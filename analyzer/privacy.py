@@ -12,7 +12,7 @@ States:
 """
 
 from __future__ import annotations
-from db import haversine_m
+from db.db import haversine_m
 
 # Apple label strings that indicate people are present in the frame
 PEOPLE_LABELS = {
