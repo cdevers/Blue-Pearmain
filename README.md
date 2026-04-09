@@ -221,6 +221,8 @@ python poller/reconcile.py --config config/config.yml --fix
 python db/migrate_001_privacy_state_check.py --config config/config.yml
 ```
 
+> **Note:** If any photos have an unrecognised `privacy_state` value (e.g. from manual DB edits or a future code change), the migration will reset them to `needs_review` before adding the constraint. Check the output for any rows that are reset.
+
 ## Tests
 
 ```bash
