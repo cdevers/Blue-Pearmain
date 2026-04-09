@@ -787,5 +787,102 @@ class TestBatchPerson(unittest.TestCase):
         self.assertNotIn(nav3["id"], id_to_nav)
 
 
+# ---------------------------------------------------------------------------
+# FlickrClient retry / backoff
+# ---------------------------------------------------------------------------
+
+class TestFlickrClientRetry(unittest.TestCase):
+
+    def _make_client(self):
+        from flickr.flickr_client import FlickrClient
+        c = FlickrClient("key", "secret", "token", "tsecret", rate_limit_delay=0)
+        return c
+
+    def _mock_response(self, status_code=200, json_data=None):
+        from unittest.mock import MagicMock
+        resp = MagicMock()
+        resp.status_code = status_code
+        resp.json.return_value = json_data or {"stat": "ok"}
+        resp.raise_for_status = MagicMock()
+        if status_code >= 400:
+            import requests as req
+            resp.raise_for_status.side_effect = req.HTTPError(response=resp)
+        return resp
+
+    def test_success_no_retry(self):
+        from unittest.mock import patch
+        c = self._make_client()
+        ok_resp = self._mock_response(200, {"stat": "ok", "user": {"id": "123"}})
+        with patch.object(c._session, 'get', return_value=ok_resp):
+            result = c._call("flickr.test.login")
+        self.assertEqual(result["stat"], "ok")
+
+    def test_retries_on_500(self):
+        from unittest.mock import patch, MagicMock
+        c = self._make_client()
+        err_resp = self._mock_response(500)
+        ok_resp  = self._mock_response(200, {"stat": "ok"})
+        # Fail once then succeed
+        with patch.object(c._session, 'get', side_effect=[err_resp, ok_resp]):
+            with patch('time.sleep'):  # don't actually sleep in tests
+                result = c._call("flickr.test.login")
+        self.assertEqual(result["stat"], "ok")
+
+    def test_retries_on_timeout(self):
+        from unittest.mock import patch
+        import requests as req
+        c = self._make_client()
+        ok_resp = self._mock_response(200, {"stat": "ok"})
+        with patch.object(c._session, 'get',
+                          side_effect=[req.Timeout(), ok_resp]):
+            with patch('time.sleep'):
+                result = c._call("flickr.test.login")
+        self.assertEqual(result["stat"], "ok")
+
+    def test_raises_after_max_retries(self):
+        from unittest.mock import patch
+        from flickr.flickr_client import FlickrError
+        c = self._make_client()
+        err_resp = self._mock_response(500)
+        with patch.object(c._session, 'get', return_value=err_resp):
+            with patch('time.sleep'):
+                with self.assertRaises(FlickrError):
+                    c._call("flickr.test.login", max_retries=2)
+
+    def test_non_transient_flickr_error_raises_immediately(self):
+        from unittest.mock import patch, MagicMock
+        from flickr.flickr_client import FlickrError
+        c = self._make_client()
+        bad_resp = self._mock_response(200, {
+            "stat": "fail", "code": 1, "message": "Method not found"
+        })
+        call_count = 0
+        original_get = c._session.get
+        def counting_get(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            return bad_resp
+        with patch.object(c._session, 'get', side_effect=counting_get):
+            with patch('time.sleep'):
+                with self.assertRaises(FlickrError) as ctx:
+                    c._call("flickr.nonexistent")
+        self.assertEqual(call_count, 1)  # no retries
+        self.assertEqual(ctx.exception.code, 1)
+
+    def test_transient_flickr_error_retries(self):
+        from unittest.mock import patch
+        from flickr.flickr_client import FlickrError
+        c = self._make_client()
+        transient_resp = self._mock_response(200, {
+            "stat": "fail", "code": 0, "message": "something went wrong"
+        })
+        ok_resp = self._mock_response(200, {"stat": "ok"})
+        with patch.object(c._session, 'get',
+                          side_effect=[transient_resp, ok_resp]):
+            with patch('time.sleep'):
+                result = c._call("flickr.test.login")
+        self.assertEqual(result["stat"], "ok")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

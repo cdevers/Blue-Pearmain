@@ -48,7 +48,7 @@ Apple Photos Library          Flickr (cloud)
 | `analyzer/privacy.py` | Privacy classification logic |
 | `analyzer/tagger.py` | Tag proposal logic |
 | `flickr/flickr_auth.py` | One-time Flickr OAuth setup |
-| `flickr/flickr_client.py` | Flickr API client |
+| `flickr/flickr_client.py` | Flickr API client (with retry/backoff) |
 | `poller/poller.py` | Scheduled sync: Flickr → local DB |
 | `poller/scanner.py` | Apple Photos → local DB sync and matching |
 | `poller/thumbnailer.py` | Populate thumbnail paths for the review UI |
@@ -195,13 +195,19 @@ Photos are automatically classified into one of these states:
 
 Add private locations (home, school, etc.) via the Zones page in the UI. Each zone has a centre point, radius in metres, and a policy (`auto_private`, `flag_review`, or `auto_public`). Apple Photos' own home flag is also used automatically.
 
+## Reliability
+
+The Flickr API client uses exponential backoff on transient failures (HTTP 429/5xx, timeouts, connection errors), retrying up to 4 times with 1/2/4/8 second delays before giving up. Permanent errors (invalid method, bad photo ID) raise immediately without retrying. Every API call has a 30-second timeout.
+
+Write operations (setting permissions, adding tags) are the most important to get right — a partial failure is logged with enough context to identify which photo was affected.
+
 ## Tests
 
 ```bash
 python tests/test_core.py
 ```
 
-41 tests covering the privacy classifier, tagger, database layer, and scanner matching logic.
+77 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry logic, and batch person actions.
 
 ## License
 

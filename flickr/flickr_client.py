@@ -12,17 +12,31 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
 from requests_oauthlib import OAuth1Session
+import requests
 
 REST_URL = "https://api.flickr.com/services/rest/"
+
+log = logging.getLogger("blue-pearmain.flickr")
+
+# Flickr API error codes that are transient and worth retrying
+_TRANSIENT_HTTP_CODES = {429, 500, 502, 503, 504}
+
+# Flickr application-level error codes that are transient
+_TRANSIENT_FLICKR_CODES = {
+    0,    # generic "something went wrong" — often transient
+    106,  # service unavailable
+}
 
 
 class FlickrError(Exception):
     def __init__(self, code: int, message: str):
         self.code = code
+        self.transient = code in _TRANSIENT_FLICKR_CODES
         super().__init__(f"Flickr API error {code}: {message}")
 
 
@@ -61,8 +75,20 @@ class FlickrClient:
     # Core request
     # -----------------------------------------------------------------------
 
-    def _call(self, method: str, params: dict | None = None, http_method: str = "GET") -> dict:
-        """Make a signed Flickr API call. Returns the parsed JSON response body."""
+    def _call(
+        self,
+        method: str,
+        params: dict | None = None,
+        http_method: str = "GET",
+        max_retries: int = 4,
+        _attempt: int = 0,
+    ) -> dict:
+        """
+        Make a signed Flickr API call with exponential backoff on transient errors.
+        Returns the parsed JSON response body. Raises FlickrError on persistent failure.
+
+        Retry schedule (seconds): 1, 2, 4, 8 — then give up.
+        """
         p = {
             "method":         method,
             "format":         "json",
@@ -73,20 +99,53 @@ class FlickrClient:
 
         time.sleep(self._rate_delay)
 
-        if http_method == "POST":
-            resp = self._session.post(REST_URL, data=p)
-        else:
-            resp = self._session.get(REST_URL, params=p)
+        try:
+            if http_method == "POST":
+                resp = self._session.post(REST_URL, data=p, timeout=30)
+            else:
+                resp = self._session.get(REST_URL, params=p, timeout=30)
+        except requests.Timeout:
+            return self._retry(method, params, http_method, max_retries, _attempt,
+                               reason="timeout")
+        except requests.ConnectionError:
+            return self._retry(method, params, http_method, max_retries, _attempt,
+                               reason="connection error")
+
+        # HTTP-level transient errors (rate limit, server error)
+        if resp.status_code in _TRANSIENT_HTTP_CODES:
+            return self._retry(method, params, http_method, max_retries, _attempt,
+                               reason=f"HTTP {resp.status_code}")
 
         resp.raise_for_status()
         data = resp.json()
 
         if data.get("stat") != "ok":
-            err = data.get("message", "unknown error")
+            err  = data.get("message", "unknown error")
             code = data.get("code", -1)
-            raise FlickrError(code, err)
+            err_obj = FlickrError(code, err)
+            if err_obj.transient:
+                return self._retry(method, params, http_method, max_retries, _attempt,
+                                   reason=f"Flickr error {code}")
+            raise err_obj
 
         return data
+
+    def _retry(
+        self,
+        method: str,
+        params: dict | None,
+        http_method: str,
+        max_retries: int,
+        attempt: int,
+        reason: str,
+    ) -> dict:
+        """Sleep with exponential backoff and retry, or raise if exhausted."""
+        if attempt >= max_retries:
+            raise FlickrError(-1, f"Flickr call failed after {max_retries} retries ({reason})")
+        delay = 2 ** attempt  # 1, 2, 4, 8 seconds
+        log.warning(f"Flickr {method} failed ({reason}), retry {attempt + 1}/{max_retries} in {delay}s")
+        time.sleep(delay)
+        return self._call(method, params, http_method, max_retries, attempt + 1)
 
     # -----------------------------------------------------------------------
     # Photo polling
