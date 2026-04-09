@@ -330,18 +330,18 @@ def api_decide():
     if push and photo.get("flickr_id"):
         c = client()
         if c:
-            errors = []
-            flickr_id = photo["flickr_id"]
+            errors        = []
+            flickr_id     = photo["flickr_id"]
+            perms_ok      = False
+            tags_ok       = False
 
             # Only change visibility for make_public decisions
             if decision == "make_public":
                 try:
                     c.set_permissions(flickr_id, is_public=1)
-                    db().conn.execute(
-                        "UPDATE photos SET perms_pushed_flickr = 1 WHERE id = ?",
-                        (photo_id,)
-                    )
+                    perms_ok = True
                 except FlickrError as e:
+                    log.error(f"setPerms failed for flickr_id={flickr_id} photo_id={photo_id}: {e}")
                     errors.append(f"perms: {e}")
 
             # Always push tags regardless of privacy decision
@@ -350,19 +350,27 @@ def api_decide():
                 try:
                     from analyzer.tagger import merge_tags
                     existing = photo.get("flickr_tags") or []
-                    merged = merge_tags(existing, final_tags)
+                    merged   = merge_tags(existing, final_tags)
                     c.add_tags(flickr_id, merged)
-                    db().conn.execute(
-                        "UPDATE photos SET tags_pushed_flickr = 1 WHERE id = ?",
-                        (photo_id,)
-                    )
+                    tags_ok  = True
                 except FlickrError as e:
+                    log.error(f"addTags failed for flickr_id={flickr_id} photo_id={photo_id}: {e}")
                     errors.append(f"tags: {e}")
 
-            db().conn.commit()
+            # Only update DB push flags for operations that actually succeeded
+            if perms_ok:
+                db().conn.execute(
+                    "UPDATE photos SET perms_pushed_flickr = 1 WHERE id = ?", (photo_id,)
+                )
+            if tags_ok:
+                db().conn.execute(
+                    "UPDATE photos SET tags_pushed_flickr = 1 WHERE id = ?", (photo_id,)
+                )
+            if perms_ok or tags_ok:
+                db().conn.commit()
 
             if errors:
-                return jsonify({"ok": False, "errors": errors}), 500
+                return jsonify({"ok": False, "errors": errors, "flickr_id": flickr_id}), 500
 
     return jsonify({"ok": True})
 
@@ -560,12 +568,51 @@ def _placeholder_svg(label: str) -> Response:
 # Startup
 # ---------------------------------------------------------------------------
 
+def _validate_config(config: dict, config_path: str):
+    """
+    Validate required config fields at startup.
+    Raises SystemExit with a clear message rather than a cryptic KeyError later.
+    """
+    import sys
+
+    required = {
+        "flickr.api_key":            "Flickr API key",
+        "flickr.api_secret":         "Flickr API secret",
+        "flickr.oauth_token":        "Flickr OAuth token (run flickr/flickr_auth.py)",
+        "flickr.oauth_token_secret": "Flickr OAuth token secret (run flickr/flickr_auth.py)",
+        "database.path":             "SQLite database path",
+        "thumbnails.path":           "Thumbnail cache path",
+        "photos_library.path":       "Apple Photos library path",
+    }
+
+    errors = []
+    for dotted_key, description in required.items():
+        parts = dotted_key.split(".")
+        val = config
+        try:
+            for part in parts:
+                val = val[part]
+        except (KeyError, TypeError):
+            val = None
+        if not val:
+            errors.append(f"  {dotted_key}: {description}")
+
+    if errors:
+        print(f"\nConfiguration errors in {config_path}:")
+        for e in errors:
+            print(e)
+        print("\nCopy config/config.example.yml to config/config.yml and fill in the missing values.")
+        sys.exit(1)
+
+
 def create_app(config_path: str) -> Flask:
     global _db, _config, _client
 
     with open(config_path) as f:
         _config = yaml.safe_load(f)
     _config["_config_path"] = config_path
+
+    _validate_config(_config, config_path)
 
     db_path = Path(_config["database"]["path"]).expanduser()
     _db = Database(db_path)

@@ -52,9 +52,11 @@ Apple Photos Library          Flickr (cloud)
 | `poller/poller.py` | Scheduled sync: Flickr → local DB |
 | `poller/scanner.py` | Apple Photos → local DB sync and matching |
 | `poller/thumbnailer.py` | Populate thumbnail paths for the review UI |
+| `poller/reconcile.py` | Compare DB push state against actual Flickr state |
 | `reviewer/app.py` | Flask web UI |
 | `reviewer/templates/` | Jinja2 templates (dashboard, review grid, photo detail, faces, zones) |
 | `config/` | Configuration templates and launchd plists |
+| `db/migrate_001_privacy_state_check.py` | One-time DB migration (adds CHECK constraint) |
 | `tests/` | Unit tests (60 tests) |
 
 ## Requirements
@@ -199,7 +201,25 @@ Add private locations (home, school, etc.) via the Zones page in the UI. Each zo
 
 The Flickr API client uses exponential backoff on transient failures (HTTP 429/5xx, timeouts, connection errors), retrying up to 4 times with 1/2/4/8 second delays before giving up. Permanent errors (invalid method, bad photo ID) raise immediately without retrying. Every API call has a 30-second timeout.
 
-Write operations (setting permissions, adding tags) are the most important to get right — a partial failure is logged with enough context to identify which photo was affected.
+Write operations (permissions and tags) only update the DB push flags after each operation succeeds individually — a failed tag push does not mark tags as pushed, and a failed permission change does not mark the photo as public. Both failures are logged with the Flickr photo ID for traceability.
+
+If you suspect a push operation failed silently, the reconciliation script checks your DB's expected state against what Flickr actually has:
+
+```bash
+# Report mismatches
+python poller/reconcile.py --config config/config.yml
+
+# Report and fix mismatches
+python poller/reconcile.py --config config/config.yml --fix
+```
+
+**Config validation** — both the poller and reviewer validate required config fields at startup and exit immediately with a readable error message if anything is missing, rather than failing deep in a request.
+
+**Database integrity** — `privacy_state` has a SQL `CHECK` constraint enforcing valid values. If you are upgrading an existing installation, run the migration once:
+
+```bash
+python db/migrate_001_privacy_state_check.py --config config/config.yml
+```
 
 ## Tests
 

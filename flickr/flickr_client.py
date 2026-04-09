@@ -140,10 +140,16 @@ class FlickrClient:
         reason: str,
     ) -> dict:
         """Sleep with exponential backoff and retry, or raise if exhausted."""
+        photo_id = (params or {}).get("photo_id", "")
+        context  = f" photo_id={photo_id}" if photo_id else ""
         if attempt >= max_retries:
+            log.error(f"Flickr {method}{context} failed after {max_retries} retries ({reason})")
             raise FlickrError(-1, f"Flickr call failed after {max_retries} retries ({reason})")
         delay = 2 ** attempt  # 1, 2, 4, 8 seconds
-        log.warning(f"Flickr {method} failed ({reason}), retry {attempt + 1}/{max_retries} in {delay}s")
+        log.warning(
+            f"Flickr {method}{context} failed ({reason}), "
+            f"retry {attempt + 1}/{max_retries} in {delay}s"
+        )
         time.sleep(delay)
         return self._call(method, params, http_method, max_retries, attempt + 1)
 

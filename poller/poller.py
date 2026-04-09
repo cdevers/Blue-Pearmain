@@ -378,6 +378,38 @@ def poll(
 
 
 # ---------------------------------------------------------------------------
+# Config validation
+# ---------------------------------------------------------------------------
+
+def _validate_config(config: dict, config_path: str):
+    """Fail fast with a readable message if required keys are missing."""
+    required = {
+        "flickr.api_key":            "Flickr API key",
+        "flickr.api_secret":         "Flickr API secret",
+        "flickr.oauth_token":        "Flickr OAuth token (run flickr/flickr_auth.py)",
+        "flickr.oauth_token_secret": "Flickr OAuth token secret (run flickr/flickr_auth.py)",
+        "database.path":             "SQLite database path",
+    }
+    errors = []
+    for dotted_key, description in required.items():
+        parts = dotted_key.split(".")
+        val = config
+        try:
+            for part in parts:
+                val = val[part]
+        except (KeyError, TypeError):
+            val = None
+        if not val:
+            errors.append(f"  {dotted_key}: {description}")
+    if errors:
+        print(f"\nConfiguration errors in {config_path}:")
+        for e in errors:
+            print(e)
+        print("\nCopy config/config.example.yml to config/config.yml and fill in missing values.")
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -398,6 +430,9 @@ def main():
     config_path = Path(args.config)
     config = load_config(config_path)
     setup_logging(config, args.verbose)
+
+    # Validate config before doing anything else
+    _validate_config(config, str(config_path))
 
     log.info("Blue Pearmain poller starting")
 

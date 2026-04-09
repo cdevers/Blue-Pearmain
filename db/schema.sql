@@ -65,7 +65,12 @@ CREATE TABLE IF NOT EXISTS photos (
     --   'keep_private'     : human said no
     --   'already_public'   : was already public on Flickr before this tool existed
     --   'skipped'          : human deferred decision
-    privacy_state           TEXT NOT NULL DEFAULT 'needs_review',
+    privacy_state           TEXT NOT NULL DEFAULT 'needs_review'
+                                CHECK(privacy_state IN (
+                                    'auto_private', 'needs_review', 'candidate_public',
+                                    'approved_public', 'keep_private', 'already_public',
+                                    'skipped', 'duplicate_flickr'
+                                )),
     privacy_reason          TEXT,                   -- human-readable explanation of how state was set
 
     -- Proposed tags (staged, not yet pushed)
