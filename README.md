@@ -134,17 +134,33 @@ launchctl start com.cdevers.blue-pearmain.reviewer
 
 The grid view shows photos with proposed tags and action buttons. Keyboard shortcuts are available throughout:
 
+**Grid view:**
+
 | Key | Action |
 |---|---|
 | `J` / `↓` | Next photo |
 | `K` / `↑` | Previous photo |
-| `P` | Make public (approve + push to Flickr) |
-| `X` | Keep private |
+| `P` | Make public + push tags to Flickr |
+| `X` | Keep private + push tags to Flickr |
 | `Space` | Skip (decide later) |
 | `Enter` | Open detail view |
+
+**Detail view:**
+
+| Key | Action |
+|---|---|
+| `P` | Make public + push to Flickr |
+| `A` | Approve (don't push yet) |
+| `X` | Keep private + push tags |
+| `Space` | Skip |
+| `T` | Focus tag editor |
+| `J` / `→` | Next photo |
+| `K` / `←` | Previous photo |
 | `Esc` | Return to grid |
 
-In the detail view, `J` / `K` navigate between photos without returning to the grid, and any decision automatically advances to the next photo.
+In the detail view the action buttons are pinned to the top of the sidebar, so their position stays consistent regardless of how much metadata or how many tags a photo has. Any decision automatically advances to the next photo.
+
+Both public and private decisions push tags to Flickr — tags are useful for search even on private photos.
 
 ## Privacy classification
 

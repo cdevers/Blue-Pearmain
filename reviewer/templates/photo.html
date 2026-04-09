@@ -144,6 +144,34 @@
   backdrop-filter: blur(4px);
 }
 .flickr-link:hover { text-decoration: none; opacity: 0.85; }
+.key-hint {
+  display: inline-block;
+  background: rgba(255,255,255,0.12);
+  border-radius: 3px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 700;
+  margin-right: 4px;
+  letter-spacing: 0.03em;
+  vertical-align: middle;
+}
+.kbd-hints {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 6px 0 2px;
+  border-top: 1px solid var(--border);
+}
+.kbd-hints kbd {
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: monospace;
+  font-size: 10px;
+}
 {% endblock %}
 
 {% block content %}
@@ -171,7 +199,7 @@
 
     <!-- Filename + state -->
     <div>
-      <div style="font-size:15px; font-weight:600; margin-bottom:6px; word-break:break-all">
+      <div style="font-size:14px; font-weight:600; margin-bottom:6px; word-break:break-all">
         {{ photo.original_filename or photo.flickr_id or 'Unknown' }}
       </div>
       {% set state = photo.privacy_state %}
@@ -189,6 +217,30 @@
       {% if photo.privacy_reason %}
         <span style="font-size:11px; color:var(--muted); margin-left:6px">{{ photo.privacy_reason }}</span>
       {% endif %}
+    </div>
+
+    <!-- Actions — fixed at top so position is consistent across photos -->
+    <div class="action-row">
+      <button class="btn btn-public" onclick="doDecide('make_public', true)">
+        <span class="key-hint">P</span> Make public + push to Flickr
+      </button>
+      <button class="btn btn-public" style="background:#1e5c30"
+              onclick="doDecide('make_public', false)">
+        <span class="key-hint">A</span> Approve (don't push yet)
+      </button>
+      <button class="btn btn-private" onclick="doDecide('keep_private', true)">
+        <span class="key-hint">X</span> Keep private (push tags)
+      </button>
+      <button class="btn btn-skip" onclick="doDecide('skip', false)">
+        <span class="key-hint">Space</span> Skip for now
+      </button>
+    </div>
+
+    <!-- Keyboard hint -->
+    <div class="kbd-hints">
+      <span><kbd>J</kbd><kbd>K</kbd> next/prev</span>
+      <span><kbd>Esc</kbd> grid</span>
+      <span><kbd>T</kbd> edit tags</span>
     </div>
 
     <!-- Apple AI caption -->
@@ -277,23 +329,6 @@
       <button class="btn" onclick="saveTags()" style="margin-top:4px;font-size:12px">Save tags</button>
     </div>
 
-    <!-- Actions -->
-    <div class="action-row">
-      <button class="btn btn-public" onclick="doDecide('make_public', true)">
-        ✓ Make public + push to Flickr
-      </button>
-      <button class="btn btn-public" style="background:#1e5c30"
-              onclick="doDecide('make_public', false)">
-        ✓ Approve (don't push yet)
-      </button>
-      <button class="btn btn-private" onclick="doDecide('keep_private', false)">
-        ✗ Keep private
-      </button>
-      <button class="btn btn-skip" onclick="doDecide('skip', false)">
-        → Skip for now
-      </button>
-    </div>
-
   </div>
 </div>
 {% endblock %}
@@ -366,8 +401,13 @@ async function doDecide(decision, push) {
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
   if (e.key === 'p' || e.key === 'P') doDecide('make_public', true);
-  else if (e.key === 'x' || e.key === 'X') doDecide('keep_private', false);
+  else if (e.key === 'a' || e.key === 'A') doDecide('make_public', false);
+  else if (e.key === 'x' || e.key === 'X') doDecide('keep_private', true);
   else if (e.key === ' ') { e.preventDefault(); doDecide('skip', false); }
+  else if (e.key === 't' || e.key === 'T') {
+    e.preventDefault();
+    document.getElementById('tag-input').focus();
+  }
   else if (e.key === 'Escape') window.location.href = '/review?state=' + {{ state | tojson }};
   else if (e.key === 'j' || e.key === 'ArrowRight') {
     const a = document.querySelector('.nav-next');

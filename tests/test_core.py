@@ -573,5 +573,77 @@ class TestFindFlickrMatch(unittest.TestCase):
         self.assertEqual(matches, [])
 
 
+
+# ---------------------------------------------------------------------------
+# approved_public queue (DB side of push_approved)
+# ---------------------------------------------------------------------------
+
+class TestApprovedQueue(unittest.TestCase):
+
+    def setUp(self):
+        import tempfile, os
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.db = Database(self.tmp.name)
+
+    def tearDown(self):
+        import os
+        self.db.close()
+        os.unlink(self.tmp.name)
+
+    def test_approved_unpushed_appears_in_queue(self):
+        self.db.upsert_photo({
+            "flickr_id": "111",
+            "privacy_state": "approved_public",
+            "perms_pushed_flickr": 0,
+        })
+        rows = self.db.conn.execute(
+            "SELECT flickr_id FROM photos "
+            "WHERE privacy_state = 'approved_public' "
+            "AND flickr_id IS NOT NULL AND perms_pushed_flickr = 0"
+        ).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["flickr_id"], "111")
+
+    def test_already_pushed_excluded_from_queue(self):
+        self.db.upsert_photo({
+            "flickr_id": "222",
+            "privacy_state": "approved_public",
+            "perms_pushed_flickr": 1,
+        })
+        rows = self.db.conn.execute(
+            "SELECT flickr_id FROM photos "
+            "WHERE privacy_state = 'approved_public' "
+            "AND flickr_id IS NOT NULL AND perms_pushed_flickr = 0"
+        ).fetchall()
+        self.assertEqual(len(rows), 0)
+
+    def test_no_flickr_id_excluded_from_queue(self):
+        self.db.upsert_photo({
+            "uuid": "ABC-123",
+            "privacy_state": "approved_public",
+            "perms_pushed_flickr": 0,
+        })
+        rows = self.db.conn.execute(
+            "SELECT id FROM photos "
+            "WHERE privacy_state = 'approved_public' "
+            "AND flickr_id IS NOT NULL AND perms_pushed_flickr = 0"
+        ).fetchall()
+        self.assertEqual(len(rows), 0)
+
+    def test_record_review_sets_approved_public(self):
+        self.db.upsert_photo({"flickr_id": "333", "privacy_state": "candidate_public"})
+        photo = self.db.get_photo_by_flickr_id("333")
+        self.db.record_review(photo["id"], "make_public")
+        updated = self.db.get_photo_by_flickr_id("333")
+        self.assertEqual(updated["privacy_state"], "approved_public")
+
+    def test_keep_private_sets_keep_private(self):
+        self.db.upsert_photo({"flickr_id": "444", "privacy_state": "needs_review"})
+        photo = self.db.get_photo_by_flickr_id("444")
+        self.db.record_review(photo["id"], "keep_private")
+        updated = self.db.get_photo_by_flickr_id("444")
+        self.assertEqual(updated["privacy_state"], "keep_private")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

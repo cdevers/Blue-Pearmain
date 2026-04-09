@@ -198,27 +198,30 @@ def api_decide():
 
     db().record_review(photo_id, decision, notes)
 
-    # Optionally push to Flickr
-    if push and decision == "make_public" and photo.get("flickr_id"):
+    # Push to Flickr if we have a flickr_id and something to do
+    if push and photo.get("flickr_id"):
         c = client()
         if c:
             errors = []
             flickr_id = photo["flickr_id"]
 
-            try:
-                c.set_permissions(flickr_id, is_public=1)
-                db().conn.execute(
-                    "UPDATE photos SET perms_pushed_flickr = 1 WHERE id = ?",
-                    (photo_id,)
-                )
-            except FlickrError as e:
-                errors.append(f"perms: {e}")
+            # Only change visibility for make_public decisions
+            if decision == "make_public":
+                try:
+                    c.set_permissions(flickr_id, is_public=1)
+                    db().conn.execute(
+                        "UPDATE photos SET perms_pushed_flickr = 1 WHERE id = ?",
+                        (photo_id,)
+                    )
+                except FlickrError as e:
+                    errors.append(f"perms: {e}")
 
+            # Always push tags regardless of privacy decision
             final_tags = tags if tags is not None else photo.get("proposed_tags", [])
             if final_tags:
                 try:
-                    existing = photo.get("flickr_tags") or []
                     from analyzer.tagger import merge_tags
+                    existing = photo.get("flickr_tags") or []
                     merged = merge_tags(existing, final_tags)
                     c.add_tags(flickr_id, merged)
                     db().conn.execute(
@@ -287,6 +290,73 @@ def api_zone_delete(zone_id: int):
 @app.route("/api/stats")
 def api_stats():
     return jsonify(db().stats())
+
+
+@app.route("/api/push_approved", methods=["POST"])
+def api_push_approved():
+    """
+    Batch-push all approved_public photos to Flickr.
+    Sets permissions to public and writes tags for each.
+    Returns counts of successes and failures.
+    """
+    c = client()
+    if not c:
+        return jsonify({"ok": False, "error": "Flickr client not available"}), 503
+
+    rows = db().conn.execute(
+        """SELECT id, flickr_id, proposed_tags
+           FROM photos
+           WHERE privacy_state = 'approved_public'
+             AND flickr_id IS NOT NULL
+             AND perms_pushed_flickr = 0"""
+    ).fetchall()
+
+    if not rows:
+        return jsonify({"ok": True, "pushed": 0, "failed": 0, "message": "Nothing to push"})
+
+    pushed = failed = 0
+    for row in rows:
+        photo_id  = row["id"]
+        flickr_id = row["flickr_id"]
+        tags      = _json_loads_safe(row["proposed_tags"])
+        errors    = []
+
+        try:
+            c.set_permissions(flickr_id, is_public=1)
+            db().conn.execute(
+                "UPDATE photos SET perms_pushed_flickr = 1 WHERE id = ?", (photo_id,)
+            )
+        except FlickrError as e:
+            errors.append(str(e))
+
+        if tags:
+            try:
+                from analyzer.tagger import merge_tags
+                c.add_tags(flickr_id, tags)
+                db().conn.execute(
+                    "UPDATE photos SET tags_pushed_flickr = 1 WHERE id = ?", (photo_id,)
+                )
+            except FlickrError as e:
+                errors.append(str(e))
+
+        if errors:
+            failed += 1
+            log.warning(f"Push failed for {flickr_id}: {errors}")
+        else:
+            pushed += 1
+
+    db().conn.commit()
+    return jsonify({"ok": True, "pushed": pushed, "failed": failed})
+
+
+def _json_loads_safe(value):
+    if not value:
+        return []
+    try:
+        import json as _json
+        return _json.loads(value)
+    except Exception:
+        return []
 
 
 @app.route("/api/poll", methods=["POST"])
