@@ -54,8 +54,8 @@ Apple Photos Library          Flickr (cloud)
 | `poller/thumbnailer.py` | Populate thumbnail paths for the review UI |
 | `reviewer/app.py` | Flask web UI |
 | `reviewer/templates/` | Jinja2 templates |
-| `config/` | Configuration templates and launchd plist |
-| `tests/` | Unit tests (41 tests) |
+| `config/` | Configuration templates and launchd plists |
+| `tests/` | Unit tests (60 tests) |
 
 ## Requirements
 
@@ -101,12 +101,31 @@ python reviewer/app.py --config config/config.yml
 # Open http://localhost:5173
 ```
 
-For ongoing use, the poller and scanner can be scheduled via launchd using the included plist:
+For ongoing use, both the poller and the review UI run as launchd agents — no terminal window required. Create the log directory first, then install both plists:
 
 ```bash
+mkdir -p ~/Library/Logs/BluePearmain
+
 cp config/com.cdevers.blue-pearmain.poller.plist ~/Library/LaunchAgents/
-# Edit paths in the plist to match your install location, then:
+cp config/com.cdevers.blue-pearmain.reviewer.plist ~/Library/LaunchAgents/
+
+# Edit paths in both plists to match your install location, then:
 launchctl load ~/Library/LaunchAgents/com.cdevers.blue-pearmain.poller.plist
+launchctl load ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
+```
+
+The reviewer starts immediately and restarts automatically if it crashes. The poller runs hourly. Logs are written to `~/Library/Logs/BluePearmain/` and are visible in Console.app:
+
+```bash
+tail -f ~/Library/Logs/BluePearmain/reviewer.log
+tail -f ~/Library/Logs/BluePearmain/poller.log
+```
+
+To restart either service:
+
+```bash
+launchctl stop com.cdevers.blue-pearmain.reviewer
+launchctl start com.cdevers.blue-pearmain.reviewer
 ```
 
 ## Review UI

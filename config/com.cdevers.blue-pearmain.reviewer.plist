@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.cdevers.blue-pearmain.reviewer.plist
+  launchd agent for Blue Pearmain review UI (Flask)
+
+  Install:
+    cp config/com.cdevers.blue-pearmain.reviewer.plist \
+       ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
+    launchctl load ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
+
+  The UI will then be available at http://localhost:5173 after login,
+  and launchd will restart it automatically if it crashes.
+
+  Stop temporarily (survives reboot):
+    launchctl stop com.cdevers.blue-pearmain.reviewer
+
+  Restart:
+    launchctl stop com.cdevers.blue-pearmain.reviewer
+    launchctl start com.cdevers.blue-pearmain.reviewer
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
+    rm ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
+
+  Logs:
+    tail -f /Users/cdevers/Library/Logs/BluePearmain/reviewer.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cdevers.blue-pearmain.reviewer</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/uv</string>
+        <string>run</string>
+        <string>python</string>
+        <string>/Users/cdevers/Documents/GitHub/Blue Pearmain/reviewer/app.py</string>
+        <string>--config</string>
+        <string>/Users/cdevers/Documents/GitHub/Blue Pearmain/config/config.yml</string>
+    </array>
+
+    <!-- Keep the UI running — restart automatically if it exits -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Start at login -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Stdout/stderr for debugging -->
+    <key>StandardOutPath</key>
+    <string>/Users/cdevers/Library/Logs/BluePearmain/reviewer.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/cdevers/Library/Logs/BluePearmain/reviewer.log</string>
+
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>/Users/cdevers/Documents/GitHub/Blue Pearmain</string>
+
+    <!-- Wait 5 seconds before restarting after a crash -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+</dict>
+</plist>
