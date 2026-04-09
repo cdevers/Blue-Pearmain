@@ -28,7 +28,7 @@
     <key>ProgramArguments</key>
     <array>
         <!-- Update these paths to match your actual install location -->
-        <string>/Users/cdevers/.local/bin/uv</string>
+        <string>/opt/homebrew/bin/uv</string>
         <string>run</string>
         <string>python</string>
         <string>/Users/cdevers/Documents/GitHub/Blue Pearmain/poller/poller.py</string>

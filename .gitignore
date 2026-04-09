@@ -5,6 +5,7 @@ config/config.yml
 *.db
 *.db-wal
 *.db-shm
+data/
 thumbs/
 
 # Python

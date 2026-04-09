@@ -3,8 +3,10 @@
 # config.yaml is gitignored — never commit credentials.
 
 flickr:
-  api_key: "7e69e74995b9af19cbe44ac7a25a7107"
-  api_secret: ""              # paste your secret key here
+  # API key registered to cdevers — other users should register their own at
+  # https://www.flickr.com/services/apps/create/
+  api_key: "684a0bc07f822a45ec85d8506487d631"
+  api_secret: ""   # your secret key here — never commit this
   oauth_token: ""             # filled in by flickr_auth.py
   oauth_token_secret: ""      # filled in by flickr_auth.py
   user_nsid: ""               # filled in by flickr_auth.py
