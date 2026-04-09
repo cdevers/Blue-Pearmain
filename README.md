@@ -34,7 +34,7 @@ Apple Photos Library          Flickr (cloud)
                        ↓
            Tag proposals (from Apple ML labels + location)
                        ↓
-           SQLite database + thumbnail cache (NAS)
+           SQLite database + thumbnail cache
                        ↓
            Review UI  →  Flickr API (setPerms, addTags)
 ```
@@ -43,19 +43,25 @@ Apple Photos Library          Flickr (cloud)
 
 | Path | Purpose |
 |---|---|
-| `db/` | SQLite schema and database access layer |
-| `analyzer/` | Privacy classification and tag proposal logic |
-| `flickr/` | Flickr OAuth setup and API client |
-| `poller/` | Scheduled sync: Flickr → local DB |
-| `reviewer/` | Flask web UI for the review queue |
-| `config/` | Configuration templates |
+| `db/schema.sql` | SQLite schema |
+| `db/db.py` | Database access layer |
+| `analyzer/privacy.py` | Privacy classification logic |
+| `analyzer/tagger.py` | Tag proposal logic |
+| `flickr/flickr_auth.py` | One-time Flickr OAuth setup |
+| `flickr/flickr_client.py` | Flickr API client |
+| `poller/poller.py` | Scheduled sync: Flickr → local DB |
+| `poller/scanner.py` | Apple Photos → local DB sync and matching |
+| `poller/thumbnailer.py` | Populate thumbnail paths for the review UI |
+| `reviewer/app.py` | Flask web UI |
+| `reviewer/templates/` | Jinja2 templates |
+| `config/` | Configuration templates and launchd plist |
+| `tests/` | Unit tests (41 tests) |
 
 ## Requirements
 
-- macOS (for Apple Photos integration via [osxphotos](https://github.com/RhetTbull/osxphotos))
+- macOS (Apple Photos integration via [osxphotos](https://github.com/RhetTbull/osxphotos))
 - Python 3.11+
-- A Flickr Pro account and API key
-- A NAS or other always-on storage for the database and thumbnail cache (optional but recommended)
+- A Flickr Pro account and API key (register at [flickr.com/services/apps](https://www.flickr.com/services/apps/create/))
 
 ## Setup
 
@@ -63,25 +69,87 @@ Apple Photos Library          Flickr (cloud)
 # 1. Clone and install dependencies
 git clone https://github.com/cdevers/Blue-Pearmain.git
 cd Blue-Pearmain
-uv sync
+pip3 install requests requests-oauthlib pyyaml flask osxphotos
 
 # 2. Configure
 cp config/config.example.yml config/config.yml
 # Edit config/config.yml — add your Flickr API key and secret
 
-# 3. Authorise with Flickr (one-time)
+# 3. Authorise with Flickr (one-time, opens browser)
 python flickr/flickr_auth.py --config config/config.yml
-
-# 4. Run the poller (coming soon)
-# python poller/poller.py --config config/config.yml
-
-# 5. Run the review UI (coming soon)
-# python reviewer/app.py --config config/config.yml
 ```
 
-## Status
+## Running
 
-Early development. The database schema, privacy classifier, tag proposer, and Flickr API client are implemented. The poller and review UI are in progress.
+Run these once to populate the database initially:
+
+```bash
+# Pull recent Flickr uploads into the DB
+python poller/poller.py --config config/config.yml
+
+# Scan your entire Apple Photos library and cross-reference with Flickr records
+python poller/scanner.py --config config/config.yml --all
+
+# Populate thumbnail paths
+python poller/thumbnailer.py --config config/config.yml
+```
+
+Then start the review UI:
+
+```bash
+python reviewer/app.py --config config/config.yml
+# Open http://localhost:5173
+```
+
+For ongoing use, the poller and scanner can be scheduled via launchd using the included plist:
+
+```bash
+cp config/com.cdevers.blue-pearmain.poller.plist ~/Library/LaunchAgents/
+# Edit paths in the plist to match your install location, then:
+launchctl load ~/Library/LaunchAgents/com.cdevers.blue-pearmain.poller.plist
+```
+
+## Review UI
+
+The grid view shows photos with proposed tags and action buttons. Keyboard shortcuts are available throughout:
+
+| Key | Action |
+|---|---|
+| `J` / `↓` | Next photo |
+| `K` / `↑` | Previous photo |
+| `P` | Make public (approve + push to Flickr) |
+| `X` | Keep private |
+| `Space` | Skip (decide later) |
+| `Enter` | Open detail view |
+| `Esc` | Return to grid |
+
+In the detail view, `J` / `K` navigate between photos without returning to the grid, and any decision automatically advances to the next photo.
+
+## Privacy classification
+
+Photos are automatically classified into one of these states:
+
+| State | Meaning |
+|---|---|
+| `auto_private` | Home location, screenshot, or geofenced zone — never enters review queue |
+| `needs_review` | People detected — human must decide |
+| `candidate_public` | No people signals — tags proposed, ready for quick confirmation |
+| `approved_public` | Human approved, queued for Flickr push |
+| `already_public` | Was already public on Flickr before this tool existed |
+| `keep_private` | Human said no |
+| `skipped` | Deferred |
+
+## Geofence zones
+
+Add private locations (home, school, etc.) via the Zones page in the UI. Each zone has a centre point, radius in metres, and a policy (`auto_private`, `flag_review`, or `auto_public`). Apple Photos' own home flag is also used automatically.
+
+## Tests
+
+```bash
+python tests/test_core.py
+```
+
+41 tests covering the privacy classifier, tagger, database layer, and scanner matching logic.
 
 ## License
 
