@@ -94,6 +94,8 @@ python poller/scanner.py --config config/config.yml --all
 python poller/thumbnailer.py --config config/config.yml
 ```
 
+The thumbnailer populates `thumbnail_path` for each photo using the best available source: a locally cached Photos derivative JPEG, a stored Flickr URL, or nothing. When serving thumbnails, the review UI falls back to fetching directly from Flickr's CDN for any matched photo that has a Flickr ID but no local file — so photos that haven't been downloaded from iCloud will still display if they've been uploaded to Flickr. Purely local photos with no Flickr match will show a "no preview" placeholder until iCloud downloads them.
+
 Then start the review UI:
 
 ```bash

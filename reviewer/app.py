@@ -308,29 +308,53 @@ def api_poll():
 @app.route("/thumb/<int:photo_id>")
 def thumb(photo_id: int):
     """
-    Serve a thumbnail. If thumbnail_path is a local file, serve it directly.
-    If it's a URL, redirect to it. If missing, return a placeholder.
+    Serve a thumbnail. Priority order:
+      1. Local file (Photos derivative or downloaded Flickr thumb)
+      2. Stored URL (redirect to Flickr CDN)
+      3. Flickr URL constructed on the fly from flickr_id/secret/server
+      4. Placeholder SVG
     """
     row = db().conn.execute(
-        "SELECT thumbnail_path FROM photos WHERE id = ?", (photo_id,)
+        "SELECT thumbnail_path, flickr_id, flickr_secret, flickr_server FROM photos WHERE id = ?",
+        (photo_id,)
     ).fetchone()
 
-    if not row or not row["thumbnail_path"]:
-        # Return a minimal grey placeholder SVG
-        svg = '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="100%" height="100%" fill="#2a2a2a"/><text x="50%" y="50%" fill="#555" font-family="sans-serif" font-size="13" text-anchor="middle" dominant-baseline="middle">no preview</text></svg>'
-        return Response(svg, mimetype="image/svg+xml")
+    if not row:
+        return _placeholder_svg("no preview")
 
-    path = row["thumbnail_path"]
+    path = row["thumbnail_path"] or ""
 
+    # 1. Stored URL — redirect to CDN
     if path.startswith("http"):
         return redirect(path)
 
-    p = Path(path)
-    if p.exists():
-        return send_file(str(p), mimetype="image/jpeg")
+    # 2. Local file
+    if path:
+        p = Path(path)
+        if p.exists():
+            return send_file(str(p), mimetype="image/jpeg")
 
-    # File was expected locally but is missing
-    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="100%" height="100%" fill="#1a1a2a"/><text x="50%" y="50%" fill="#555" font-family="sans-serif" font-size="13" text-anchor="middle" dominant-baseline="middle">not downloaded</text></svg>'
+    # 3. Construct Flickr URL on the fly if we have the pieces
+    flickr_id = row["flickr_id"] or ""
+    secret     = row["flickr_secret"] or ""
+    server     = row["flickr_server"] or ""
+    if flickr_id and secret and server:
+        url = f"https://live.staticflickr.com/{server}/{flickr_id}_{secret}_b.jpg"
+        return redirect(url)
+
+    # 4. Placeholder
+    label = "not downloaded" if path else "no preview"
+    return _placeholder_svg(label)
+
+
+def _placeholder_svg(label: str) -> Response:
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240">' 
+        f'<rect width="100%" height="100%" fill="#1e1e1e"/>' 
+        f'<text x="50%" y="50%" fill="#555" font-family="sans-serif" ' 
+        f'font-size="13" text-anchor="middle" dominant-baseline="middle">{label}</text>' 
+        f'</svg>'
+    )
     return Response(svg, mimetype="image/svg+xml")
 
 
