@@ -17,4 +17,4 @@ dist/
 
 # macOS
 .DS_Store
-
+*.swp
