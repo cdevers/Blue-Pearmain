@@ -258,12 +258,13 @@ class TestTagger(unittest.TestCase):
 class TestDatabase(unittest.TestCase):
 
     def setUp(self):
-        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-        self.db = Database(self.tmp.name)
+        fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.db = Database(self.tmp_path)
 
     def tearDown(self):
         self.db.close()
-        os.unlink(self.tmp.name)
+        os.unlink(self.tmp_path)
 
     def test_upsert_and_retrieve(self):
         row_id = self.db.upsert_photo({
@@ -530,8 +531,9 @@ class TestFindFlickrMatch(unittest.TestCase):
 
     def setUp(self):
         import tempfile, os
-        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-        self.db = Database(self.tmp.name)
+        fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.db = Database(self.tmp_path)
         self.db.upsert_photo({
             "flickr_id": "AAA",
             "date_taken": "2024-06-16 10:00:00",
@@ -543,9 +545,8 @@ class TestFindFlickrMatch(unittest.TestCase):
         })
 
     def tearDown(self):
-        import os
         self.db.close()
-        os.unlink(self.tmp.name)
+        os.unlink(self.tmp_path)
 
     def test_match_by_exact_date(self):
         from poller.scanner import find_flickr_match
@@ -582,13 +583,13 @@ class TestApprovedQueue(unittest.TestCase):
 
     def setUp(self):
         import tempfile, os
-        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-        self.db = Database(self.tmp.name)
+        fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.db = Database(self.tmp_path)
 
     def tearDown(self):
-        import os
         self.db.close()
-        os.unlink(self.tmp.name)
+        os.unlink(self.tmp_path)
 
     def test_approved_unpushed_appears_in_queue(self):
         self.db.upsert_photo({

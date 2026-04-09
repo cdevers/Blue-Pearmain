@@ -79,34 +79,34 @@
   <div class="stat-grid">
     <div class="stat-card">
       <a href="{{ url_for('review', state='candidate_public') }}">
-        <div class="n n-candidate">{{ stats.by_state.get('candidate_public', 0) | int }}</div>
+        <div class="n n-candidate">{{ stats.by_state.get('candidate_public', 0) | int | format(',d') }}</div>
         <div class="label">Candidate public</div>
       </a>
     </div>
     <div class="stat-card">
       <a href="{{ url_for('review', state='needs_review') }}">
-        <div class="n n-review">{{ stats.by_state.get('needs_review', 0) | int }}</div>
+        <div class="n n-review">{{ stats.by_state.get('needs_review', 0) | int | format(',d') }}</div>
         <div class="label">Needs review</div>
       </a>
     </div>
     <div class="stat-card">
-      <div class="n n-private">{{ stats.by_state.get('auto_private', 0) | int }}</div>
+      <div class="n n-private">{{ stats.by_state.get('auto_private', 0) | int | format(',d') }}</div>
       <div class="label">Auto private</div>
     </div>
     <div class="stat-card">
       <a href="{{ url_for('review', state='approved_public') }}">
-        <div class="n n-public">{{ stats.by_state.get('approved_public', 0) | int }}</div>
+        <div class="n n-public">{{ stats.by_state.get('approved_public', 0) | int | format(',d') }}</div>
         <div class="label">Approved public</div>
       </a>
     </div>
     <div class="stat-card">
       <a href="{{ url_for('review', state='already_public') }}">
-        <div class="n n-public">{{ stats.by_state.get('already_public', 0) | int }}</div>
+        <div class="n n-public">{{ stats.by_state.get('already_public', 0) | int | format(',d') }}</div>
         <div class="label">Already public</div>
       </a>
     </div>
     <div class="stat-card">
-      <div class="n n-total">{{ stats.total | int }}</div>
+      <div class="n n-total">{{ stats.total | int | format(',d') }}</div>
       <div class="label">Total photos</div>
     </div>
   </div>
@@ -127,12 +127,19 @@
   </div>
   {% endif %}
 
-  <div style="margin-top:32px; display:flex; gap:12px; align-items:center">
+  <div style="margin-top:32px; display:flex; gap:12px; align-items:center; flex-wrap:wrap">
     <a href="{{ url_for('review', state='candidate_public') }}" class="btn btn-primary">
       Start reviewing →
     </a>
+    {% set approved = stats.by_state.get('approved_public', 0) %}
+    {% if approved > 0 %}
+    <button class="btn btn-public" onclick="pushApproved()">
+      ↑ Push {{ approved }} approved to Flickr
+    </button>
+    {% endif %}
     <button class="btn" onclick="triggerPoll()">↻ Poll Flickr now</button>
   </div>
+  <div id="push-result" style="margin-top:12px; font-size:13px; color:var(--muted)"></div>
 
 </div>
 {% endblock %}
@@ -144,6 +151,24 @@ async function triggerPoll() {
   const d = await r.json();
   if (d.ok) toast('Poll started (PID ' + d.pid + ')');
   else toast('Poll failed', 'err');
+}
+
+async function pushApproved() {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = 'Pushing…';
+  const r = await fetch('/api/push_approved', {method:'POST'});
+  const d = await r.json();
+  btn.disabled = false;
+  if (d.ok) {
+    const msg = d.message || `Pushed ${d.pushed} photos${d.failed ? ', ' + d.failed + ' failed' : ''}`;
+    toast(msg, d.failed ? 'err' : 'ok');
+    document.getElementById('push-result').textContent = msg;
+    setTimeout(() => location.reload(), 1500);
+  } else {
+    toast('Push failed: ' + (d.error || 'unknown'), 'err');
+    btn.textContent = '↑ Push approved to Flickr';
+  }
 }
 
 // Format numbers with commas (Jinja filter workaround)

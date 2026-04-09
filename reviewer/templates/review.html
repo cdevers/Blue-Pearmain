@@ -195,21 +195,10 @@
        onclick="selectCard(this)"
        ondblclick="openDetail({{ photo.id }})">
 
-     <div class="thumb">
-       {% if photo.flickr_id %}
-       <a href="https://www.flickr.com/photos/cdevers/{{ photo.flickr_id }}"
-          target="_blank" rel="noopener"
-          onclick="event.stopPropagation()"
-          title="View on Flickr">
-         <img src="{{ url_for('thumb', photo_id=photo.id) }}"
-     	 alt="{{ photo.original_filename or '' }}"
-     	 loading="lazy">
-       </a>
-       {% else %}
-       <img src="{{ url_for('thumb', photo_id=photo.id) }}"
-            alt="{{ photo.original_filename or '' }}"
-            loading="lazy">
-      {% endif %}
+    <div class="thumb">
+      <img src="{{ url_for('thumb', photo_id=photo.id) }}"
+           alt="{{ photo.original_filename or '' }}"
+           loading="lazy">
       {% if photo.apple_unknown_faces > 0 or photo.apple_named_faces > 1 %}
       <span class="people-flag">
         {% if photo.apple_unknown_faces > 0 %}
@@ -284,7 +273,8 @@ function openDetail(id) {
 }
 
 async function quickDecide(id, decision, card) {
-  const ok = await decide(id, decision, decision === 'make_public');
+  // Push tags for both make_public and keep_private; skip gets nothing
+  const ok = await decide(id, decision, decision !== 'skip');
   if (!ok) return;
   if (decision === 'make_public') card.classList.add('decided-pub');
   else if (decision === 'keep_private') card.classList.add('decided-prv');
