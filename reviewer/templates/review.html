@@ -1,0 +1,334 @@
+{% extends "base.html" %}
+{% block title %}Review — Blue Pearmain{% endblock %}
+
+{% block extra_style %}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.toolbar select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 5px 10px;
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+.toolbar .count { color: var(--muted); font-size: 13px; }
+.toolbar .spacer { flex: 1; }
+.shortcuts {
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  gap: 12px;
+}
+.shortcuts kbd {
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: monospace;
+  font-size: 11px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  padding: 20px 24px;
+}
+
+.photo-card {
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.1s, transform 0.1s;
+  position: relative;
+}
+.photo-card:hover       { border-color: #3a3a3a; }
+.photo-card.selected    { border-color: var(--accent); }
+.photo-card.decided-pub { border-color: var(--green); opacity: 0.5; }
+.photo-card.decided-prv { border-color: var(--red);   opacity: 0.5; }
+.photo-card.decided-skp { opacity: 0.4; }
+
+.photo-card .thumb {
+  aspect-ratio: 4/3;
+  background: var(--border);
+  overflow: hidden;
+  position: relative;
+}
+.photo-card .thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.photo-card .thumb .people-flag {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(180, 80, 20, 0.85);
+  color: #fff;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.photo-card .meta {
+  padding: 8px 10px;
+}
+.photo-card .filename {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+.photo-card .tag-row {
+  font-size: 10px;
+  color: #5a8fc0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 6px;
+  min-height: 14px;
+}
+.photo-card .actions {
+  display: flex;
+  gap: 4px;
+}
+.photo-card .actions button {
+  flex: 1;
+  padding: 5px 4px;
+  border: none;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.1s;
+}
+.photo-card .actions button:hover { opacity: 0.85; }
+.btn-pub  { background: var(--green); color: #fff; }
+.btn-prv  { background: var(--red);   color: #fff; }
+.btn-skp  { background: #2a2a2a;      color: var(--muted); }
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 24px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.pagination a { color: var(--accent); }
+
+.empty {
+  text-align: center;
+  padding: 80px 24px;
+  color: var(--muted);
+}
+.empty h2 { font-size: 24px; margin-bottom: 8px; color: var(--text); }
+{% endblock %}
+
+{% block content %}
+
+<div class="toolbar">
+  <select id="state-select" onchange="changeState(this.value)">
+    <option value="candidate_public" {% if state_filter=='candidate_public' %}selected{% endif %}>
+      Candidate public ({{ stats.by_state.get('candidate_public',0) }})
+    </option>
+    <option value="needs_review" {% if state_filter=='needs_review' %}selected{% endif %}>
+      Needs review ({{ stats.by_state.get('needs_review',0) }})
+    </option>
+    <option value="already_public" {% if state_filter=='already_public' %}selected{% endif %}>
+      Already public ({{ stats.by_state.get('already_public',0) }})
+    </option>
+    <option value="approved_public" {% if state_filter=='approved_public' %}selected{% endif %}>
+      Approved ({{ stats.by_state.get('approved_public',0) }})
+    </option>
+    <option value="keep_private" {% if state_filter=='keep_private' %}selected{% endif %}>
+      Kept private ({{ stats.by_state.get('keep_private',0) }})
+    </option>
+    <option value="auto_private" {% if state_filter=='auto_private' %}selected{% endif %}>
+      Auto private ({{ stats.by_state.get('auto_private',0) }})
+    </option>
+    <option value="skipped" {% if state_filter=='skipped' %}selected{% endif %}>
+      Skipped ({{ stats.by_state.get('skipped',0) }})
+    </option>
+  </select>
+
+  <span class="count">
+    {{ total }} photos · page {{ page }}/{{ total_pages }}
+  </span>
+
+  <span class="spacer"></span>
+
+  <div class="shortcuts">
+    <span><kbd>P</kbd> public</span>
+    <span><kbd>X</kbd> private</span>
+    <span><kbd>Space</kbd> skip</span>
+    <span><kbd>J</kbd><kbd>K</kbd> navigate</span>
+    <span><kbd>Enter</kbd> detail</span>
+  </div>
+</div>
+
+{% if photos %}
+<div class="grid" id="photo-grid">
+  {% for photo in photos %}
+  <div class="photo-card"
+       id="card-{{ photo.id }}"
+       data-id="{{ photo.id }}"
+       data-flickr="{{ photo.flickr_id or '' }}"
+       tabindex="0"
+       onclick="selectCard(this)"
+       ondblclick="openDetail({{ photo.id }})">
+
+     <div class="thumb">
+       {% if photo.flickr_id %}
+       <a href="https://www.flickr.com/photos/cdevers/{{ photo.flickr_id }}"
+          target="_blank" rel="noopener"
+          onclick="event.stopPropagation()"
+          title="View on Flickr">
+         <img src="{{ url_for('thumb', photo_id=photo.id) }}"
+     	 alt="{{ photo.original_filename or '' }}"
+     	 loading="lazy">
+       </a>
+       {% else %}
+       <img src="{{ url_for('thumb', photo_id=photo.id) }}"
+            alt="{{ photo.original_filename or '' }}"
+            loading="lazy">
+      {% endif %}
+      {% if photo.apple_unknown_faces > 0 or photo.apple_named_faces > 1 %}
+      <span class="people-flag">
+        {% if photo.apple_unknown_faces > 0 %}
+          {{ photo.apple_unknown_faces }} unknown
+        {% else %}
+          {{ photo.apple_named_faces }} people
+        {% endif %}
+      </span>
+      {% endif %}
+    </div>
+
+    <div class="meta">
+      <div class="filename">{{ photo.original_filename or photo.flickr_id or '?' }}</div>
+      <div class="tag-row" id="tags-{{ photo.id }}">
+        {% if photo.proposed_tags %}
+          {{ photo.proposed_tags | join(', ') }}
+        {% else %}
+          <span style="color:#444">no tags yet</span>
+        {% endif %}
+      </div>
+      <div class="actions">
+        <button class="btn-pub"
+                onclick="event.stopPropagation(); quickDecide({{ photo.id }}, 'make_public', this.closest('.photo-card'))">
+          ✓ Public
+        </button>
+        <button class="btn-prv"
+                onclick="event.stopPropagation(); quickDecide({{ photo.id }}, 'keep_private', this.closest('.photo-card'))">
+          ✗ Private
+        </button>
+        <button class="btn-skp"
+                onclick="event.stopPropagation(); quickDecide({{ photo.id }}, 'skip', this.closest('.photo-card'))">
+          →
+        </button>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% else %}
+<div class="empty">
+  <h2>Queue empty</h2>
+  <p>No photos in this state.</p>
+</div>
+{% endif %}
+
+<div class="pagination">
+  {% if page > 1 %}
+    <a href="{{ url_for('review', state=state_filter, page=page-1) }}">← Previous</a>
+  {% endif %}
+  <span>Page {{ page }} of {{ total_pages }}</span>
+  {% if page < total_pages %}
+    <a href="{{ url_for('review', state=state_filter, page=page+1) }}">Next →</a>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let selected = null;
+
+function selectCard(card) {
+  if (selected) selected.classList.remove('selected');
+  selected = card;
+  card.classList.add('selected');
+  card.focus();
+}
+
+function openDetail(id) {
+  window.location.href = '/photo/' + id;
+}
+
+async function quickDecide(id, decision, card) {
+  const ok = await decide(id, decision, decision === 'make_public');
+  if (!ok) return;
+  if (decision === 'make_public') card.classList.add('decided-pub');
+  else if (decision === 'keep_private') card.classList.add('decided-prv');
+  else card.classList.add('decided-skp');
+
+  // Auto-advance selection to next card
+  const cards = [...document.querySelectorAll('.photo-card')];
+  const idx = cards.indexOf(card);
+  if (idx >= 0 && idx < cards.length - 1) selectCard(cards[idx + 1]);
+}
+
+function changeState(val) {
+  window.location.href = '/review?state=' + encodeURIComponent(val);
+}
+
+// Keyboard navigation
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+  const cards = [...document.querySelectorAll('.photo-card')];
+  const idx = selected ? cards.indexOf(selected) : -1;
+
+  if (e.key === 'j' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    const next = cards[idx + 1];
+    if (next) { selectCard(next); next.scrollIntoView({block:'nearest'}); }
+  } else if (e.key === 'k' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const prev = cards[idx - 1];
+    if (prev) { selectCard(prev); prev.scrollIntoView({block:'nearest'}); }
+  } else if (e.key === 'p' || e.key === 'P') {
+    if (selected) quickDecide(+selected.dataset.id, 'make_public', selected);
+  } else if (e.key === 'x' || e.key === 'X') {
+    if (selected) quickDecide(+selected.dataset.id, 'keep_private', selected);
+  } else if (e.key === ' ') {
+    e.preventDefault();
+    if (selected) quickDecide(+selected.dataset.id, 'skip', selected);
+  } else if (e.key === 'Enter') {
+    if (selected) openDetail(+selected.dataset.id);
+  }
+});
+
+// Select first card on load
+const first = document.querySelector('.photo-card');
+if (first) selectCard(first);
+</script>
+{% endblock %}

@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Blue Pearmain{% endblock %}
+
+{% block extra_style %}
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 32px;
+}
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  text-align: center;
+}
+.stat-card .n {
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.1;
+  margin-bottom: 4px;
+}
+.stat-card .label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.stat-card a { color: inherit; }
+.stat-card a:hover { text-decoration: none; opacity: 0.8; }
+
+.n-candidate { color: #6ab4f5; }
+.n-review    { color: #f5a623; }
+.n-private   { color: #e57373; }
+.n-public    { color: #66bb6a; }
+.n-total     { color: var(--text); }
+
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+.recent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+.recent-thumb {
+  aspect-ratio: 4/3;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+  background: var(--border);
+}
+.recent-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.recent-thumb .overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(transparent, rgba(0,0,0,0.7));
+  padding: 8px 4px 4px;
+  font-size: 10px;
+  color: #ccc;
+}
+{% endblock %}
+
+{% block content %}
+<div class="container">
+
+  <div class="stat-grid">
+    <div class="stat-card">
+      <a href="{{ url_for('review', state='candidate_public') }}">
+        <div class="n n-candidate">{{ stats.by_state.get('candidate_public', 0) | int }}</div>
+        <div class="label">Candidate public</div>
+      </a>
+    </div>
+    <div class="stat-card">
+      <a href="{{ url_for('review', state='needs_review') }}">
+        <div class="n n-review">{{ stats.by_state.get('needs_review', 0) | int }}</div>
+        <div class="label">Needs review</div>
+      </a>
+    </div>
+    <div class="stat-card">
+      <div class="n n-private">{{ stats.by_state.get('auto_private', 0) | int }}</div>
+      <div class="label">Auto private</div>
+    </div>
+    <div class="stat-card">
+      <a href="{{ url_for('review', state='approved_public') }}">
+        <div class="n n-public">{{ stats.by_state.get('approved_public', 0) | int }}</div>
+        <div class="label">Approved public</div>
+      </a>
+    </div>
+    <div class="stat-card">
+      <a href="{{ url_for('review', state='already_public') }}">
+        <div class="n n-public">{{ stats.by_state.get('already_public', 0) | int }}</div>
+        <div class="label">Already public</div>
+      </a>
+    </div>
+    <div class="stat-card">
+      <div class="n n-total">{{ stats.total | int }}</div>
+      <div class="label">Total photos</div>
+    </div>
+  </div>
+
+  {% if recent %}
+  <div class="section-title">Recently reviewed</div>
+  <div class="recent-grid">
+    {% for photo in recent %}
+    <a href="{{ url_for('photo_detail', photo_id=loop.index) }}" style="text-decoration:none">
+      <div class="recent-thumb">
+        <img src="{{ url_for('thumb', photo_id=loop.index) }}"
+             alt="{{ photo.original_filename }}"
+             loading="lazy">
+        <div class="overlay">{{ photo.review_decision or photo.privacy_state }}</div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div style="margin-top:32px; display:flex; gap:12px; align-items:center">
+    <a href="{{ url_for('review', state='candidate_public') }}" class="btn btn-primary">
+      Start reviewing →
+    </a>
+    <button class="btn" onclick="triggerPoll()">↻ Poll Flickr now</button>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function triggerPoll() {
+  const r = await fetch('/api/poll', {method:'POST'});
+  const d = await r.json();
+  if (d.ok) toast('Poll started (PID ' + d.pid + ')');
+  else toast('Poll failed', 'err');
+}
+
+// Format numbers with commas (Jinja filter workaround)
+document.querySelectorAll('.n').forEach(el => {
+  const n = parseInt(el.textContent.replace(/,/g,''));
+  if (!isNaN(n)) el.textContent = n.toLocaleString();
+});
+</script>
+{% endblock %}

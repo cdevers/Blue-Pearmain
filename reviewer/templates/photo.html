@@ -1,0 +1,381 @@
+{% extends "base.html" %}
+{% block title %}{{ photo.original_filename or photo.flickr_id }} — Blue Pearmain{% endblock %}
+
+{% block extra_style %}
+.detail-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 0;
+  height: calc(100vh - 48px);
+}
+.detail-image {
+  background: #050505;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+.detail-image img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.detail-panel {
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.meta-section { display: flex; flex-direction: column; gap: 6px; }
+.meta-section h3 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+.meta-row {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+}
+.meta-row .label { color: var(--muted); min-width: 80px; flex-shrink: 0; }
+.meta-row .value { color: var(--text); word-break: break-all; }
+
+.tag-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  min-height: 48px;
+}
+.tag-editor .tag {
+  background: #1e2a3a;
+  color: #7ab4e8;
+  border-radius: 3px;
+  padding: 2px 7px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.tag-editor .tag .remove {
+  cursor: pointer;
+  color: #555;
+  line-height: 1;
+}
+.tag-editor .tag .remove:hover { color: #e57373; }
+.tag-editor input {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  min-width: 80px;
+  flex: 1;
+}
+
+.action-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.action-row .btn { justify-content: center; font-size: 13px; }
+
+.caption-text {
+  font-size: 12px;
+  color: var(--muted);
+  font-style: italic;
+  line-height: 1.5;
+}
+
+.back-link {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  background: rgba(0,0,0,0.6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--text);
+  text-decoration: none;
+  backdrop-filter: blur(4px);
+}
+.back-link:hover { background: rgba(0,0,0,0.8); text-decoration: none; }
+.nav-link {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(0,0,0,0.55);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 28px;
+  line-height: 1;
+  padding: 8px 14px;
+  text-decoration: none;
+  backdrop-filter: blur(4px);
+  z-index: 2;
+  transition: background 0.1s;
+}
+.nav-link:hover { background: rgba(0,0,0,0.8); text-decoration: none; }
+.nav-prev { left: 16px; }
+.nav-next { right: 16px; }
+.flickr-link {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  background: rgba(0,0,0,0.6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: #6ab4f5;
+  font-size: 12px;
+  padding: 5px 10px;
+  text-decoration: none;
+  backdrop-filter: blur(4px);
+}
+.flickr-link:hover { text-decoration: none; opacity: 0.85; }
+{% endblock %}
+
+{% block content %}
+<div class="detail-layout">
+
+  <!-- Left: image -->
+  <div class="detail-image">
+    <a href="{{ url_for('review', state=state) }}" class="back-link">← Back to grid</a>
+    {% if prev_id %}
+    <a href="{{ url_for('photo_detail', photo_id=prev_id, state=state) }}" class="nav-link nav-prev" title="Previous (K)">‹</a>
+    {% endif %}
+    {% if next_id %}
+    <a href="{{ url_for('photo_detail', photo_id=next_id, state=state) }}" class="nav-link nav-next" title="Next (J)">›</a>
+    {% endif %}
+    {% if flickr_url %}
+    <a href="{{ flickr_url }}" target="_blank" rel="noopener" class="flickr-link" title="View on Flickr ↗">Flickr ↗</a>
+    {% endif %}
+    <img src="{{ url_for('thumb', photo_id=photo.id) }}"
+         alt="{{ photo.original_filename or '' }}"
+         id="main-image">
+  </div>
+
+  <!-- Right: metadata + actions -->
+  <div class="detail-panel">
+
+    <!-- Filename + state -->
+    <div>
+      <div style="font-size:15px; font-weight:600; margin-bottom:6px; word-break:break-all">
+        {{ photo.original_filename or photo.flickr_id or 'Unknown' }}
+      </div>
+      {% set state = photo.privacy_state %}
+      {% if state == 'candidate_public' %}
+        <span class="badge badge-candidate">Candidate public</span>
+      {% elif state == 'needs_review' %}
+        <span class="badge badge-review">Needs review</span>
+      {% elif state in ('auto_private', 'keep_private') %}
+        <span class="badge badge-private">Private</span>
+      {% elif state in ('approved_public', 'already_public') %}
+        <span class="badge badge-public">Public</span>
+      {% else %}
+        <span class="badge badge-skipped">{{ state }}</span>
+      {% endif %}
+      {% if photo.privacy_reason %}
+        <span style="font-size:11px; color:var(--muted); margin-left:6px">{{ photo.privacy_reason }}</span>
+      {% endif %}
+    </div>
+
+    <!-- Apple AI caption -->
+    {% if photo.apple_ai_caption %}
+    <div class="meta-section">
+      <h3>AI Caption</h3>
+      <div class="caption-text">{{ photo.apple_ai_caption }}</div>
+    </div>
+    {% endif %}
+
+    <!-- Metadata -->
+    <div class="meta-section">
+      <h3>Details</h3>
+      {% if photo.date_taken %}
+      <div class="meta-row">
+        <span class="label">Date</span>
+        <span class="value">{{ photo.date_taken[:16] }}</span>
+      </div>
+      {% endif %}
+      {% if photo.camera_model %}
+      <div class="meta-row">
+        <span class="label">Camera</span>
+        <span class="value">{{ photo.camera_model }}</span>
+      </div>
+      {% endif %}
+      {% if photo.place_city %}
+      <div class="meta-row">
+        <span class="label">Location</span>
+        <span class="value">
+          {{ photo.place_city }}{% if photo.place_state %}, {{ photo.place_state }}{% endif %}
+          {% if photo.place_country and photo.place_country != 'United States' %}, {{ photo.place_country }}{% endif %}
+        </span>
+      </div>
+      {% endif %}
+      {% if photo.place_neighborhood %}
+      <div class="meta-row">
+        <span class="label">Area</span>
+        <span class="value">{{ photo.place_neighborhood }}</span>
+      </div>
+      {% endif %}
+      {% if photo.apple_persons %}
+      <div class="meta-row">
+        <span class="label">People</span>
+        <span class="value">{{ photo.apple_persons | join(', ') }}</span>
+      </div>
+      {% endif %}
+      {% if photo.flickr_id %}
+      <div class="meta-row">
+        <span class="label">Flickr</span>
+        <span class="value">
+          {% if flickr_url %}
+          <a href="{{ flickr_url }}" target="_blank" rel="noopener">{{ photo.flickr_id }} ↗</a>
+          {% else %}
+          {{ photo.flickr_id }}
+          {% endif %}
+        </span>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Apple labels -->
+    {% if photo.apple_labels %}
+    <div class="meta-section">
+      <h3>Apple labels</h3>
+      <div class="tags">
+        {% for label in photo.apple_labels %}
+        <span class="tag" style="background:#1a2a1a; color:#6a9e6a">{{ label }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Tag editor -->
+    <div class="meta-section">
+      <h3>Proposed tags <span style="font-weight:400;color:var(--muted)">(edit before pushing)</span></h3>
+      <div class="tag-editor" id="tag-editor" onclick="document.getElementById('tag-input').focus()">
+        {% for tag in photo.proposed_tags %}
+        <span class="tag" data-tag="{{ tag }}">
+          {{ tag }}
+          <span class="remove" onclick="removeTag('{{ tag }}')">×</span>
+        </span>
+        {% endfor %}
+        <input type="text" id="tag-input" placeholder="add tag…"
+               onkeydown="handleTagInput(event)">
+      </div>
+      <button class="btn" onclick="saveTags()" style="margin-top:4px;font-size:12px">Save tags</button>
+    </div>
+
+    <!-- Actions -->
+    <div class="action-row">
+      <button class="btn btn-public" onclick="doDecide('make_public', true)">
+        ✓ Make public + push to Flickr
+      </button>
+      <button class="btn btn-public" style="background:#1e5c30"
+              onclick="doDecide('make_public', false)">
+        ✓ Approve (don't push yet)
+      </button>
+      <button class="btn btn-private" onclick="doDecide('keep_private', false)">
+        ✗ Keep private
+      </button>
+      <button class="btn btn-skip" onclick="doDecide('skip', false)">
+        → Skip for now
+      </button>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PHOTO_ID = {{ photo.id }};
+
+function currentTags() {
+  return [...document.querySelectorAll('#tag-editor .tag')].map(el => el.dataset.tag);
+}
+
+function removeTag(tag) {
+  const els = [...document.querySelectorAll('#tag-editor .tag')];
+  const el = els.find(e => e.dataset.tag === tag);
+  if (el) el.remove();
+}
+
+function addTag(tag) {
+  tag = tag.trim().toLowerCase();
+  if (!tag) return;
+  if (currentTags().includes(tag)) return;
+  const editor = document.getElementById('tag-editor');
+  const input  = document.getElementById('tag-input');
+  const span = document.createElement('span');
+  span.className = 'tag';
+  span.dataset.tag = tag;
+  span.innerHTML = `${tag} <span class="remove" onclick="removeTag('${tag}')">×</span>`;
+  editor.insertBefore(span, input);
+}
+
+function handleTagInput(e) {
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault();
+    addTag(e.target.value);
+    e.target.value = '';
+  } else if (e.key === 'Backspace' && e.target.value === '') {
+    const tags = document.querySelectorAll('#tag-editor .tag');
+    if (tags.length) tags[tags.length - 1].remove();
+  }
+}
+
+async function saveTags() {
+  const tags = currentTags();
+  const r = await fetch('/api/tags', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({photo_id: PHOTO_ID, tags}),
+  });
+  const d = await r.json();
+  toast(d.ok ? 'Tags saved' : 'Save failed', d.ok ? 'ok' : 'err');
+}
+
+async function doDecide(decision, push) {
+  const tags = currentTags();
+  const ok = await decide(PHOTO_ID, decision, push, tags);
+  if (ok) {
+    const nextId = {{ next_id or 'null' }};
+    const state  = {{ state | tojson }};
+    setTimeout(() => {
+      if (nextId) {
+        window.location.href = '/photo/' + nextId + '?state=' + encodeURIComponent(state);
+      } else {
+        window.location.href = '/review?state=' + encodeURIComponent(state);
+      }
+    }, 500);
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'p' || e.key === 'P') doDecide('make_public', true);
+  else if (e.key === 'x' || e.key === 'X') doDecide('keep_private', false);
+  else if (e.key === ' ') { e.preventDefault(); doDecide('skip', false); }
+  else if (e.key === 'Escape') window.location.href = '/review?state=' + {{ state | tojson }};
+  else if (e.key === 'j' || e.key === 'ArrowRight') {
+    const a = document.querySelector('.nav-next');
+    if (a) window.location.href = a.href;
+  } else if (e.key === 'k' || e.key === 'ArrowLeft') {
+    const a = document.querySelector('.nav-prev');
+    if (a) window.location.href = a.href;
+  }
+});
+</script>
+{% endblock %}

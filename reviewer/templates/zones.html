@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}Geofence Zones — Blue Pearmain{% endblock %}
+
+{% block extra_style %}
+.zones-layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 24px;
+  padding: 24px;
+}
+.zone-list { display: flex; flex-direction: column; gap: 10px; }
+.zone-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.zone-card .zone-info { flex: 1; }
+.zone-card .zone-name { font-weight: 600; margin-bottom: 2px; }
+.zone-card .zone-meta { font-size: 11px; color: var(--muted); }
+.zone-card .policy-badge {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.policy-auto_private { background: #2a0d0d; color: #e57373; }
+.policy-flag_review  { background: #4a2800; color: #f5a623; }
+.policy-auto_public  { background: #0d2e1a; color: #66bb6a; }
+
+.add-form {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: sticky;
+  top: 72px;
+}
+.add-form h3 { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.form-row { display: flex; flex-direction: column; gap: 4px; }
+.form-row label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.form-row input, .form-row select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 13px;
+  width: 100%;
+}
+.hint {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+{% endblock %}
+
+{% block content %}
+<div class="zones-layout">
+
+  <div>
+    <h2 style="font-size:16px; margin-bottom:16px">Geofence Zones</h2>
+
+    {% if zones %}
+    <div class="zone-list">
+      {% for zone in zones %}
+      <div class="zone-card">
+        <div class="zone-info">
+          <div class="zone-name">{{ zone.label or zone.name }}</div>
+          <div class="zone-meta">
+            {{ zone.latitude | round(5) }}, {{ zone.longitude | round(5) }}
+            · {{ zone.radius_m | int }}m radius
+            {% if zone.notes %} · {{ zone.notes }}{% endif %}
+          </div>
+        </div>
+        <span class="policy-badge policy-{{ zone.policy }}">{{ zone.policy.replace('_', ' ') }}</span>
+        <button class="btn" style="padding:4px 10px; font-size:11px"
+                onclick="deleteZone({{ zone.id }}, '{{ zone.label or zone.name }}')">
+          Remove
+        </button>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p style="color:var(--muted); margin-top:24px">No zones defined yet. Add one using the form →</p>
+    {% endif %}
+  </div>
+
+  <div class="add-form">
+    <h3>Add zone</h3>
+
+    <div class="form-row">
+      <label>Name (internal)</label>
+      <input type="text" id="z-name" placeholder="home">
+    </div>
+    <div class="form-row">
+      <label>Label (display)</label>
+      <input type="text" id="z-label" placeholder="Home">
+    </div>
+    <div class="form-row">
+      <label>Latitude</label>
+      <input type="number" id="z-lat" step="0.000001" placeholder="42.394000">
+    </div>
+    <div class="form-row">
+      <label>Longitude</label>
+      <input type="number" id="z-lon" step="0.000001" placeholder="-71.103100">
+    </div>
+    <div class="form-row">
+      <label>Radius (metres)</label>
+      <input type="number" id="z-radius" value="150" min="50" max="5000">
+    </div>
+    <div class="form-row">
+      <label>Policy</label>
+      <select id="z-policy">
+        <option value="auto_private">auto_private — never enters review queue</option>
+        <option value="flag_review">flag_review — always enters review queue</option>
+        <option value="auto_public">auto_public — treat as public (e.g. known venue)</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Notes (optional)</label>
+      <input type="text" id="z-notes" placeholder="e.g. apartment building">
+    </div>
+
+    <button class="btn btn-primary" onclick="addZone()">Add zone</button>
+
+    <div class="hint">
+      Tip: to get precise coordinates, right-click any location in Apple Maps
+      or Google Maps and copy the lat/long. A radius of 150m covers most
+      residential buildings; use 300–500m for a school campus.
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function addZone() {
+  const name   = document.getElementById('z-name').value.trim();
+  const label  = document.getElementById('z-label').value.trim();
+  const lat    = parseFloat(document.getElementById('z-lat').value);
+  const lon    = parseFloat(document.getElementById('z-lon').value);
+  const radius = parseFloat(document.getElementById('z-radius').value);
+  const policy = document.getElementById('z-policy').value;
+  const notes  = document.getElementById('z-notes').value.trim();
+
+  if (!name || isNaN(lat) || isNaN(lon) || isNaN(radius)) {
+    toast('Fill in name, lat, lon, radius', 'err');
+    return;
+  }
+
+  const r = await fetch('/api/zone', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, label: label || name, latitude: lat,
+                          longitude: lon, radius_m: radius, policy, notes}),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    toast('Zone added');
+    setTimeout(() => location.reload(), 800);
+  } else {
+    toast('Error: ' + d.error, 'err');
+  }
+}
+
+async function deleteZone(id, name) {
+  if (!confirm(`Remove zone "${name}"?`)) return;
+  const r = await fetch('/api/zone/' + id, {method: 'DELETE'});
+  const d = await r.json();
+  if (d.ok) { toast('Zone removed'); location.reload(); }
+  else toast('Error', 'err');
+}
+</script>
+{% endblock %}
