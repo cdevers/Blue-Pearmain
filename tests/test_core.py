@@ -411,6 +411,167 @@ class TestBuildEnrichedRow(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Thumbnailer
+# ---------------------------------------------------------------------------
+
+class TestThumbnailer(unittest.TestCase):
+
+    def test_flickr_url_valid(self):
+        from poller.thumbnailer import flickr_url
+        url = flickr_url("12345", "abc123", "1234")
+        self.assertEqual(url, "https://live.staticflickr.com/1234/12345_abc123_b.jpg")
+
+    def test_flickr_url_missing_secret(self):
+        from poller.thumbnailer import flickr_url
+        self.assertIsNone(flickr_url("12345", "", "1234"))
+
+    def test_flickr_url_missing_id(self):
+        from poller.thumbnailer import flickr_url
+        self.assertIsNone(flickr_url("", "abc123", "1234"))
+
+    def test_flickr_url_missing_server(self):
+        from poller.thumbnailer import flickr_url
+        self.assertIsNone(flickr_url("12345", "abc123", ""))
+
+    def test_derivative_path_nonexistent_library(self):
+        from poller.thumbnailer import derivative_path
+        result = derivative_path("AAAAAAAA-0000-0000-0000-000000000000", "/nonexistent/library")
+        self.assertIsNone(result)
+
+    def test_derivative_path_empty_uuid(self):
+        from poller.thumbnailer import derivative_path
+        self.assertIsNone(derivative_path("", "/some/library"))
+
+    def test_derivative_path_uses_first_char_shard(self):
+        from poller.thumbnailer import derivative_path
+        from unittest import mock
+        with mock.patch("pathlib.Path.exists", return_value=True):
+            result = derivative_path("ABCD1234-0000-0000-0000-000000000000", "/library")
+            self.assertIsNotNone(result)
+            self.assertIn("/a/", result.lower())
+            self.assertIn("ABCD1234-0000-0000-0000-000000000000_4_5005_c.jpeg", result)
+
+
+# ---------------------------------------------------------------------------
+# Poller: flickr_photo_to_db
+# ---------------------------------------------------------------------------
+
+class TestFlickrPhotoToDb(unittest.TestCase):
+
+    def _fake(self, **kwargs):
+        base = {
+            "id": "54321", "secret": "abc123",
+            "server": "1234", "farm": 1,
+            "title": "Test photo",
+            "dateupload": "1718500000",
+            "datetaken": "2024-06-16 10:00:00",
+            "latitude": "42.3601", "longitude": "-71.0589",
+            "tags": "concert boston",
+            "url_l": "https://live.staticflickr.com/1234/54321_abc123_b.jpg",
+            "url_m": "https://live.staticflickr.com/1234/54321_abc123.jpg",
+            "ispublic": 0,
+            "description": {"_content": "A test photo"},
+        }
+        return {**base, **kwargs}
+
+    def test_basic_fields(self):
+        from poller.poller import flickr_photo_to_db
+        row = flickr_photo_to_db(self._fake())
+        self.assertEqual(row["flickr_id"], "54321")
+        self.assertEqual(row["flickr_secret"], "abc123")
+        self.assertEqual(row["flickr_server"], "1234")
+        self.assertEqual(row["date_taken"], "2024-06-16 10:00:00")
+
+    def test_location_parsed(self):
+        from poller.poller import flickr_photo_to_db
+        row = flickr_photo_to_db(self._fake())
+        self.assertAlmostEqual(row["latitude"], 42.3601, places=3)
+        self.assertAlmostEqual(row["longitude"], -71.0589, places=3)
+
+    def test_tags_split(self):
+        from poller.poller import flickr_photo_to_db
+        row = flickr_photo_to_db(self._fake(tags="concert boston cycling"))
+        self.assertEqual(row["flickr_tags"], ["concert", "boston", "cycling"])
+
+    def test_empty_tags(self):
+        from poller.poller import flickr_photo_to_db
+        row = flickr_photo_to_db(self._fake(tags=""))
+        self.assertEqual(row["flickr_tags"], [])
+
+    def test_upload_date_iso(self):
+        from poller.poller import flickr_photo_to_db
+        row = flickr_photo_to_db(self._fake())
+        self.assertIn("2024", row["date_uploaded_flickr"])
+        self.assertTrue(row["date_uploaded_flickr"].endswith("+00:00"))
+
+    def test_description_extracted(self):
+        from poller.poller import flickr_photo_to_db
+        row = flickr_photo_to_db(self._fake(description={"_content": "My caption"}))
+        self.assertEqual(row["flickr_description"], "My caption")
+
+    def test_thumbnail_urls_stored(self):
+        from poller.poller import flickr_photo_to_db
+        row = flickr_photo_to_db(self._fake())
+        self.assertIn("thumbnail_url_l", row)
+        self.assertIn("thumbnail_url_m", row)
+        self.assertIn("54321_abc123_b.jpg", row["thumbnail_url_l"])
+
+    def test_no_location(self):
+        from poller.poller import flickr_photo_to_db
+        row = flickr_photo_to_db(self._fake(latitude="", longitude=""))
+        self.assertNotIn("latitude", row)
+
+
+# ---------------------------------------------------------------------------
+# find_flickr_match date matching
+# ---------------------------------------------------------------------------
+
+class TestFindFlickrMatch(unittest.TestCase):
+
+    def setUp(self):
+        import tempfile, os
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.db = Database(self.tmp.name)
+        self.db.upsert_photo({
+            "flickr_id": "AAA",
+            "date_taken": "2024-06-16 10:00:00",
+            "latitude": 42.36, "longitude": -71.06,
+        })
+        self.db.upsert_photo({
+            "flickr_id": "BBB",
+            "date_taken": "2023-05-06 16:34:28",
+        })
+
+    def tearDown(self):
+        import os
+        self.db.close()
+        os.unlink(self.tmp.name)
+
+    def test_match_by_exact_date(self):
+        from poller.scanner import find_flickr_match
+        photo_row = {"date_taken": "2024-06-16T10:00:00.000000-04:00"}
+        matches = find_flickr_match(photo_row, self.db)
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["flickr_id"], "AAA")
+
+    def test_no_match(self):
+        from poller.scanner import find_flickr_match
+        photo_row = {"date_taken": "2020-01-01T00:00:00-05:00"}
+        matches = find_flickr_match(photo_row, self.db)
+        self.assertEqual(matches, [])
+
+    def test_match_flickr_space_format(self):
+        from poller.scanner import find_flickr_match
+        photo_row = {"date_taken": "2023-05-06 16:34:28"}
+        matches = find_flickr_match(photo_row, self.db)
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["flickr_id"], "BBB")
+
+    def test_no_date_returns_empty(self):
+        from poller.scanner import find_flickr_match
+        matches = find_flickr_match({}, self.db)
+        self.assertEqual(matches, [])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
