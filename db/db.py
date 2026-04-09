@@ -111,16 +111,27 @@ class Database:
 
         data.setdefault("date_synced", _now_iso())
 
-        # Determine lookup key
-        lookup_field = "uuid" if data.get("uuid") else "flickr_id"
-        lookup_value = data.get(lookup_field)
+        # Determine lookup key — try uuid first, then flickr_id.
+        # When both are present (scanner enriching a Flickr record), we must
+        # check both to avoid a spurious INSERT hitting the unique constraint.
+        existing = None
+        lookup_field = None
+        for field in ("uuid", "flickr_id"):
+            value = data.get(field)
+            if value:
+                row = self.conn.execute(
+                    f"SELECT id FROM photos WHERE {field} = ?", (value,)
+                ).fetchone()
+                if row:
+                    existing = row
+                    lookup_field = field
+                    break
 
-        if lookup_value is None:
+        if existing is None and not data.get("uuid") and not data.get("flickr_id"):
             raise ValueError("upsert_photo requires at least one of uuid or flickr_id")
 
-        existing = self.conn.execute(
-            f"SELECT id FROM photos WHERE {lookup_field} = ?", (lookup_value,)
-        ).fetchone()
+        if lookup_field is None:
+            lookup_field = "uuid" if data.get("uuid") else "flickr_id"
 
         if existing:
             row_id = existing["id"]

@@ -230,7 +230,7 @@ def build_enriched_row(
     Re-runs privacy classification with the fuller data.
     Returns the updated row dict (does not write to DB).
     """
-    merged = dict(existing)
+    merged = {k: v for k, v in existing.items() if k != "id"}
 
     # Fields we always take from Photos (more authoritative than Flickr)
     for field in (
