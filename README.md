@@ -53,7 +53,7 @@ Apple Photos Library          Flickr (cloud)
 | `poller/scanner.py` | Apple Photos → local DB sync and matching |
 | `poller/thumbnailer.py` | Populate thumbnail paths for the review UI |
 | `reviewer/app.py` | Flask web UI |
-| `reviewer/templates/` | Jinja2 templates |
+| `reviewer/templates/` | Jinja2 templates (dashboard, review grid, photo detail, faces, zones) |
 | `config/` | Configuration templates and launchd plists |
 | `tests/` | Unit tests (60 tests) |
 
@@ -154,6 +154,7 @@ The grid view shows photos with proposed tags and action buttons. Keyboard short
 | `X` | Keep private + push tags |
 | `Space` | Skip |
 | `T` | Focus tag editor |
+| `N` | Go to Faces page for this person |
 | `J` / `→` | Next photo |
 | `K` / `←` | Previous photo |
 | `Esc` | Return to grid |
@@ -161,6 +162,20 @@ The grid view shows photos with proposed tags and action buttons. Keyboard short
 In the detail view the action buttons are pinned to the top of the sidebar, so their position stays consistent regardless of how much metadata or how many tags a photo has. Any decision automatically advances to the next photo.
 
 Both public and private decisions push tags to Flickr — tags are useful for search even on private photos.
+
+## Faces
+
+The Faces page (`/faces`) lists every named person in your Apple Photos library, sorted by photo count. For each person you can:
+
+- **Review** — open a filtered review queue showing only photos containing that person
+- **All private** — batch-mark every photo of that person as private (tags still pushed to Flickr)
+- **All public** — batch-mark every photo as approved public
+
+A confirmation dialog prevents accidental bulk actions. Unknown/unidentified faces appear as a separate count at the bottom with no batch actions.
+
+In the photo detail view, each named person is a link to the filtered review queue for that person — so you can immediately start browsing all photos containing them. The `N` keyboard shortcut goes to the Faces directory page, anchored to that person's row, where the batch actions and photo counts are available.
+
+When browsing a person-filtered review queue, prev/next navigation (J/K, ‹ ›) stays scoped to that person's photos throughout — including after opening a photo in detail view.
 
 ## Privacy classification
 

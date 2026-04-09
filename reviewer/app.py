@@ -91,6 +91,7 @@ def dashboard():
 @app.route("/review")
 def review():
     state_filter = request.args.get("state", "candidate_public")
+    person_filter = request.args.get("person", "").strip()
     page = int(request.args.get("page", 1))
     per_page = int(request.args.get("per_page", 48))
     offset = (page - 1) * per_page
@@ -100,18 +101,49 @@ def review():
     if state_filter not in valid_states:
         state_filter = "candidate_public"
 
-    photos = db().review_queue(
-        states=[state_filter],
-        limit=per_page,
-        offset=offset,
-    )
-    total = db().review_queue_count(states=[state_filter])
+    if person_filter:
+        # Filter by person using json_each
+        rows = db().conn.execute(
+            """SELECT DISTINCT photos.*
+               FROM photos, json_each(photos.apple_persons) AS p
+               WHERE p.value = ?
+                 AND photos.privacy_state = ?
+               ORDER BY photos.date_taken ASC
+               LIMIT ? OFFSET ?""",
+            (person_filter, state_filter, per_page, offset)
+        ).fetchall()
+        photos = []
+        for row in rows:
+            d = dict(row)
+            import json as _json
+            for field in ("apple_labels", "apple_persons", "proposed_tags"):
+                if isinstance(d.get(field), str):
+                    try: d[field] = _json.loads(d[field])
+                    except: d[field] = []
+            photos.append(d)
+
+        total_row = db().conn.execute(
+            """SELECT COUNT(DISTINCT photos.id) AS n
+               FROM photos, json_each(photos.apple_persons) AS p
+               WHERE p.value = ? AND photos.privacy_state = ?""",
+            (person_filter, state_filter)
+        ).fetchone()
+        total = total_row["n"] if total_row else 0
+    else:
+        photos = db().review_queue(
+            states=[state_filter],
+            limit=per_page,
+            offset=offset,
+        )
+        total = db().review_queue_count(states=[state_filter])
+
     total_pages = max(1, (total + per_page - 1) // per_page)
 
     return render_template(
         "review.html",
         photos=photos,
         state_filter=state_filter,
+        person_filter=person_filter,
         page=page,
         per_page=per_page,
         total=total,
@@ -126,18 +158,32 @@ def photo_detail(photo_id: int):
     if not photo:
         abort(404)
 
-    state = request.args.get("state", photo.get("privacy_state", "candidate_public"))
+    state        = request.args.get("state", photo.get("privacy_state", "candidate_public"))
+    person_filter = request.args.get("person", "").strip()
 
-    # Find prev/next within the same state queue, ordered by date_taken
-    nav = db().conn.execute(
-        """SELECT id,
-               LAG(id)  OVER (ORDER BY date_taken, id) AS prev_id,
-               LEAD(id) OVER (ORDER BY date_taken, id) AS next_id
-           FROM photos
-           WHERE privacy_state = ?
-        """,
-        (state,),
-    ).fetchall()
+    # Find prev/next scoped to the same state queue — and person if filtered
+    if person_filter:
+        nav = db().conn.execute(
+            """SELECT DISTINCT photos.id,
+                   LAG(photos.id)  OVER (ORDER BY photos.date_taken, photos.id) AS prev_id,
+                   LEAD(photos.id) OVER (ORDER BY photos.date_taken, photos.id) AS next_id
+               FROM photos, json_each(photos.apple_persons) AS p
+               WHERE p.value = ?
+                 AND photos.privacy_state = ?
+            """,
+            (person_filter, state),
+        ).fetchall()
+    else:
+        nav = db().conn.execute(
+            """SELECT id,
+                   LAG(id)  OVER (ORDER BY date_taken, id) AS prev_id,
+                   LEAD(id) OVER (ORDER BY date_taken, id) AS next_id
+               FROM photos
+               WHERE privacy_state = ?
+            """,
+            (state,),
+        ).fetchall()
+
     prev_id = next_id = None
     for row in nav:
         if row["id"] == photo_id:
@@ -156,7 +202,89 @@ def photo_detail(photo_id: int):
         prev_id=prev_id,
         next_id=next_id,
         state=state,
+        person_filter=person_filter,
     )
+
+
+@app.route("/faces")
+def faces():
+    """People directory — aggregated from apple_persons across all photos."""
+    # Aggregate named persons using SQLite's json_each
+    rows = db().conn.execute(
+        """SELECT p.value AS person,
+                  COUNT(*) AS photo_count,
+                  SUM(CASE WHEN privacy_state IN ('approved_public','already_public') THEN 1 ELSE 0 END) AS public_count,
+                  SUM(CASE WHEN privacy_state = 'keep_private' THEN 1 ELSE 0 END) AS private_count,
+                  SUM(CASE WHEN privacy_state IN ('needs_review','candidate_public') THEN 1 ELSE 0 END) AS pending_count
+           FROM photos, json_each(photos.apple_persons) AS p
+           WHERE photos.apple_persons IS NOT NULL
+             AND photos.apple_persons NOT IN ('null', '[]', '')
+             AND p.value != '_UNKNOWN_'
+           GROUP BY p.value
+           ORDER BY photo_count DESC"""
+    ).fetchall()
+
+    named = [dict(r) for r in rows]
+
+    # Count unknown separately
+    unknown_count = db().conn.execute(
+        """SELECT COUNT(*) AS n
+           FROM photos, json_each(photos.apple_persons) AS p
+           WHERE p.value = '_UNKNOWN_'"""
+    ).fetchone()["n"]
+
+    unknown_photos = db().conn.execute(
+        """SELECT COUNT(DISTINCT photos.id) AS n
+           FROM photos, json_each(photos.apple_persons) AS p
+           WHERE p.value = '_UNKNOWN_'"""
+    ).fetchone()["n"]
+
+    return render_template(
+        "faces.html",
+        named=named,
+        unknown_count=unknown_count,
+        unknown_photos=unknown_photos,
+        stats=db().stats(),
+    )
+
+
+@app.route("/api/batch_person", methods=["POST"])
+def api_batch_person():
+    """
+    Batch-set privacy decision for all photos containing a named person.
+    decision: 'keep_private' | 'make_public'
+    """
+    data = request.get_json(force=True)
+    person   = data.get("person", "").strip()
+    decision = data.get("decision")
+
+    if not person or decision not in ("keep_private", "make_public"):
+        return jsonify({"ok": False, "error": "invalid params"}), 400
+
+    new_state = "approved_public" if decision == "make_public" else "keep_private"
+
+    # Find all photos containing this person that haven't been reviewed yet
+    rows = db().conn.execute(
+        """SELECT DISTINCT photos.id
+           FROM photos, json_each(photos.apple_persons) AS p
+           WHERE p.value = ?
+             AND photos.privacy_state NOT IN ('already_public')""",
+        (person,)
+    ).fetchall()
+
+    count = 0
+    for row in rows:
+        db().conn.execute(
+            """UPDATE photos
+               SET privacy_state = ?, privacy_reason = ?,
+                   review_decision = ?, reviewed_at = datetime('now')
+               WHERE id = ?""",
+            (new_state, f"batch: {person}", decision, row["id"])
+        )
+        count += 1
+
+    db().conn.commit()
+    return jsonify({"ok": True, "updated": count, "person": person, "decision": decision})
 
 
 @app.route("/settings/zones")

@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+{% block title %}Faces — Blue Pearmain{% endblock %}
+
+{% block extra_style %}
+.faces-container { padding: 24px; max-width: 1000px; }
+.faces-header {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.faces-header h2 { font-size: 16px; font-weight: 600; }
+.faces-header .sub { font-size: 13px; color: var(--muted); }
+
+.person-list { display: flex; flex-direction: column; gap: 8px; }
+
+.person-row {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.person-row:hover { border-color: #3a3a3a; }
+
+.person-name {
+  font-size: 14px;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+}
+.person-name a { color: var(--text); }
+.person-name a:hover { color: var(--accent); text-decoration: none; }
+
+.person-counts {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.person-counts .total { font-weight: 600; color: var(--text); }
+.person-counts .pub   { color: #66bb6a; }
+.person-counts .prv   { color: #e57373; }
+.person-counts .pend  { color: #f5a623; }
+
+.person-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.person-actions button {
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.1s;
+}
+.person-actions button:hover { opacity: 0.85; }
+.btn-all-prv { background: var(--red);   border-color: var(--red);   color: #fff; }
+.btn-all-pub { background: var(--green); border-color: var(--green); color: #fff; }
+.btn-review  { background: transparent; color: var(--accent); border-color: var(--accent); }
+
+.unknown-row {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  opacity: 0.6;
+  margin-top: 16px;
+}
+.section-divider {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin: 20px 0 8px;
+}
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  display: none;
+}
+.confirm-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  max-width: 420px;
+  width: 90%;
+}
+.confirm-box h3 { font-size: 15px; margin-bottom: 8px; }
+.confirm-box p  { font-size: 13px; color: var(--muted); margin-bottom: 20px; line-height: 1.5; }
+.confirm-box .actions { display: flex; gap: 8px; justify-content: flex-end; }
+{% endblock %}
+
+{% block content %}
+<div class="faces-container">
+
+  <div class="faces-header">
+    <h2>Faces</h2>
+    <span class="sub">{{ named | length }} named people across your library</span>
+  </div>
+
+  {% if named %}
+  <div class="person-list">
+    {% for person in named %}
+    <div class="person-row" id="row-{{ loop.index }}" data-person="{{ person.person | e }}">
+      <div class="person-name">
+        <a href="{{ url_for('review', state='needs_review', person=person.person) }}">
+          {{ person.person }}
+        </a>
+      </div>
+      <div class="person-counts">
+        <span class="total">{{ person.photo_count }} photos</span>
+        {% if person.public_count %}
+        <span class="pub">{{ person.public_count }} public</span>
+        {% endif %}
+        {% if person.private_count %}
+        <span class="prv">{{ person.private_count }} private</span>
+        {% endif %}
+        {% if person.pending_count %}
+        <span class="pend">{{ person.pending_count }} pending</span>
+        {% endif %}
+      </div>
+      <div class="person-actions">
+        <button class="btn-review"
+                onclick="window.location.href='/review?state=needs_review&person={{ person.person | urlencode }}'">
+          Review
+        </button>
+        <button class="btn-all-prv"
+                onclick="confirmBatch('{{ person.person | e }}', 'keep_private', {{ person.photo_count }}, {{ loop.index }})">
+          All private
+        </button>
+        <button class="btn-all-pub"
+                onclick="confirmBatch('{{ person.person | e }}', 'make_public', {{ person.photo_count }}, {{ loop.index }})">
+          All public
+        </button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p style="color:var(--muted); margin-top:24px">
+    No named people found yet. Run the scanner to import Apple Photos face data.
+  </p>
+  {% endif %}
+
+  {% if unknown_photos %}
+  <div class="section-divider">Unidentified</div>
+  <div class="unknown-row">
+    <div class="person-name" style="color:var(--muted)">Unknown / unidentified faces</div>
+    <div class="person-counts">
+      <span class="total">{{ unknown_photos }} photos</span>
+      <span style="font-size:11px; color:var(--muted)">({{ unknown_count }} face detections)</span>
+    </div>
+    <div class="person-actions">
+      <button class="btn-review"
+              onclick="window.location.href='/review?state=needs_review'"
+              title="These appear in the main needs-review queue">
+        Review queue
+      </button>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+
+<!-- Confirm dialog -->
+<div class="confirm-overlay" id="confirm-overlay">
+  <div class="confirm-box">
+    <h3 id="confirm-title"></h3>
+    <p id="confirm-body"></p>
+    <div class="actions">
+      <button class="btn" onclick="closeConfirm()">Cancel</button>
+      <button class="btn" id="confirm-btn" onclick="doConfirm()"></button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let _pendingPerson = null;
+let _pendingDecision = null;
+let _pendingRowIdx = null;
+
+function confirmBatch(person, decision, count, rowIdx) {
+  _pendingPerson = person;
+  _pendingDecision = decision;
+  _pendingRowIdx = rowIdx;
+
+  const isPrivate = decision === 'keep_private';
+  document.getElementById('confirm-title').textContent =
+    isPrivate ? `Keep all ${person} photos private?` : `Make all ${person} photos public?`;
+  document.getElementById('confirm-body').textContent =
+    `This will set ${count} photo${count === 1 ? '' : 's'} to ${isPrivate ? 'private' : 'public'}. ` +
+    (isPrivate
+      ? 'Tags will still be pushed to Flickr for searchability.'
+      : 'Photos will be made public on Flickr.');
+  const btn = document.getElementById('confirm-btn');
+  btn.textContent = isPrivate ? 'Keep all private' : 'Make all public';
+  btn.className = 'btn ' + (isPrivate ? 'btn-private' : 'btn-public');
+  document.getElementById('confirm-overlay').style.display = 'flex';
+}
+
+function closeConfirm() {
+  document.getElementById('confirm-overlay').style.display = 'none';
+  _pendingPerson = _pendingDecision = _pendingRowIdx = null;
+}
+
+async function doConfirm() {
+  closeConfirm();
+  const r = await fetch('/api/batch_person', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({person: _pendingPerson, decision: _pendingDecision}),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    toast(`Updated ${d.updated} photos for ${d.person}`);
+    setTimeout(() => location.reload(), 1000);
+  } else {
+    toast('Error: ' + (d.error || 'unknown'), 'err');
+  }
+}
+
+// Close on backdrop click
+document.getElementById('confirm-overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeConfirm();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeConfirm();
+});
+
+// Scroll to and highlight person from URL hash (e.g. arriving from photo detail)
+function scrollToHash() {
+  const hash = decodeURIComponent(window.location.hash.slice(1));
+  if (!hash) return;
+  const row = [...document.querySelectorAll('.person-row')]
+    .find(el => el.dataset.person === hash);
+  if (row) {
+    row.scrollIntoView({behavior: 'smooth', block: 'center'});
+    row.style.borderColor = 'var(--accent)';
+    setTimeout(() => row.style.borderColor = '', 2000);
+  }
+}
+scrollToHash();
+</script>
+{% endblock %}

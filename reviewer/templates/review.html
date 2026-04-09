@@ -170,6 +170,10 @@
   </select>
 
   <span class="count">
+    {% if person_filter %}
+    <a href="{{ url_for('faces') }}" style="color:var(--muted)">← Faces</a>
+    · <strong style="color:var(--text)">{{ person_filter }}</strong> ·
+    {% endif %}
     {{ total }} photos · page {{ page }}/{{ total_pages }}
   </span>
 
@@ -247,11 +251,11 @@
 
 <div class="pagination">
   {% if page > 1 %}
-    <a href="{{ url_for('review', state=state_filter, page=page-1) }}">← Previous</a>
+    <a href="{{ url_for('review', state=state_filter, page=page-1, person=person_filter or '') }}">← Previous</a>
   {% endif %}
   <span>Page {{ page }} of {{ total_pages }}</span>
   {% if page < total_pages %}
-    <a href="{{ url_for('review', state=state_filter, page=page+1) }}">Next →</a>
+    <a href="{{ url_for('review', state=state_filter, page=page+1, person=person_filter or '') }}">Next →</a>
   {% endif %}
 </div>
 
@@ -269,7 +273,11 @@ function selectCard(card) {
 }
 
 function openDetail(id) {
-  window.location.href = '/photo/' + id;
+  const person = {{ (person_filter or '') | tojson }};
+  const state  = {{ state_filter | tojson }};
+  let url = '/photo/' + id + '?state=' + encodeURIComponent(state);
+  if (person) url += '&person=' + encodeURIComponent(person);
+  window.location.href = url;
 }
 
 async function quickDecide(id, decision, card) {

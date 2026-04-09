@@ -148,6 +148,7 @@
   <span class="brand">🍎 Blue Pearmain</span>
   <a href="{{ url_for('dashboard') }}" {% if request.endpoint == 'dashboard' %}class="active"{% endif %}>Dashboard</a>
   <a href="{{ url_for('review', state='candidate_public') }}" {% if request.endpoint == 'review' %}class="active"{% endif %}>Review</a>
+  <a href="{{ url_for('faces') }}" {% if request.endpoint == 'faces' %}class="active"{% endif %}>Faces</a>
   <a href="{{ url_for('zones') }}" {% if request.endpoint == 'zones' %}class="active"{% endif %}>Zones</a>
   <span class="spacer"></span>
   <span class="stats-pill" id="nav-stats">Loading…</span>

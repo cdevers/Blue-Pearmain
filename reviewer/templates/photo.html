@@ -179,12 +179,12 @@
 
   <!-- Left: image -->
   <div class="detail-image">
-    <a href="{{ url_for('review', state=state) }}" class="back-link">← Back to grid</a>
+    <a href="{{ url_for('review', state=state, person=person_filter or '') }}" class="back-link">← Back{% if person_filter %} · {{ person_filter }}{% endif %}</a>
     {% if prev_id %}
-    <a href="{{ url_for('photo_detail', photo_id=prev_id, state=state) }}" class="nav-link nav-prev" title="Previous (K)">‹</a>
+    <a href="{{ url_for('photo_detail', photo_id=prev_id, state=state, person=person_filter or '') }}" class="nav-link nav-prev" title="Previous (K)">‹</a>
     {% endif %}
     {% if next_id %}
-    <a href="{{ url_for('photo_detail', photo_id=next_id, state=state) }}" class="nav-link nav-next" title="Next (J)">›</a>
+    <a href="{{ url_for('photo_detail', photo_id=next_id, state=state, person=person_filter or '') }}" class="nav-link nav-next" title="Next (J)">›</a>
     {% endif %}
     {% if flickr_url %}
     <a href="{{ flickr_url }}" target="_blank" rel="noopener" class="flickr-link" title="View on Flickr ↗">Flickr ↗</a>
@@ -240,7 +240,8 @@
     <div class="kbd-hints">
       <span><kbd>J</kbd><kbd>K</kbd> next/prev</span>
       <span><kbd>Esc</kbd> grid</span>
-      <span><kbd>T</kbd> edit tags</span>
+      <span><kbd>T</kbd> tags</span>
+      <span><kbd>N</kbd> faces</span>
     </div>
 
     <!-- Apple AI caption -->
@@ -284,7 +285,18 @@
       {% if photo.apple_persons %}
       <div class="meta-row">
         <span class="label">People</span>
-        <span class="value">{{ photo.apple_persons | join(', ') }}</span>
+        <span class="value">
+          {% for person in photo.apple_persons %}
+            {% if person != '_UNKNOWN_' %}
+              <a href="{{ url_for('review', state=state, person=person) }}"
+                 onclick="event.stopPropagation()"
+                 title="Review all photos of {{ person }}">{{ person }}</a>
+            {% else %}
+              <span style="color:var(--muted)">unknown</span>
+            {% endif %}
+            {% if not loop.last %}, {% endif %}
+          {% endfor %}
+        </span>
       </div>
       {% endif %}
       {% if photo.flickr_id %}
@@ -388,11 +400,13 @@ async function doDecide(decision, push) {
   if (ok) {
     const nextId = {{ next_id or 'null' }};
     const state  = {{ state | tojson }};
+    const person = {{ (person_filter or '') | tojson }};
     setTimeout(() => {
+      const personParam = person ? '&person=' + encodeURIComponent(person) : '';
       if (nextId) {
-        window.location.href = '/photo/' + nextId + '?state=' + encodeURIComponent(state);
+        window.location.href = '/photo/' + nextId + '?state=' + encodeURIComponent(state) + personParam;
       } else {
-        window.location.href = '/review?state=' + encodeURIComponent(state);
+        window.location.href = '/review?state=' + encodeURIComponent(state) + personParam;
       }
     }, 500);
   }
@@ -408,7 +422,17 @@ document.addEventListener('keydown', e => {
     e.preventDefault();
     document.getElementById('tag-input').focus();
   }
-  else if (e.key === 'Escape') window.location.href = '/review?state=' + {{ state | tojson }};
+  else if (e.key === 'Escape') { const p = {{ (person_filter or '') | tojson }}; window.location.href = '/review?state=' + {{ state | tojson }} + (p ? '&person=' + encodeURIComponent(p) : ''); }
+  else if (e.key === 'n' || e.key === 'N') {
+    // Go to Faces page for the first named person in this photo
+    const persons = {{ photo.apple_persons | tojson }};
+    const named = persons.filter(p => p && p !== '_UNKNOWN_');
+    if (named.length > 0) {
+      window.location.href = '/faces#' + encodeURIComponent(named[0]);
+    } else {
+      window.location.href = '/faces';
+    }
+  }
   else if (e.key === 'j' || e.key === 'ArrowRight') {
     const a = document.querySelector('.nav-next');
     if (a) window.location.href = a.href;
