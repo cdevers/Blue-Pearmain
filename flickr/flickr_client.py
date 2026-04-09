@@ -1,0 +1,281 @@
+"""
+flickr_client.py — thin Flickr API wrapper for flickr-curator
+
+Wraps OAuth 1.0a calls via requests-oauthlib. All methods return
+plain Python dicts (parsed JSON). Raises FlickrError on API errors.
+
+Usage:
+    from flickr.flickr_client import FlickrClient
+    client = FlickrClient.from_config(config)
+    photos = client.get_recent_private(min_upload_date=ts)
+"""
+
+from __future__ import annotations
+
+import time
+from typing import Any
+
+from requests_oauthlib import OAuth1Session
+
+REST_URL = "https://api.flickr.com/services/rest/"
+
+
+class FlickrError(Exception):
+    def __init__(self, code: int, message: str):
+        self.code = code
+        super().__init__(f"Flickr API error {code}: {message}")
+
+
+class FlickrClient:
+    def __init__(
+        self,
+        api_key: str,
+        api_secret: str,
+        oauth_token: str,
+        oauth_token_secret: str,
+        user_nsid: str = "",
+        rate_limit_delay: float = 0.5,
+    ):
+        self.api_key = api_key
+        self.user_nsid = user_nsid
+        self._rate_delay = rate_limit_delay
+        self._session = OAuth1Session(
+            api_key,
+            client_secret=api_secret,
+            resource_owner_key=oauth_token,
+            resource_owner_secret=oauth_token_secret,
+        )
+
+    @classmethod
+    def from_config(cls, config: dict) -> "FlickrClient":
+        f = config["flickr"]
+        return cls(
+            api_key=f["api_key"],
+            api_secret=f["api_secret"],
+            oauth_token=f["oauth_token"],
+            oauth_token_secret=f["oauth_token_secret"],
+            user_nsid=f.get("user_nsid", ""),
+        )
+
+    # -----------------------------------------------------------------------
+    # Core request
+    # -----------------------------------------------------------------------
+
+    def _call(self, method: str, params: dict | None = None, http_method: str = "GET") -> dict:
+        """Make a signed Flickr API call. Returns the parsed JSON response body."""
+        p = {
+            "method":         method,
+            "format":         "json",
+            "nojsoncallback": 1,
+        }
+        if params:
+            p.update(params)
+
+        time.sleep(self._rate_delay)
+
+        if http_method == "POST":
+            resp = self._session.post(REST_URL, data=p)
+        else:
+            resp = self._session.get(REST_URL, params=p)
+
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("stat") != "ok":
+            err = data.get("message", "unknown error")
+            code = data.get("code", -1)
+            raise FlickrError(code, err)
+
+        return data
+
+    # -----------------------------------------------------------------------
+    # Photo polling
+    # -----------------------------------------------------------------------
+
+    def get_recent_uploads(
+        self,
+        min_upload_date: int,
+        privacy_filter: int | None = None,
+        page: int = 1,
+        per_page: int = 500,
+        extras: str | None = None,
+    ) -> dict:
+        """
+        Call flickr.photos.recentlyUpdated to get photos uploaded/changed
+        since min_upload_date (Unix timestamp).
+
+        privacy_filter: 1=public, 2=friends, 3=family, 4=friends+family, 5=private
+        extras: comma-separated list of extra fields to return
+        """
+        default_extras = (
+            "date_upload,date_taken,geo,tags,machine_tags,"
+            "url_sq,url_t,url_s,url_m,url_l,url_o,"
+            "original_format,media,description,license"
+        )
+        return self._call(
+            "flickr.photos.recentlyUpdated",
+            {
+                "min_date":      min_upload_date,
+                "privacy_filter": privacy_filter or "",
+                "page":          page,
+                "per_page":      per_page,
+                "extras":        extras or default_extras,
+            },
+        )
+
+    def get_not_in_set(
+        self,
+        privacy_filter: int = 5,
+        page: int = 1,
+        per_page: int = 500,
+        min_upload_date: int | None = None,
+    ) -> dict:
+        """
+        Get photos not in any album. Useful for finding unsorted uploads.
+        privacy_filter=5 returns only private photos.
+        """
+        params: dict[str, Any] = {
+            "privacy_filter": privacy_filter,
+            "page":          page,
+            "per_page":      per_page,
+            "extras":        "date_upload,date_taken,geo,tags,url_m,url_l,description",
+        }
+        if min_upload_date:
+            params["min_upload_date"] = min_upload_date
+        return self._call("flickr.photos.getNotInSet", params)
+
+    def get_photo_info(self, photo_id: str, secret: str | None = None) -> dict:
+        """Get full metadata for a single photo."""
+        params: dict[str, Any] = {"photo_id": photo_id}
+        if secret:
+            params["secret"] = secret
+        return self._call("flickr.photos.getInfo", params)
+
+    def get_photo_sizes(self, photo_id: str) -> dict:
+        """Get available size URLs for a photo."""
+        return self._call("flickr.photos.getSizes", {"photo_id": photo_id})
+
+    def search_photos(
+        self,
+        user_id: str = "me",
+        min_upload_date: int | None = None,
+        max_upload_date: int | None = None,
+        privacy_filter: int | None = None,
+        page: int = 1,
+        per_page: int = 500,
+        extras: str | None = None,
+    ) -> dict:
+        params: dict[str, Any] = {
+            "user_id":  user_id,
+            "page":     page,
+            "per_page": per_page,
+            "extras":   extras or "date_upload,date_taken,geo,tags,url_m,url_l,description",
+        }
+        if min_upload_date:
+            params["min_upload_date"] = min_upload_date
+        if max_upload_date:
+            params["max_upload_date"] = max_upload_date
+        if privacy_filter:
+            params["privacy_filter"] = privacy_filter
+        return self._call("flickr.photos.search", params)
+
+    # -----------------------------------------------------------------------
+    # Writing back to Flickr
+    # -----------------------------------------------------------------------
+
+    def set_permissions(
+        self,
+        photo_id: str,
+        is_public: int,
+        is_friend: int = 0,
+        is_family: int = 0,
+        perm_comment: int = 3,
+        perm_addmeta: int = 2,
+    ) -> dict:
+        """
+        Set photo visibility.
+        is_public: 1 = public, 0 = private
+        perm_comment/perm_addmeta: 0=nobody,1=friends+family,2=contacts,3=everybody
+        """
+        return self._call(
+            "flickr.photos.setPerms",
+            {
+                "photo_id":      photo_id,
+                "is_public":     is_public,
+                "is_friend":     is_friend,
+                "is_family":     is_family,
+                "perm_comment":  perm_comment,
+                "perm_addmeta":  perm_addmeta,
+            },
+            http_method="POST",
+        )
+
+    def add_tags(self, photo_id: str, tags: list[str]) -> dict:
+        """Add tags to a photo (does not remove existing tags)."""
+        # Flickr expects space-separated tags; multi-word tags must be quoted
+        tag_str = " ".join(
+            f'"{t}"' if " " in t else t
+            for t in tags
+            if t.strip()
+        )
+        return self._call(
+            "flickr.photos.addTags",
+            {"photo_id": photo_id, "tags": tag_str},
+            http_method="POST",
+        )
+
+    def set_tags(self, photo_id: str, tags: list[str]) -> dict:
+        """Replace all tags on a photo (destructive — use add_tags to append)."""
+        tag_str = " ".join(
+            f'"{t}"' if " " in t else t
+            for t in tags
+            if t.strip()
+        )
+        return self._call(
+            "flickr.photos.setTags",
+            {"photo_id": photo_id, "tags": tag_str},
+            http_method="POST",
+        )
+
+    def set_meta(self, photo_id: str, title: str = "", description: str = "") -> dict:
+        """Set title and/or description on a photo."""
+        return self._call(
+            "flickr.photos.setMeta",
+            {"photo_id": photo_id, "title": title, "description": description},
+            http_method="POST",
+        )
+
+    # -----------------------------------------------------------------------
+    # Thumbnail download
+    # -----------------------------------------------------------------------
+
+    def download_thumbnail(self, url: str, dest_path: str) -> bool:
+        """
+        Download a Flickr thumbnail URL to dest_path.
+        Returns True on success. Uses a plain (non-OAuth) GET since
+        Flickr static URLs are publicly accessible once you have the URL.
+        """
+        import requests
+        from pathlib import Path
+
+        Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
+        try:
+            resp = requests.get(url, timeout=30, stream=True)
+            resp.raise_for_status()
+            with open(dest_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            return True
+        except Exception:
+            return False
+
+    # -----------------------------------------------------------------------
+    # Account info
+    # -----------------------------------------------------------------------
+
+    def test_login(self) -> dict:
+        """Verify authentication and return user info."""
+        return self._call("flickr.test.login")
+
+    def get_user_info(self, user_id: str = "me") -> dict:
+        return self._call("flickr.people.getInfo", {"user_id": user_id})

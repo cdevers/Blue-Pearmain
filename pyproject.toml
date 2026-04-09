@@ -1,0 +1,21 @@
+[project]
+name = "blue-pearmain"
+version = "0.1.0"
+description = "Privacy-aware Flickr photo review and tagging tool"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+    "requests-oauthlib>=1.3",
+    "pyyaml>=6.0",
+    "flask>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

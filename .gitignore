@@ -1,0 +1,19 @@
+# Credentials — never commit these
+config/config.yml
+
+# Database and cache
+*.db
+*.db-wal
+*.db-shm
+thumbs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+
+# macOS
+.DS_Store
+

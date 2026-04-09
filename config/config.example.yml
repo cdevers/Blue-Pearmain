@@ -1,0 +1,32 @@
+# flickr-curator config
+# Copy this to config.yaml and fill in your values.
+# config.yaml is gitignored — never commit credentials.
+
+flickr:
+  api_key: "7e69e74995b9af19cbe44ac7a25a7107"
+  api_secret: ""              # paste your secret key here
+  oauth_token: ""             # filled in by flickr_auth.py
+  oauth_token_secret: ""      # filled in by flickr_auth.py
+  user_nsid: ""               # filled in by flickr_auth.py
+
+database:
+  path: "/volume1/flickr-curator/curator.db"   # path on NAS (SMB mount or Docker volume)
+
+thumbnails:
+  path: "/volume1/flickr-curator/thumbs"       # NAS path for cached url_l thumbnails
+
+photos_library:
+  path: "~/Pictures/Photos Library.photoslibrary"
+  self_name: "Chris Devers"   # your name as it appears in Apple's People album
+
+poller:
+  interval_minutes: 60        # how often to check Flickr for new uploads
+  batch_size: 500             # photos per API page
+
+review:
+  host: "0.0.0.0"
+  port: 5173
+
+logging:
+  level: "INFO"               # DEBUG | INFO | WARNING | ERROR
+  file: "/volume1/flickr-curator/curator.log"
