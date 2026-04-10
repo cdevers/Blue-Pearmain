@@ -884,5 +884,81 @@ class TestFlickrClientRetry(unittest.TestCase):
         self.assertEqual(result["stat"], "ok")
 
 
+# ---------------------------------------------------------------------------
+# Poller auto-push: approved Photos record matched to new Flickr upload
+# ---------------------------------------------------------------------------
+
+class TestFindApprovedPhotosRecord(unittest.TestCase):
+
+    def setUp(self):
+        fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.db = Database(self.tmp_path)
+
+    def tearDown(self):
+        self.db.close()
+        os.unlink(self.tmp_path)
+
+    def test_finds_approved_match_by_date(self):
+        from poller.poller import _find_approved_photos_record
+        # Insert a Photos-only approved record
+        self.db.upsert_photo({
+            "uuid": "ABC-123",
+            "date_taken": "2024-06-16 10:00:00",
+            "privacy_state": "approved_public",
+        })
+        # Simulate incoming Flickr row with same date
+        flickr_row = {"date_taken": "2024-06-16 10:00:00", "flickr_id": "99999"}
+        match = _find_approved_photos_record(self.db, flickr_row)
+        self.assertIsNotNone(match)
+        self.assertEqual(match["uuid"], "ABC-123")
+
+    def test_no_match_for_different_date(self):
+        from poller.poller import _find_approved_photos_record
+        self.db.upsert_photo({
+            "uuid": "ABC-456",
+            "date_taken": "2024-06-16 10:00:00",
+            "privacy_state": "approved_public",
+        })
+        flickr_row = {"date_taken": "2024-06-17 10:00:00", "flickr_id": "88888"}
+        match = _find_approved_photos_record(self.db, flickr_row)
+        self.assertIsNone(match)
+
+    def test_no_match_when_not_approved(self):
+        from poller.poller import _find_approved_photos_record
+        self.db.upsert_photo({
+            "uuid": "ABC-789",
+            "date_taken": "2024-06-16 10:00:00",
+            "privacy_state": "needs_review",
+        })
+        flickr_row = {"date_taken": "2024-06-16 10:00:00", "flickr_id": "77777"}
+        match = _find_approved_photos_record(self.db, flickr_row)
+        self.assertIsNone(match)
+
+    def test_no_match_when_already_has_flickr_id(self):
+        from poller.poller import _find_approved_photos_record
+        # Record already linked to Flickr should not be re-matched
+        self.db.upsert_photo({
+            "flickr_id": "EXISTING",
+            "date_taken": "2024-06-16 10:00:00",
+            "privacy_state": "approved_public",
+        })
+        flickr_row = {"date_taken": "2024-06-16 10:00:00", "flickr_id": "NEW"}
+        match = _find_approved_photos_record(self.db, flickr_row)
+        self.assertIsNone(match)
+
+    def test_iso8601_date_matches_space_format(self):
+        from poller.poller import _find_approved_photos_record
+        self.db.upsert_photo({
+            "uuid": "DEF-123",
+            "date_taken": "2024-06-16 10:00:00",
+            "privacy_state": "approved_public",
+        })
+        # Flickr may return ISO8601 format
+        flickr_row = {"date_taken": "2024-06-16T10:00:00.000000-04:00", "flickr_id": "66666"}
+        match = _find_approved_photos_record(self.db, flickr_row)
+        self.assertIsNotNone(match)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

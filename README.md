@@ -197,6 +197,14 @@ Photos are automatically classified into one of these states:
 
 Add private locations (home, school, etc.) via the Zones page in the UI. Each zone has a centre point, radius in metres, and a policy (`auto_private`, `flag_review`, or `auto_public`). Apple Photos' own home flag is also used automatically.
 
+## Workflow note: Photos-only approvals
+
+When you approve a photo that exists in Apple Photos but hasn't yet been uploaded to Flickr, Blue Pearmain marks it `approved_public` locally but cannot push anything to Flickr yet — there is no Flickr ID to push to.
+
+Once the Flickr iOS app eventually uploads those photos, the poller will detect the new upload, match it against the existing `approved_public` record by capture timestamp, and automatically push the permissions and tags to Flickr without requiring further action. The approved decision you made earlier is honoured as soon as the photo arrives on Flickr.
+
+Photos that are already on Flickr when you approve them are pushed immediately.
+
 ## Reliability
 
 The Flickr API client uses exponential backoff on transient failures (HTTP 429/5xx, timeouts, connection errors), retrying up to 4 times with 1/2/4/8 second delays before giving up. Permanent errors (invalid method, bad photo ID) raise immediately without retrying. Every API call has a 30-second timeout.

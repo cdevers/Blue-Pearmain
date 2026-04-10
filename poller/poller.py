@@ -250,6 +250,75 @@ def download_thumb(client: FlickrClient, row: dict, thumb_root: Path) -> str | N
 
 
 # ---------------------------------------------------------------------------
+# Auto-push helpers
+# ---------------------------------------------------------------------------
+
+def _find_approved_photos_record(db, flickr_row: dict):
+    """
+    Look for a Photos-only DB record (no flickr_id) with privacy_state
+    'approved_public' that matches this incoming Flickr upload by date_taken.
+    Returns the DB record dict if found, else None.
+    """
+    from poller.scanner import normalise_dt
+    date_taken = normalise_dt(flickr_row.get("date_taken"))
+    if not date_taken:
+        return None
+    row = db.conn.execute(
+        """SELECT * FROM photos
+           WHERE flickr_id IS NULL
+             AND privacy_state = 'approved_public'
+             AND date_taken LIKE ?
+           LIMIT 1""",
+        (f"{date_taken}%",),
+    ).fetchone()
+    if not row:
+        return None
+    import json as _json
+    d = dict(row)
+    for field in ("apple_labels", "apple_persons", "proposed_tags"):
+        if isinstance(d.get(field), str):
+            try:    d[field] = _json.loads(d[field])
+            except: d[field] = []
+    return d
+
+
+def _push_to_flickr(client, flickr_id: str, db_record: dict, db, dry_run: bool):
+    """
+    Push permissions and tags to Flickr for a newly matched approved photo.
+    Records push state in the DB.
+    """
+    from analyzer.tagger import merge_tags
+    errors = []
+
+    try:
+        client.set_permissions(flickr_id, is_public=1)
+        db.conn.execute(
+            "UPDATE photos SET perms_pushed_flickr = 1 WHERE flickr_id = ?",
+            (flickr_id,)
+        )
+        log.info(f"  set_permissions OK for {flickr_id}")
+    except FlickrError as e:
+        log.error(f"  set_permissions failed for {flickr_id}: {e}")
+        errors.append(str(e))
+
+    tags = db_record.get("proposed_tags") or []
+    if tags:
+        try:
+            client.add_tags(flickr_id, tags)
+            db.conn.execute(
+                "UPDATE photos SET tags_pushed_flickr = 1 WHERE flickr_id = ?",
+                (flickr_id,)
+            )
+            log.info(f"  add_tags OK for {flickr_id} ({len(tags)} tags)")
+        except FlickrError as e:
+            log.error(f"  add_tags failed for {flickr_id}: {e}")
+            errors.append(str(e))
+
+    if not errors:
+        db.conn.commit()
+
+
+# ---------------------------------------------------------------------------
 # Main poll loop
 # ---------------------------------------------------------------------------
 
@@ -341,7 +410,21 @@ def poll(
                     db.upsert_photo(row)
                     updated += 1
                 else:
-                    db.upsert_photo(row)
+                    # New Flickr upload — check if there's a matching Photos-only
+                    # record that was already approved. If so, auto-push to Flickr.
+                    matched = _find_approved_photos_record(db, row)
+                    if matched:
+                        log.info(
+                            f"  Auto-push: {flickr_id} matched approved Photos record "
+                            f"(uuid={matched.get('uuid')}) — pushing to Flickr"
+                        )
+                        # Merge Flickr identity into the Photos record
+                        row["privacy_state"]  = "approved_public"
+                        row["privacy_reason"] = "matched approved Photos record"
+                        db.upsert_photo({**row, "id": matched["id"]})
+                        _push_to_flickr(client, flickr_id, matched, db, dry_run=False)
+                    else:
+                        db.upsert_photo(row)
                     new += 1
 
                 # Queue thumbnail download
