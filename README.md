@@ -57,7 +57,8 @@ Apple Photos Library          Flickr (cloud)
 | `reviewer/templates/` | Jinja2 templates (dashboard, review grid, photo detail, faces, zones) |
 | `config/` | Configuration templates and launchd plists |
 | `db/migrate_001_privacy_state_check.py` | One-time DB migration (adds CHECK constraint) |
-| `tests/` | Unit tests (60 tests) |
+| `bp` | Unified command-line entry point |
+| `tests/` | Unit tests (88 tests) |
 
 ## Requirements
 
@@ -83,27 +84,36 @@ python flickr/flickr_auth.py --config config/config.yml
 
 ## Running
 
-Run these once to populate the database initially:
+The `bp` script at the repo root is the unified entry point for all commands:
 
 ```bash
-# Pull recent Flickr uploads into the DB
-python poller/poller.py --config config/config.yml
+chmod +x bp   # once, after cloning
 
-# Scan your entire Apple Photos library and cross-reference with Flickr records
-python poller/scanner.py --config config/config.yml --all
+bp stats                           # Photo counts by privacy state
+bp stats --oneliner                # Single-line summary for watch loops
+bp poll                            # Pull recent Flickr uploads (incremental)
+bp poll --backfill --days 365      # Backfill a year of Flickr history
+bp poll --backfill --days 100000   # Full historical backfill
+bp scan --all                      # Scan entire Apple Photos library
+bp scan                            # Scan recent Photos additions (last 7 days)
+bp thumbs                          # Populate missing thumbnail paths
+bp reconcile                       # Check DB vs actual Flickr state
+bp reconcile --fix                 # Check and repair mismatches
+bp ui                              # Start the review UI (http://localhost:5173)
+```
 
-# Populate thumbnail paths
-python poller/thumbnailer.py --config config/config.yml
+All commands accept `--config PATH` (default: `config/config.yml`) and `--verbose`.
+
+Initial population sequence:
+
+```bash
+bp poll --backfill --days 100000  # Pull full Flickr history into DB
+bp scan --all                     # Cross-reference Apple Photos library
+bp thumbs                         # Cache thumbnail paths
+bp ui                             # Open http://localhost:5173 and start reviewing
 ```
 
 The thumbnailer populates `thumbnail_path` for each photo using the best available source: a locally cached Photos derivative JPEG, a stored Flickr URL, or nothing. When serving thumbnails, the review UI falls back to fetching directly from Flickr's CDN for any matched photo that has a Flickr ID but no local file — so photos that haven't been downloaded from iCloud will still display if they've been uploaded to Flickr. Purely local photos with no Flickr match will show a "no preview" placeholder until iCloud downloads them.
-
-Then start the review UI:
-
-```bash
-python reviewer/app.py --config config/config.yml
-# Open http://localhost:5173
-```
 
 For ongoing use, both the poller and the review UI run as launchd agents — no terminal window required. Create the log directory first, then install both plists:
 
@@ -214,11 +224,8 @@ Write operations (permissions and tags) only update the DB push flags after each
 If you suspect a push operation failed silently, the reconciliation script checks your DB's expected state against what Flickr actually has:
 
 ```bash
-# Report mismatches
-python poller/reconcile.py --config config/config.yml
-
-# Report and fix mismatches
-python poller/reconcile.py --config config/config.yml --fix
+bp reconcile          # Report mismatches
+bp reconcile --fix    # Report and fix mismatches
 ```
 
 **Config validation** — both the poller and reviewer validate required config fields at startup and exit immediately with a readable error message if anything is missing, rather than failing deep in a request.
@@ -226,7 +233,7 @@ python poller/reconcile.py --config config/config.yml --fix
 **Database integrity** — `privacy_state` has a SQL `CHECK` constraint enforcing valid values. If you are upgrading an existing installation, run the migration once:
 
 ```bash
-python db/migrate_001_privacy_state_check.py --config config/config.yml
+python db/migrate_001_privacy_state_check.py --config config/config.yml  # no bp wrapper for one-time migrations
 ```
 
 > **Note:** If any photos have an unrecognised `privacy_state` value (e.g. from manual DB edits or a future code change), the migration will reset them to `needs_review` before adding the constraint. Check the output for any rows that are reset.
@@ -237,7 +244,7 @@ python db/migrate_001_privacy_state_check.py --config config/config.yml
 python tests/test_core.py
 ```
 
-77 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry logic, and batch person actions.
+88 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry logic, batch person actions, and the `bp` CLI entry point.
 
 ## License
 

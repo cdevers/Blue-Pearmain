@@ -960,5 +960,54 @@ class TestFindApprovedPhotosRecord(unittest.TestCase):
         self.assertIsNotNone(match)
 
 
+# ---------------------------------------------------------------------------
+# bp CLI entry point
+# ---------------------------------------------------------------------------
+
+class TestBpCli(unittest.TestCase):
+
+    def _run_bp(self, *args):
+        """Run bp with given args, return (stdout, stderr, exit_code)."""
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, "bp"] + list(args),
+            capture_output=True, text=True,
+            cwd=str(Path(__file__).parent.parent),
+        )
+        return result.stdout, result.stderr, result.returncode
+
+    def test_help(self):
+        stdout, _, code = self._run_bp("--help")
+        self.assertEqual(code, 0)
+        self.assertIn("stats", stdout)
+        self.assertIn("poll", stdout)
+        self.assertIn("reconcile", stdout)
+
+    def test_poll_help(self):
+        stdout, _, code = self._run_bp("poll", "--help")
+        self.assertEqual(code, 0)
+        self.assertIn("--backfill", stdout)
+        self.assertIn("--days", stdout)
+
+    def test_scan_help(self):
+        stdout, _, code = self._run_bp("scan", "--help")
+        self.assertEqual(code, 0)
+        self.assertIn("--all", stdout)
+
+    def test_reconcile_help(self):
+        stdout, _, code = self._run_bp("reconcile", "--help")
+        self.assertEqual(code, 0)
+        self.assertIn("--fix", stdout)
+        self.assertIn("--limit", stdout)
+
+    def test_unknown_command_fails(self):
+        _, _, code = self._run_bp("notacommand")
+        self.assertNotEqual(code, 0)
+
+    def test_stats_missing_config_fails(self):
+        _, stderr, code = self._run_bp("--config", "/nonexistent.yml", "stats")
+        self.assertNotEqual(code, 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

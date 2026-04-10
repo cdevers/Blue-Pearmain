@@ -48,6 +48,33 @@ def cmd_stats(args):
         ("duplicate_flickr",  "Duplicate Flickr"),
     ]
 
+    flickr_linked = db.conn.execute(
+        "SELECT COUNT(*) AS n FROM photos WHERE flickr_id IS NOT NULL"
+    ).fetchone()["n"]
+    db.close()
+
+    if args.oneliner:
+        short = {
+            "candidate_public": "cand",
+            "needs_review":     "review",
+            "approved_public":  "approved",
+            "already_public":   "public",
+            "keep_private":     "private",
+            "auto_private":     "auto",
+            "skipped":          "skip",
+            "duplicate_flickr": "dup",
+        }
+        parts = []
+        for state, _ in order:
+            n = by_state.get(state, 0)
+            if n:
+                parts.append(f"{short[state]}={n}")
+        parts.append(f"total={total}")
+        parts.append(f"flickr={flickr_linked}")
+        parts.append(f"local={total - flickr_linked}")
+        print("  ".join(parts))
+        return
+
     print()
     width = max(len(label) for _, label in order)
     for state, label in order:
@@ -58,11 +85,6 @@ def cmd_stats(args):
     print(f"  {'─' * (width + 11)}")
     print(f"  {'Total':<{width}}  {total:>8,}")
     print()
-
-    flickr_linked = db.conn.execute(
-        "SELECT COUNT(*) AS n FROM photos WHERE flickr_id IS NOT NULL"
-    ).fetchone()["n"]
-    db.close()
     print(f"  Flickr-linked records:  {flickr_linked:>8,}")
     print(f"  Photos-only records:    {total - flickr_linked:>8,}")
     print()
@@ -150,7 +172,8 @@ def main():
     sub.required = True
 
     # stats
-    sub.add_parser("stats", help="Show photo counts by privacy state")
+    p_stats = sub.add_parser("stats", help="Show photo counts by privacy state")
+    p_stats.add_argument("--oneliner", action="store_true", help="Single-line summary for watch/loop use")
 
     # poll
     p_poll = sub.add_parser("poll", help="Poll Flickr for new/updated photos")
@@ -180,6 +203,7 @@ def main():
     args = parser.parse_args()
 
     # Attach config/verbose to all subcommands
+    if not hasattr(args, "oneliner"): args.oneliner = False
     if not hasattr(args, "dry_run"):  args.dry_run = False
     if not hasattr(args, "all"):      args.all = False
     if not hasattr(args, "days"):     args.days = None
