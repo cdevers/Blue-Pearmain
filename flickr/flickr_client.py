@@ -24,10 +24,12 @@ REST_URL = "https://api.flickr.com/services/rest/"
 
 log = logging.getLogger("blue-pearmain.flickr")
 
-# HTTP codes that are transient and worth retrying
+# HTTP codes that are transient and worth retrying.
+# 429 (rate limit) is explicitly here — do not move it to _PERMANENT_HTTP_CODES.
 _TRANSIENT_HTTP_CODES  = {429, 500, 502, 503, 504}
 
-# HTTP codes that are permanent client errors — never retry
+# HTTP codes that are permanent client errors — raise immediately, never retry.
+# Note: 429 is intentionally absent; it belongs in _TRANSIENT_HTTP_CODES above.
 _PERMANENT_HTTP_CODES  = {400, 401, 403, 404, 405, 410}
 
 # Flickr application-level error codes that are transient

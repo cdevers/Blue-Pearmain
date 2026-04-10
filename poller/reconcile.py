@@ -182,46 +182,51 @@ def main():
 
     log.info(f"Checking {total} photos against Flickr...")
 
-    for row in rows:
-        result = check_photo(client, dict(row), fix=args.fix, verbose=args.verbose)
+    try:
+        for row in rows:
+            result = check_photo(client, dict(row), fix=args.fix, verbose=args.verbose)
 
-        if result["status"] == "ok":
-            ok_count += 1
-            if args.verbose:
-                print(f"  ok  {result['flickr_id']}")
+            if result["status"] == "ok":
+                ok_count += 1
+                if args.verbose:
+                    print(f"  ok  {result['flickr_id']}")
 
-        elif result["status"] == "flickr_error":
-            error_count += 1
-            print(f"  ERR {result['flickr_id']}")
-            for e in result["errors"]:
-                print(f"        error:    {e}")
-
-        else:
-            mismatch_count += 1
-            fid = result["flickr_id"]
-            url = f"https://www.flickr.com/photos/cdevers/{fid}"
-            print(f"  [{result['status']}]  {fid}  {url}")
-
-            if result["perm_expected"] and result["perm_expected"] != result["perm_actual"]:
-                print(f"        perm:     expected={result['perm_expected']}"
-                      f"  actual={result['perm_actual']}")
-
-            if result["tags_missing"]:
-                missing_str = ", ".join(result["tags_missing"][:8])
-                extra = f" (+{len(result['tags_missing'])-8} more)" if len(result["tags_missing"]) > 8 else ""
-                print(f"        tags:     missing from Flickr: {missing_str}{extra}")
-
-            if result["fixes"]:
-                fix_ok_count += len(result["fixes"])
-                print(f"        fixed:    {', '.join(result['fixes'])}")
-
-            if result["errors"]:
-                fix_fail_count += len(result["errors"])
+            elif result["status"] == "flickr_error":
+                error_count += 1
+                print(f"  ERR {result['flickr_id']}")
                 for e in result["errors"]:
                     print(f"        error:    {e}")
 
+            else:
+                mismatch_count += 1
+                fid = result["flickr_id"]
+                url = f"https://www.flickr.com/photos/cdevers/{fid}"
+                print(f"  [{result['status']}]  {fid}  {url}")
+
+                if result["perm_expected"] and result["perm_expected"] != result["perm_actual"]:
+                    print(f"        perm:     expected={result['perm_expected']}"
+                          f"  actual={result['perm_actual']}")
+
+                if result["tags_missing"]:
+                    missing_str = ", ".join(result["tags_missing"][:8])
+                    extra = f" (+{len(result['tags_missing'])-8} more)" if len(result["tags_missing"]) > 8 else ""
+                    print(f"        tags:     missing from Flickr: {missing_str}{extra}")
+
+                if result["fixes"]:
+                    fix_ok_count += len(result["fixes"])
+                    print(f"        fixed:    {', '.join(result['fixes'])}")
+
+                if result["errors"]:
+                    fix_fail_count += len(result["errors"])
+                    for e in result["errors"]:
+                        print(f"        error:    {e}")
+
+    except Exception as e:
+        log.error(f"Reconcile interrupted: {e}")
+        error_count += 1
+
     print()
-    # Structured summary — machine-readable and human-readable
+    # Structured summary always emitted — machine-readable and human-readable
     print(
         f"  checked={total}"
         f"  ok={ok_count}"

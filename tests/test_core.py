@@ -927,23 +927,39 @@ class TestFlickrClientRetry(unittest.TestCase):
         self.assertEqual(call_count, 1)
 
     def test_retry_delay_includes_jitter(self):
-        """Retry delay should not be exactly 2^n — jitter must be added."""
+        """Retry delay should include jitter (2^n + random), not bare 2^n."""
         from unittest.mock import patch
-        import requests as req
         c = self._make_client()
         err_resp = self._mock_response(500)
         ok_resp  = self._mock_response(200, {"stat": "ok"})
         sleep_calls = []
+        # Mock random.uniform to return a fixed value so test is deterministic
         with patch.object(c._session, 'get', side_effect=[err_resp, ok_resp]):
             with patch('time.sleep', side_effect=lambda d: sleep_calls.append(d)):
-                c._call("flickr.test.login")
-        # Filter out the 0-second rate_delay sleeps, find the actual retry sleep
+                with patch('flickr.flickr_client.random.uniform', return_value=0.3):
+                    c._call("flickr.test.login")
         retry_sleeps = [d for d in sleep_calls if d > 0]
-        self.assertTrue(retry_sleeps, "Expected at least one non-zero sleep (retry delay)")
+        self.assertTrue(retry_sleeps, "Expected at least one non-zero retry sleep")
         retry_delay = retry_sleeps[0]
-        # First retry: 2^0 + jitter in [0, 0.5) → range [1.0, 1.5)
-        self.assertGreaterEqual(retry_delay, 1.0)
-        self.assertLess(retry_delay, 2.0)
+        # First retry: 2^0 + 0.3 = 1.3 exactly
+        self.assertAlmostEqual(retry_delay, 1.3, places=5)
+
+    def test_429_is_retried_not_treated_as_permanent(self):
+        """429 rate limit must be retried, not raised immediately like 4xx."""
+        from unittest.mock import patch
+        c = self._make_client()
+        rate_limited = self._mock_response(429)
+        ok_resp = self._mock_response(200, {"stat": "ok"})
+        call_count = 0
+        def counting_get(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            return rate_limited if call_count == 1 else ok_resp
+        with patch.object(c._session, 'get', side_effect=counting_get):
+            with patch('time.sleep'):
+                result = c._call("flickr.test.login")
+        self.assertEqual(result["stat"], "ok")
+        self.assertEqual(call_count, 2)  # retried once
 
 
 # ---------------------------------------------------------------------------
@@ -1214,6 +1230,14 @@ class TestReconcileExitCodes(unittest.TestCase):
     def test_api_error_beats_mismatch(self):
         # Errors take priority over plain mismatches
         self.assertEqual(self._exit_code(3, 2, 0, False), 2)
+
+    def test_mixed_mismatch_and_fix_failure_returns_two(self):
+        # With --fix: some fixed, some failed → still exit 2
+        self.assertEqual(self._exit_code(3, 0, 1, True), 2)
+
+    def test_fix_all_success_returns_zero_not_one(self):
+        # With --fix: all mismatches resolved → exit 0, not 1
+        self.assertEqual(self._exit_code(5, 0, 0, True), 0)
 
 
 # ---------------------------------------------------------------------------
