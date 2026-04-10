@@ -257,31 +257,48 @@ def _find_approved_photos_record(db, flickr_row: dict):
     """
     Look for a Photos-only DB record (no flickr_id) with privacy_state
     'approved_public' that matches this incoming Flickr upload by date_taken.
+
+    Both sides are normalized to UTC seconds precision before comparison,
+    handling the different formats Apple Photos and Flickr use:
+      Apple Photos: 2026-04-07T16:35:09.679000-04:00  (ISO8601 + ms + tz)
+      Flickr:       2023-05-06T16:34:28-04:00          (ISO8601, no ms)
+                    2023-05-07 13:03:19                 (space format, no tz)
+
     Returns the DB record dict if found, else None.
     """
     import sys as _sys, os as _os
     _sys.path.insert(0, _os.path.dirname(__file__))
     from scanner import normalise_dt
-    date_taken = normalise_dt(flickr_row.get("date_taken"))
-    if not date_taken:
+
+    # Normalise the incoming Flickr date to UTC, truncated to seconds
+    flickr_dt = normalise_dt(flickr_row.get("date_taken"))
+    if not flickr_dt:
         return None
-    row = db.conn.execute(
+    flickr_dt_prefix = flickr_dt[:19]  # "YYYY-MM-DDTHH:MM:SS"
+
+    # Fetch candidate approved Photos-only records within a 1-second window.
+    # We can't do UTC normalisation in SQLite directly, so we pull candidates
+    # by the date portion and then filter in Python.
+    date_prefix = flickr_dt_prefix[:10]  # "YYYY-MM-DD"
+    candidates = db.conn.execute(
         """SELECT * FROM photos
            WHERE flickr_id IS NULL
              AND privacy_state = 'approved_public'
-             AND date_taken LIKE ?
-           LIMIT 1""",
-        (f"{date_taken}%",),
-    ).fetchone()
-    if not row:
-        return None
+             AND date_taken LIKE ?""",
+        (f"{date_prefix}%",),
+    ).fetchall()
+
     import json as _json
-    d = dict(row)
-    for field in ("apple_labels", "apple_persons", "proposed_tags"):
-        if isinstance(d.get(field), str):
-            try:    d[field] = _json.loads(d[field])
-            except: d[field] = []
-    return d
+    for row in candidates:
+        row_dt = normalise_dt(row["date_taken"])
+        if row_dt and row_dt[:19] == flickr_dt_prefix:
+            d = dict(row)
+            for field in ("apple_labels", "apple_persons", "proposed_tags"):
+                if isinstance(d.get(field), str):
+                    try:    d[field] = _json.loads(d[field])
+                    except: d[field] = []
+            return d
+    return None
 
 
 def _push_to_flickr(client, flickr_id: str, db_record: dict, db, dry_run: bool):

@@ -949,13 +949,29 @@ class TestFindApprovedPhotosRecord(unittest.TestCase):
 
     def test_iso8601_date_matches_space_format(self):
         from poller.poller import _find_approved_photos_record
+        # Apple Photos stores: 2024-06-16T14:00:00.000000+00:00 (UTC)
+        # Flickr returns:       2024-06-16 14:00:00 (UTC, space format)
         self.db.upsert_photo({
             "uuid": "DEF-123",
-            "date_taken": "2024-06-16 10:00:00",
+            "date_taken": "2024-06-16T14:00:00.000000+00:00",
             "privacy_state": "approved_public",
         })
-        # Flickr may return ISO8601 format
-        flickr_row = {"date_taken": "2024-06-16T10:00:00.000000-04:00", "flickr_id": "66666"}
+        flickr_row = {"date_taken": "2024-06-16 14:00:00", "flickr_id": "66666"}
+        match = _find_approved_photos_record(self.db, flickr_row)
+        self.assertIsNotNone(match)
+
+    def test_same_local_time_different_format_matches(self):
+        from poller.poller import _find_approved_photos_record
+        # Both sides record the same local capture time, just formatted differently.
+        # normalise_dt strips timezone offset and milliseconds, keeping local time.
+        # Apple Photos: 2024-06-16T10:00:00.583000-04:00 -> "2024-06-16 10:00:00"
+        # Flickr:       2024-06-16T10:00:00               -> "2024-06-16 10:00:00"
+        self.db.upsert_photo({
+            "uuid": "GHI-123",
+            "date_taken": "2024-06-16T10:00:00.583000-04:00",
+            "privacy_state": "approved_public",
+        })
+        flickr_row = {"date_taken": "2024-06-16T10:00:00", "flickr_id": "55555"}
         match = _find_approved_photos_record(self.db, flickr_row)
         self.assertIsNotNone(match)
 
