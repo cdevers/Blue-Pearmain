@@ -125,8 +125,8 @@ cp config/com.cdevers.blue-pearmain.poller.plist ~/Library/LaunchAgents/
 cp config/com.cdevers.blue-pearmain.reviewer.plist ~/Library/LaunchAgents/
 
 # Edit paths in both plists to match your install location, then:
-launchctl load ~/Library/LaunchAgents/com.cdevers.blue-pearmain.poller.plist
-launchctl load ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.poller.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
 ```
 
 The reviewer starts immediately and restarts automatically if it crashes. The poller runs hourly. Logs are written to `~/Library/Logs/BluePearmain/` and are visible in Console.app:
@@ -141,6 +141,13 @@ To restart either service:
 ```bash
 launchctl stop com.cdevers.blue-pearmain.reviewer
 launchctl start com.cdevers.blue-pearmain.reviewer
+```
+
+If you get "Input/output error" from launchctl (stale state after an unclean stop), use `bootout`/`bootstrap` instead of `unload`/`load`:
+
+```bash
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
 ```
 
 ## Review UI

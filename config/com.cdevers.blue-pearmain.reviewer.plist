@@ -8,7 +8,8 @@
   Install:
     cp config/com.cdevers.blue-pearmain.reviewer.plist \
        ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
-    launchctl load ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
+    launchctl bootstrap gui/$(id -u) \
+       ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
 
   The UI will then be available at http://localhost:5173 after login,
   and launchd will restart it automatically if it crashes.
@@ -21,8 +22,13 @@
     launchctl start com.cdevers.blue-pearmain.reviewer
 
   Uninstall:
-    launchctl unload ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
+    launchctl bootout gui/$(id -u) \
+       ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
     rm ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
+
+  If load/unload give "Input/output error", use bootout/bootstrap instead:
+    launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
 
   Logs:
     tail -f /Users/cdevers/Library/Logs/BluePearmain/reviewer.log

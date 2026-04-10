@@ -8,14 +8,20 @@
   Install:
     cp config/com.cdevers.blue-pearmain.poller.plist \
        ~/Library/LaunchAgents/com.cdevers.blue-pearmain.poller.plist
-    launchctl load ~/Library/LaunchAgents/com.cdevers.blue-pearmain.poller.plist
+    launchctl bootstrap gui/$(id -u) \
+       ~/Library/LaunchAgents/com.cdevers.blue-pearmain.poller.plist
 
   Run now (without waiting for interval):
     launchctl start com.cdevers.blue-pearmain.poller
 
   Uninstall:
-    launchctl unload ~/Library/LaunchAgents/com.cdevers.blue-pearmain.poller.plist
+    launchctl bootout gui/$(id -u) \
+       ~/Library/LaunchAgents/com.cdevers.blue-pearmain.poller.plist
     rm ~/Library/LaunchAgents/com.cdevers.blue-pearmain.poller.plist
+
+  If load/unload give "Input/output error", use bootout/bootstrap instead:
+    launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.poller.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.poller.plist
 
   Logs:
     tail -f /Users/cdevers/Library/Logs/BluePearmain/poller.log
