@@ -168,4 +168,5 @@ CREATE INDEX IF NOT EXISTS idx_photos_location      ON photos(latitude, longitud
 CREATE INDEX IF NOT EXISTS idx_photos_reviewed      ON photos(reviewed_at);
 CREATE INDEX IF NOT EXISTS idx_tag_events_photo     ON tag_events(photo_id);
 CREATE INDEX IF NOT EXISTS idx_photos_push_state    ON photos(privacy_state, perms_pushed_flickr);
+CREATE INDEX IF NOT EXISTS idx_photos_tags_pushed   ON photos(tags_pushed_flickr);
 CREATE INDEX IF NOT EXISTS idx_photos_updated       ON photos(updated_at);

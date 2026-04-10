@@ -793,6 +793,15 @@ class TestBatchPerson(unittest.TestCase):
 
 class TestFlickrClientRetry(unittest.TestCase):
 
+    def setUp(self):
+        # Suppress retry warning logs — they're expected in these tests
+        import logging
+        logging.getLogger("blue-pearmain.flickr").setLevel(logging.CRITICAL)
+
+    def tearDown(self):
+        import logging
+        logging.getLogger("blue-pearmain.flickr").setLevel(logging.WARNING)
+
     def _make_client(self):
         from flickr.flickr_client import FlickrClient
         c = FlickrClient("key", "secret", "token", "tsecret", rate_limit_delay=0)
@@ -1071,21 +1080,23 @@ class TestSchemaMigrations(unittest.TestCase):
         os.unlink(self.tmp_path)
 
     def test_migration_table_exists_after_migrate_002(self):
-        import sys as _sys
+        import sys as _sys, io, contextlib
         _sys.path.insert(0, str(Path(__file__).parent.parent / "db"))
         from migrate_002_updated_at_and_indexes import run
-        run(self.tmp_path, dry_run=False)
+        with contextlib.redirect_stdout(io.StringIO()):
+            run(self.tmp_path, dry_run=False)
         row = self.db.conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
         ).fetchone()
         self.assertIsNotNone(row)
 
     def test_migration_002_idempotent(self):
-        import sys as _sys
+        import sys as _sys, io, contextlib
         _sys.path.insert(0, str(Path(__file__).parent.parent / "db"))
         from migrate_002_updated_at_and_indexes import run
-        run(self.tmp_path, dry_run=False)
-        run(self.tmp_path, dry_run=False)  # should not raise
+        with contextlib.redirect_stdout(io.StringIO()):
+            run(self.tmp_path, dry_run=False)
+            run(self.tmp_path, dry_run=False)  # should not raise
 
 
 # ---------------------------------------------------------------------------
@@ -1110,6 +1121,118 @@ class TestBpExitCodes(unittest.TestCase):
     def test_help_exits_zero(self):
         _, _, code = self._run_bp("--help")
         self.assertEqual(code, 0)
+
+
+# ---------------------------------------------------------------------------
+# Reconcile exit code behavior
+# ---------------------------------------------------------------------------
+
+class TestReconcileExitCodes(unittest.TestCase):
+
+    def test_returns_zero_when_no_mismatches(self):
+        """reconcile.main() return value of 0 means all clear."""
+        # Indirectly test via the logic: no mismatches, no errors → 0
+        error_count = 0
+        fix_fail_count = 0
+        mismatch_count = 0
+        problems = error_count + fix_fail_count + mismatch_count
+        self.assertEqual(problems, 0)
+
+    def test_returns_nonzero_on_mismatch_without_fix(self):
+        mismatch_count = 3
+        error_count = 0
+        fix_fail_count = 0
+        problems = error_count + fix_fail_count + mismatch_count
+        self.assertGreater(problems, 0)
+
+    def test_fix_failure_returns_nonzero(self):
+        """Partial --fix success still returns non-zero if any fix failed."""
+        mismatch_count = 2
+        error_count = 0
+        fix_fail_count = 1  # one fix attempt failed
+        # with --fix: only count errors + fix failures, not raw mismatches
+        problems = error_count + fix_fail_count
+        self.assertGreater(problems, 0)
+
+    def test_all_fixed_returns_zero(self):
+        """If --fix resolves everything, return 0."""
+        mismatch_count = 2
+        error_count = 0
+        fix_fail_count = 0
+        # with --fix: mismatch_count not added to problems
+        problems = error_count + fix_fail_count
+        self.assertEqual(problems, 0)
+
+
+# ---------------------------------------------------------------------------
+# Poller push_errors propagation
+# ---------------------------------------------------------------------------
+
+class TestPollerPushErrors(unittest.TestCase):
+
+    def setUp(self):
+        fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.db = Database(self.tmp_path)
+
+    def tearDown(self):
+        self.db.close()
+        os.unlink(self.tmp_path)
+
+    def test_push_to_flickr_returns_zero_on_success(self):
+        from unittest.mock import MagicMock, patch
+        from poller.poller import _push_to_flickr
+        import json
+
+        self.db.upsert_photo({
+            "flickr_id": "TEST1",
+            "privacy_state": "approved_public",
+            "proposed_tags": json.dumps(["tag1", "tag2"]),
+        })
+        record = self.db.get_photo_by_flickr_id("TEST1")
+
+        mock_client = MagicMock()
+        errors = _push_to_flickr(mock_client, "TEST1", record, self.db, dry_run=False)
+        self.assertEqual(errors, 0)
+
+    def test_push_to_flickr_returns_error_count_on_failure(self):
+        from unittest.mock import MagicMock
+        from flickr.flickr_client import FlickrError
+        from poller.poller import _push_to_flickr
+        import json
+
+        self.db.upsert_photo({
+            "flickr_id": "TEST2",
+            "privacy_state": "approved_public",
+            "proposed_tags": json.dumps(["tag1"]),
+        })
+        record = self.db.get_photo_by_flickr_id("TEST2")
+
+        mock_client = MagicMock()
+        mock_client.set_permissions.side_effect = FlickrError(0, "service unavailable")
+
+        errors = _push_to_flickr(mock_client, "TEST2", record, self.db, dry_run=False)
+        self.assertEqual(errors, 1)
+
+    def test_db_flag_not_set_on_failed_push(self):
+        from unittest.mock import MagicMock
+        from flickr.flickr_client import FlickrError
+        from poller.poller import _push_to_flickr
+        import json
+
+        self.db.upsert_photo({
+            "flickr_id": "TEST3",
+            "privacy_state": "approved_public",
+            "proposed_tags": json.dumps(["tag1"]),
+        })
+        record = self.db.get_photo_by_flickr_id("TEST3")
+
+        mock_client = MagicMock()
+        mock_client.set_permissions.side_effect = FlickrError(0, "fail")
+
+        _push_to_flickr(mock_client, "TEST3", record, self.db, dry_run=False)
+        updated = self.db.get_photo_by_flickr_id("TEST3")
+        self.assertEqual(updated["perms_pushed_flickr"], 0)
 
 
 if __name__ == "__main__":

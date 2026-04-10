@@ -98,6 +98,9 @@ def run(db_path: str, dry_run: bool = False):
             "CREATE INDEX idx_photos_push_state "
             "ON photos(privacy_state, perms_pushed_flickr)"
         ),
+        "idx_photos_tags_pushed": (
+            "CREATE INDEX idx_photos_tags_pushed ON photos(tags_pushed_flickr)"
+        ),
         "idx_photos_updated": (
             "CREATE INDEX idx_photos_updated ON photos(updated_at)"
         ),

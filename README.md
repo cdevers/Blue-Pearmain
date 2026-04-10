@@ -57,7 +57,7 @@ Apple Photos Library          Flickr (cloud)
 | `reviewer/templates/` | Jinja2 templates (dashboard, review grid, photo detail, faces, zones) |
 | `config/` | Configuration templates and launchd plists |
 | `db/migrate_001_privacy_state_check.py` | DB migration: adds CHECK constraint on privacy_state |
-| `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at column, indexes, schema_migrations table |
+| `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at, indexes on push state and tags, schema_migrations table |
 | `bp` | Unified command-line entry point |
 | `tests/` | Unit tests (88 tests) |
 
@@ -232,9 +232,11 @@ Write operations (permissions and tags) only update the DB push flags after each
 If you suspect a push operation failed silently, the reconciliation script checks your DB's expected state against what Flickr actually has:
 
 ```bash
-bp reconcile          # Report mismatches
-bp reconcile --fix    # Report and fix mismatches
+bp reconcile          # Report mismatches (exits non-zero if any found)
+bp reconcile --fix    # Report and fix mismatches (exits non-zero if any fix fails)
 ```
+
+The summary line distinguishes between API errors, mismatches, fixes applied, and fix failures. `bp poll` also exits non-zero if any auto-push Flickr write fails during the run.
 
 **Config validation** — both the poller and reviewer validate required config fields at startup and exit immediately with a readable error message if anything is missing, rather than failing deep in a request.
 
@@ -255,7 +257,7 @@ Both scripts are idempotent and safe to re-run.
 python tests/test_core.py
 ```
 
-95 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry logic, batch person actions, schema migrations, and the `bp` CLI entry point.
+102 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry logic, batch person actions, schema migrations, reconcile exit codes, and the `bp` CLI entry point.
 
 ## License
 

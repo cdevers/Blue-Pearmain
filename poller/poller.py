@@ -301,10 +301,11 @@ def _find_approved_photos_record(db, flickr_row: dict):
     return None
 
 
-def _push_to_flickr(client, flickr_id: str, db_record: dict, db, dry_run: bool):
+def _push_to_flickr(client, flickr_id: str, db_record: dict, db, dry_run: bool) -> int:
     """
     Push permissions and tags to Flickr for a newly matched approved photo.
-    Records push state in the DB.
+    Records push state in the DB only for operations that succeed.
+    Returns the number of failed operations (0 = all ok).
     """
     from analyzer.tagger import merge_tags
     errors = []
@@ -335,6 +336,7 @@ def _push_to_flickr(client, flickr_id: str, db_record: dict, db, dry_run: bool):
 
     if not errors:
         db.conn.commit()
+    return len(errors)
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +357,7 @@ def poll(
     Returns (seen, new, updated) counts.
     """
     zones = db.active_zones()
-    seen = new = updated = 0
+    seen = new = updated = push_errors = 0
     page = 1
 
     while True:
@@ -444,7 +446,7 @@ def poll(
                         row["privacy_reason"] = "matched approved Photos record"
                         row["uuid"]           = matched["uuid"]
                         db.upsert_photo(row)
-                        _push_to_flickr(client, flickr_id, matched, db, dry_run=False)
+                        push_errors += _push_to_flickr(client, flickr_id, matched, db, dry_run=False)
                     else:
                         db.upsert_photo(row)
                     new += 1
@@ -479,7 +481,7 @@ def poll(
             break
         page += 1
 
-    return seen, new, updated
+    return seen, new, updated, push_errors
 
 
 # ---------------------------------------------------------------------------
@@ -589,7 +591,7 @@ def main():
     run_id = None if args.dry_run else db.start_sync_run("flickr_poll")
 
     try:
-        seen, new, updated = poll(
+        seen, new, updated, push_errors = poll(
             client=client,
             db=db,
             thumb_root=thumb_root,
@@ -597,16 +599,22 @@ def main():
             dry_run=args.dry_run,
             fetch_info=args.fetch_info,
         )
-        log.info(f"Poll complete: {seen} seen, {new} new, {updated} updated")
+        summary = f"Poll complete: {seen} seen, {new} new, {updated} updated"
+        if push_errors:
+            summary += f", {push_errors} push error(s)"
+        log.info(summary)
 
         if run_id:
             db.finish_sync_run(
                 run_id,
-                status="complete",
+                status="complete" if not push_errors else "complete_with_errors",
                 photos_seen=seen,
                 photos_new=new,
                 photos_updated=updated,
             )
+
+        if push_errors:
+            sys.exit(1)
 
     except KeyboardInterrupt:
         log.info("Interrupted.")

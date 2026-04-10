@@ -173,8 +173,12 @@ def main():
         (args.limit,)
     ).fetchall()
 
-    total    = len(rows)
-    ok_count = mismatch_count = error_count = 0
+    total      = len(rows)
+    ok_count   = 0
+    mismatch_count = 0
+    error_count    = 0
+    fix_ok_count   = 0
+    fix_fail_count = 0
 
     log.info(f"Checking {total} photos against Flickr...")
 
@@ -208,23 +212,38 @@ def main():
                 print(f"        tags:     missing from Flickr: {missing_str}{extra}")
 
             if result["fixes"]:
+                fix_ok_count += len(result["fixes"])
                 print(f"        fixed:    {', '.join(result['fixes'])}")
 
             if result["errors"]:
+                fix_fail_count += len(result["errors"])
                 for e in result["errors"]:
                     print(f"        error:    {e}")
 
     print()
-    log.info(
-        f"Done: {ok_count} ok, {mismatch_count} mismatches, {error_count} errors "
-        f"(out of {total} checked)"
-    )
+    if args.fix:
+        log.info(
+            f"Done: {ok_count} ok, {mismatch_count} mismatches, {error_count} api-errors "
+            f"{fix_ok_count} fixed, {fix_fail_count} fix-failures "
+            f"(out of {total} checked)"
+        )
+    else:
+        log.info(
+            f"Done: {ok_count} ok, {mismatch_count} mismatches, {error_count} errors "
+            f"(out of {total} checked)"
+        )
 
     if mismatch_count > 0 and not args.fix:
         log.info("Run with --fix to attempt automatic repair.")
 
     db.close()
-    return mismatch_count + error_count  # non-zero exit if problems found
+    # Non-zero exit if there's anything still wrong:
+    #   - without --fix: any mismatch or API error
+    #   - with --fix: any fix failure or API error (fully-fixed mismatches are ok)
+    problems = error_count + fix_fail_count
+    if not args.fix:
+        problems += mismatch_count
+    return problems
 
 
 if __name__ == "__main__":
