@@ -259,7 +259,9 @@ def _find_approved_photos_record(db, flickr_row: dict):
     'approved_public' that matches this incoming Flickr upload by date_taken.
     Returns the DB record dict if found, else None.
     """
-    from poller.scanner import normalise_dt
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.dirname(__file__))
+    from scanner import normalise_dt
     date_taken = normalise_dt(flickr_row.get("date_taken"))
     if not date_taken:
         return None
