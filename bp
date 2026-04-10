@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+"""
+bp — Blue Pearmain command-line interface
+
+Usage:
+    bp stats                        Show photo counts by privacy state
+    bp poll [--backfill] [--days N] Poll Flickr for new/updated photos
+    bp scan [--all] [--days N]      Scan Apple Photos library
+    bp thumbs                       Populate missing thumbnail paths
+    bp reconcile [--fix] [--limit N] Check DB state vs actual Flickr state
+    bp ui                           Start the review UI (http://localhost:5173)
+
+Global options:
+    --config PATH   Path to config.yml (default: config/config.yml)
+    --verbose       Extra logging
+
+Run 'bp <subcommand> --help' for subcommand-specific options.
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+# Ensure the repo root is on the path regardless of where bp is invoked from
+ROOT = Path(__file__).parent.resolve()
+sys.path.insert(0, str(ROOT))
+
+
+def cmd_stats(args):
+    import yaml
+    from db.db import Database
+
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+    db = Database(Path(config["database"]["path"]).expanduser())
+    s = db.stats()
+
+    by_state = s["by_state"]
+    total    = s["total"]
+    order = [
+        ("candidate_public",  "Candidate public"),
+        ("needs_review",      "Needs review"),
+        ("approved_public",   "Approved public"),
+        ("already_public",    "Already public"),
+        ("keep_private",      "Keep private"),
+        ("auto_private",      "Auto private"),
+        ("skipped",           "Skipped"),
+        ("duplicate_flickr",  "Duplicate Flickr"),
+    ]
+
+    print()
+    width = max(len(label) for _, label in order)
+    for state, label in order:
+        n = by_state.get(state, 0)
+        if n:
+            print(f"  {label:<{width}}  {n:>8,}")
+
+    print(f"  {'─' * (width + 11)}")
+    print(f"  {'Total':<{width}}  {total:>8,}")
+    print()
+
+    flickr_linked = db.conn.execute(
+        "SELECT COUNT(*) AS n FROM photos WHERE flickr_id IS NOT NULL"
+    ).fetchone()["n"]
+    db.close()
+    print(f"  Flickr-linked records:  {flickr_linked:>8,}")
+    print(f"  Photos-only records:    {total - flickr_linked:>8,}")
+    print()
+
+
+def cmd_poll(args):
+    # Delegate to poller.main() after injecting sys.argv
+    import importlib.util, types
+    _inject_argv(args, [
+        ("--config",   args.config),
+        ("--backfill", args.backfill),
+        ("--days",     str(args.days) if args.days else None),
+        ("--verbose",  args.verbose),
+        ("--dry-run",  args.dry_run),
+    ])
+    from poller.poller import main
+    main()
+
+
+def cmd_scan(args):
+    _inject_argv(args, [
+        ("--config",  args.config),
+        ("--all",     args.all),
+        ("--days",    str(args.days) if args.days else None),
+        ("--verbose", args.verbose),
+        ("--dry-run", args.dry_run),
+    ])
+    from poller.scanner import main
+    main()
+
+
+def cmd_thumbs(args):
+    _inject_argv(args, [
+        ("--config",  args.config),
+        ("--verbose", args.verbose),
+    ])
+    from poller.thumbnailer import main
+    main()
+
+
+def cmd_reconcile(args):
+    _inject_argv(args, [
+        ("--config",  args.config),
+        ("--fix",     args.fix),
+        ("--limit",   str(args.limit) if args.limit else None),
+        ("--verbose", args.verbose),
+    ])
+    from poller.reconcile import main
+    sys.exit(main() or 0)
+
+
+def cmd_ui(args):
+    _inject_argv(args, [
+        ("--config", args.config),
+        ("--port",   str(args.port)),
+        ("--debug",  args.debug),
+    ])
+    from reviewer.app import main
+    main()
+
+
+def _inject_argv(args, pairs):
+    """Rebuild sys.argv from parsed args so subcommand main()s parse correctly."""
+    new_argv = [sys.argv[0]]
+    for flag, value in pairs:
+        if value is None or value is False:
+            continue
+        if value is True:
+            new_argv.append(flag)
+        else:
+            new_argv.extend([flag, value])
+    sys.argv = new_argv
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="bp",
+        description="Blue Pearmain — Flickr + Apple Photos review tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--config",  default="config/config.yml", help="Path to config.yml")
+    parser.add_argument("--verbose", action="store_true")
+
+    sub = parser.add_subparsers(dest="command", metavar="<command>")
+    sub.required = True
+
+    # stats
+    sub.add_parser("stats", help="Show photo counts by privacy state")
+
+    # poll
+    p_poll = sub.add_parser("poll", help="Poll Flickr for new/updated photos")
+    p_poll.add_argument("--backfill", action="store_true", help="Poll full history, not just recent")
+    p_poll.add_argument("--days",     type=int, default=None, help="Days to look back (with --backfill)")
+    p_poll.add_argument("--dry-run",  action="store_true")
+
+    # scan
+    p_scan = sub.add_parser("scan", help="Scan Apple Photos library")
+    p_scan.add_argument("--all",     action="store_true", help="Scan entire library")
+    p_scan.add_argument("--days",    type=int, default=None)
+    p_scan.add_argument("--dry-run", action="store_true")
+
+    # thumbs
+    sub.add_parser("thumbs", help="Populate missing thumbnail paths")
+
+    # reconcile
+    p_rec = sub.add_parser("reconcile", help="Check DB state vs actual Flickr state")
+    p_rec.add_argument("--fix",   action="store_true", help="Re-push mismatches")
+    p_rec.add_argument("--limit", type=int, default=None)
+
+    # ui
+    p_ui = sub.add_parser("ui", help="Start the review UI")
+    p_ui.add_argument("--port",  type=int, default=5173)
+    p_ui.add_argument("--debug", action="store_true")
+
+    args = parser.parse_args()
+
+    # Attach config/verbose to all subcommands
+    if not hasattr(args, "dry_run"):  args.dry_run = False
+    if not hasattr(args, "all"):      args.all = False
+    if not hasattr(args, "days"):     args.days = None
+    if not hasattr(args, "backfill"): args.backfill = False
+    if not hasattr(args, "fix"):      args.fix = False
+    if not hasattr(args, "limit"):    args.limit = None
+    if not hasattr(args, "port"):     args.port = 5173
+    if not hasattr(args, "debug"):    args.debug = False
+
+    dispatch = {
+        "stats":     cmd_stats,
+        "poll":      cmd_poll,
+        "scan":      cmd_scan,
+        "thumbs":    cmd_thumbs,
+        "reconcile": cmd_reconcile,
+        "ui":        cmd_ui,
+    }
+    dispatch[args.command](args)
+
+
+if __name__ == "__main__":
+    main()
