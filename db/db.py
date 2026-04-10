@@ -110,6 +110,7 @@ class Database:
                 data[field] = json.dumps(data[field])
 
         data.setdefault("date_synced", _now_iso())
+        data["updated_at"] = _now_iso()  # always stamp on every write
 
         # Determine lookup key — try uuid first, then flickr_id.
         # When both are present (scanner enriching a Flickr record), we must

@@ -1025,5 +1025,92 @@ class TestBpCli(unittest.TestCase):
         self.assertNotEqual(code, 0)
 
 
+# ---------------------------------------------------------------------------
+# updated_at stamping
+# ---------------------------------------------------------------------------
+
+class TestUpdatedAt(unittest.TestCase):
+
+    def setUp(self):
+        fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.db = Database(self.tmp_path)
+
+    def tearDown(self):
+        self.db.close()
+        os.unlink(self.tmp_path)
+
+    def test_updated_at_set_on_insert(self):
+        self.db.upsert_photo({"flickr_id": "U1", "privacy_state": "needs_review"})
+        row = self.db.get_photo_by_flickr_id("U1")
+        self.assertIsNotNone(row["updated_at"])
+
+    def test_updated_at_changes_on_update(self):
+        import time
+        self.db.upsert_photo({"flickr_id": "U2", "privacy_state": "needs_review"})
+        first = self.db.get_photo_by_flickr_id("U2")["updated_at"]
+        time.sleep(0.01)
+        self.db.upsert_photo({"flickr_id": "U2", "privacy_state": "candidate_public"})
+        second = self.db.get_photo_by_flickr_id("U2")["updated_at"]
+        self.assertGreater(second, first)
+
+
+# ---------------------------------------------------------------------------
+# schema_migrations table
+# ---------------------------------------------------------------------------
+
+class TestSchemaMigrations(unittest.TestCase):
+
+    def setUp(self):
+        fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.db = Database(self.tmp_path)
+
+    def tearDown(self):
+        self.db.close()
+        os.unlink(self.tmp_path)
+
+    def test_migration_table_exists_after_migrate_002(self):
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).parent.parent / "db"))
+        from migrate_002_updated_at_and_indexes import run
+        run(self.tmp_path, dry_run=False)
+        row = self.db.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+        ).fetchone()
+        self.assertIsNotNone(row)
+
+    def test_migration_002_idempotent(self):
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).parent.parent / "db"))
+        from migrate_002_updated_at_and_indexes import run
+        run(self.tmp_path, dry_run=False)
+        run(self.tmp_path, dry_run=False)  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# bp exit codes
+# ---------------------------------------------------------------------------
+
+class TestBpExitCodes(unittest.TestCase):
+
+    def _run_bp(self, *args):
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, "bp"] + list(args),
+            capture_output=True, text=True,
+            cwd=str(Path(__file__).parent.parent),
+        )
+        return result.stdout, result.stderr, result.returncode
+
+    def test_bad_config_exits_nonzero(self):
+        _, _, code = self._run_bp("--config", "/nonexistent.yml", "stats")
+        self.assertNotEqual(code, 0)
+
+    def test_help_exits_zero(self):
+        _, _, code = self._run_bp("--help")
+        self.assertEqual(code, 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

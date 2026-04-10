@@ -56,7 +56,8 @@ Apple Photos Library          Flickr (cloud)
 | `reviewer/app.py` | Flask web UI |
 | `reviewer/templates/` | Jinja2 templates (dashboard, review grid, photo detail, faces, zones) |
 | `config/` | Configuration templates and launchd plists |
-| `db/migrate_001_privacy_state_check.py` | One-time DB migration (adds CHECK constraint) |
+| `db/migrate_001_privacy_state_check.py` | DB migration: adds CHECK constraint on privacy_state |
+| `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at column, indexes, schema_migrations table |
 | `bp` | Unified command-line entry point |
 | `tests/` | Unit tests (88 tests) |
 
@@ -230,13 +231,16 @@ bp reconcile --fix    # Report and fix mismatches
 
 **Config validation** — both the poller and reviewer validate required config fields at startup and exit immediately with a readable error message if anything is missing, rather than failing deep in a request.
 
-**Database integrity** — `privacy_state` has a SQL `CHECK` constraint enforcing valid values. If you are upgrading an existing installation, run the migration once:
+**Database integrity** — `privacy_state` has a SQL `CHECK` constraint enforcing valid values. Applied migrations are tracked in the `schema_migrations` table. If you are upgrading an existing installation, run both migrations in order:
 
 ```bash
-python db/migrate_001_privacy_state_check.py --config config/config.yml  # no bp wrapper for one-time migrations
+python db/migrate_001_privacy_state_check.py --config config/config.yml
+python db/migrate_002_updated_at_and_indexes.py --config config/config.yml
 ```
 
-> **Note:** If any photos have an unrecognised `privacy_state` value (e.g. from manual DB edits or a future code change), the migration will reset them to `needs_review` before adding the constraint. Check the output for any rows that are reset.
+Both scripts are idempotent and safe to re-run.
+
+> **Note (migration 001):** If any photos have an unrecognised `privacy_state` value (e.g. from manual DB edits or a future code change), the migration will reset them to `needs_review` before adding the constraint. Check the output for any rows that are reset.
 
 ## Tests
 
@@ -244,7 +248,7 @@ python db/migrate_001_privacy_state_check.py --config config/config.yml  # no bp
 python tests/test_core.py
 ```
 
-88 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry logic, batch person actions, and the `bp` CLI entry point.
+95 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry logic, batch person actions, schema migrations, and the `bp` CLI entry point.
 
 ## License
 

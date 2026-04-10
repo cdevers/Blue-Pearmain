@@ -88,7 +88,8 @@ CREATE TABLE IF NOT EXISTS photos (
     -- Review tracking
     reviewed_at             TEXT,                   -- ISO8601
     review_decision         TEXT,                   -- 'make_public' | 'keep_private' | 'skip'
-    review_notes            TEXT                    -- optional freeform notes
+    review_notes            TEXT,                   -- optional freeform notes
+    updated_at              TEXT                    -- ISO8601, last time this row was written
 );
 
 
@@ -145,6 +146,17 @@ CREATE TABLE IF NOT EXISTS tag_events (
 
 
 -- ============================================================
+-- Schema migrations: tracks which migrations have been applied
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,  -- e.g. "migrate_001_privacy_state_check"
+    applied_at  TEXT NOT NULL          -- ISO8601
+);
+
+
+-- ============================================================
 -- Indexes
 -- ============================================================
 
@@ -155,3 +167,5 @@ CREATE INDEX IF NOT EXISTS idx_photos_date_taken    ON photos(date_taken);
 CREATE INDEX IF NOT EXISTS idx_photos_location      ON photos(latitude, longitude);
 CREATE INDEX IF NOT EXISTS idx_photos_reviewed      ON photos(reviewed_at);
 CREATE INDEX IF NOT EXISTS idx_tag_events_photo     ON tag_events(photo_id);
+CREATE INDEX IF NOT EXISTS idx_photos_push_state    ON photos(privacy_state, perms_pushed_flickr);
+CREATE INDEX IF NOT EXISTS idx_photos_updated       ON photos(updated_at);

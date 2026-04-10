@@ -97,60 +97,67 @@ def cmd_stats(args):
     print()
 
 
+def _run(fn, args, pairs):
+    """Inject argv, call fn(), propagate non-zero exit codes."""
+    _inject_argv(args, pairs)
+    try:
+        result = fn()
+        if isinstance(result, int) and result != 0:
+            sys.exit(result)
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_poll(args):
-    # Delegate to poller.main() after injecting sys.argv
-    import importlib.util, types
-    _inject_argv(args, [
+    from poller.poller import main
+    _run(main, args, [
         ("--config",   args.config),
         ("--backfill", args.backfill),
         ("--days",     str(args.days) if args.days else None),
         ("--verbose",  args.verbose),
         ("--dry-run",  args.dry_run),
     ])
-    from poller.poller import main
-    main()
 
 
 def cmd_scan(args):
-    _inject_argv(args, [
+    from poller.scanner import main
+    _run(main, args, [
         ("--config",  args.config),
         ("--all",     args.all),
         ("--days",    str(args.days) if args.days else None),
         ("--verbose", args.verbose),
         ("--dry-run", args.dry_run),
     ])
-    from poller.scanner import main
-    main()
 
 
 def cmd_thumbs(args):
-    _inject_argv(args, [
+    from poller.thumbnailer import main
+    _run(main, args, [
         ("--config",  args.config),
         ("--verbose", args.verbose),
     ])
-    from poller.thumbnailer import main
-    main()
 
 
 def cmd_reconcile(args):
-    _inject_argv(args, [
+    from poller.reconcile import main
+    _run(main, args, [
         ("--config",  args.config),
         ("--fix",     args.fix),
         ("--limit",   str(args.limit) if args.limit else None),
         ("--verbose", args.verbose),
     ])
-    from poller.reconcile import main
-    sys.exit(main() or 0)
 
 
 def cmd_ui(args):
-    _inject_argv(args, [
+    from reviewer.app import main
+    _run(main, args, [
         ("--config", args.config),
         ("--port",   str(args.port)),
         ("--debug",  args.debug),
     ])
-    from reviewer.app import main
-    main()
 
 
 def _inject_argv(args, pairs):
