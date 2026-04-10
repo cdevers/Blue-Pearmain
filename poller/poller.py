@@ -437,10 +437,13 @@ def poll(
                             f"  Auto-push: {flickr_id} matched approved Photos record "
                             f"(uuid={matched.get('uuid')}) — pushing to Flickr"
                         )
-                        # Merge Flickr identity into the Photos record
+                        # Merge Flickr identity into the Photos record.
+                        # Pass uuid so upsert_photo finds the existing row via
+                        # the uuid unique constraint rather than inserting a new one.
                         row["privacy_state"]  = "approved_public"
                         row["privacy_reason"] = "matched approved Photos record"
-                        db.upsert_photo({**row, "id": matched["id"]})
+                        row["uuid"]           = matched["uuid"]
+                        db.upsert_photo(row)
                         _push_to_flickr(client, flickr_id, matched, db, dry_run=False)
                     else:
                         db.upsert_photo(row)
