@@ -89,8 +89,8 @@ The `bp` script at the repo root is the unified entry point for all commands:
 ```bash
 chmod +x bp   # once, after cloning
 
-bp stats                           # Photo counts by privacy state
-bp stats --oneliner                # Single-line summary for watch loops
+bp stats                           # Photo counts by privacy state (includes approved+pushed count)
+bp stats --oneliner                # Single-line summary for watch loops (includes pushed=N)
 bp poll                            # Pull recent Flickr uploads (incremental)
 bp poll --backfill --days 365      # Backfill a year of Flickr history
 bp poll --backfill --days 100000   # Full historical backfill

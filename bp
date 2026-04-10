@@ -51,6 +51,11 @@ def cmd_stats(args):
     flickr_linked = db.conn.execute(
         "SELECT COUNT(*) AS n FROM photos WHERE flickr_id IS NOT NULL"
     ).fetchone()["n"]
+    pushed = db.conn.execute(
+        """SELECT COUNT(*) AS n FROM photos
+           WHERE privacy_state = 'approved_public'
+             AND perms_pushed_flickr = 1"""
+    ).fetchone()["n"]
     db.close()
 
     if args.oneliner:
@@ -72,6 +77,7 @@ def cmd_stats(args):
         parts.append(f"total={total}")
         parts.append(f"flickr={flickr_linked}")
         parts.append(f"local={total - flickr_linked}")
+        parts.append(f"pushed={pushed}")
         print("  ".join(parts))
         return
 
@@ -87,6 +93,7 @@ def cmd_stats(args):
     print()
     print(f"  Flickr-linked records:  {flickr_linked:>8,}")
     print(f"  Photos-only records:    {total - flickr_linked:>8,}")
+    print(f"  Approved + pushed:      {pushed:>8,}")
     print()
 
 
