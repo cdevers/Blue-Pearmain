@@ -79,34 +79,34 @@
   <div class="stat-grid">
     <div class="stat-card">
       <a href="{{ url_for('review', state='candidate_public') }}">
-        <div class="n n-candidate">{{ stats.by_state.get('candidate_public', 0) | int | format(',d') }}</div>
+        <div class="n n-candidate">{{ stats.by_state.get('candidate_public', 0) | int }}</div>
         <div class="label">Candidate public</div>
       </a>
     </div>
     <div class="stat-card">
       <a href="{{ url_for('review', state='needs_review') }}">
-        <div class="n n-review">{{ stats.by_state.get('needs_review', 0) | int | format(',d') }}</div>
+        <div class="n n-review">{{ stats.by_state.get('needs_review', 0) | int }}</div>
         <div class="label">Needs review</div>
       </a>
     </div>
     <div class="stat-card">
-      <div class="n n-private">{{ stats.by_state.get('auto_private', 0) | int | format(',d') }}</div>
+      <div class="n n-private">{{ stats.by_state.get('auto_private', 0) | int }}</div>
       <div class="label">Auto private</div>
     </div>
     <div class="stat-card">
       <a href="{{ url_for('review', state='approved_public') }}">
-        <div class="n n-public">{{ stats.by_state.get('approved_public', 0) | int | format(',d') }}</div>
+        <div class="n n-public">{{ stats.by_state.get('approved_public', 0) | int }}</div>
         <div class="label">Approved public</div>
       </a>
     </div>
     <div class="stat-card">
       <a href="{{ url_for('review', state='already_public') }}">
-        <div class="n n-public">{{ stats.by_state.get('already_public', 0) | int | format(',d') }}</div>
+        <div class="n n-public">{{ stats.by_state.get('already_public', 0) | int }}</div>
         <div class="label">Already public</div>
       </a>
     </div>
     <div class="stat-card">
-      <div class="n n-total">{{ stats.total | int | format(',d') }}</div>
+      <div class="n n-total">{{ stats.total | int }}</div>
       <div class="label">Total photos</div>
     </div>
   </div>
