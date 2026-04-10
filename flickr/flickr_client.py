@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import random
 import time
 from typing import Any
 
@@ -23,8 +24,11 @@ REST_URL = "https://api.flickr.com/services/rest/"
 
 log = logging.getLogger("blue-pearmain.flickr")
 
-# Flickr API error codes that are transient and worth retrying
-_TRANSIENT_HTTP_CODES = {429, 500, 502, 503, 504}
+# HTTP codes that are transient and worth retrying
+_TRANSIENT_HTTP_CODES  = {429, 500, 502, 503, 504}
+
+# HTTP codes that are permanent client errors — never retry
+_PERMANENT_HTTP_CODES  = {400, 401, 403, 404, 405, 410}
 
 # Flickr application-level error codes that are transient
 _TRANSIENT_FLICKR_CODES = {
@@ -111,7 +115,11 @@ class FlickrClient:
             return self._retry(method, params, http_method, max_retries, _attempt,
                                reason="connection error")
 
-        # HTTP-level transient errors (rate limit, server error)
+        # Permanent client errors — raise immediately, no retry
+        if resp.status_code in _PERMANENT_HTTP_CODES:
+            resp.raise_for_status()  # raises requests.HTTPError
+
+        # Transient server errors — retry with backoff
         if resp.status_code in _TRANSIENT_HTTP_CODES:
             return self._retry(method, params, http_method, max_retries, _attempt,
                                reason=f"HTTP {resp.status_code}")
@@ -145,10 +153,10 @@ class FlickrClient:
         if attempt >= max_retries:
             log.error(f"Flickr {method}{context} failed after {max_retries} retries ({reason})")
             raise FlickrError(-1, f"Flickr call failed after {max_retries} retries ({reason})")
-        delay = 2 ** attempt  # 1, 2, 4, 8 seconds
+        delay = 2 ** attempt + random.uniform(0, 0.5)  # 1-1.5, 2-2.5, 4-4.5, 8-8.5s
         log.warning(
             f"Flickr {method}{context} failed ({reason}), "
-            f"retry {attempt + 1}/{max_retries} in {delay}s"
+            f"retry {attempt + 1}/{max_retries} in {delay:.1f}s"
         )
         time.sleep(delay)
         return self._call(method, params, http_method, max_retries, attempt + 1)

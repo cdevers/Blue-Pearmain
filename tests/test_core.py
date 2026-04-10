@@ -892,6 +892,59 @@ class TestFlickrClientRetry(unittest.TestCase):
                 result = c._call("flickr.test.login")
         self.assertEqual(result["stat"], "ok")
 
+    def test_404_raises_immediately_without_retry(self):
+        """HTTP 404 is a permanent error — should raise, not retry."""
+        from unittest.mock import patch, MagicMock
+        import requests as req
+        c = self._make_client()
+        not_found = self._mock_response(404)
+        call_count = 0
+        def counting_get(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            return not_found
+        with patch.object(c._session, 'get', side_effect=counting_get):
+            with patch('time.sleep'):
+                with self.assertRaises(req.HTTPError):
+                    c._call("flickr.photos.getInfo")
+        self.assertEqual(call_count, 1)  # no retries
+
+    def test_403_raises_immediately_without_retry(self):
+        """HTTP 403 is a permanent error — should raise, not retry."""
+        from unittest.mock import patch
+        import requests as req
+        c = self._make_client()
+        forbidden = self._mock_response(403)
+        call_count = 0
+        def counting_get(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            return forbidden
+        with patch.object(c._session, 'get', side_effect=counting_get):
+            with patch('time.sleep'):
+                with self.assertRaises(req.HTTPError):
+                    c._call("flickr.photos.getInfo")
+        self.assertEqual(call_count, 1)
+
+    def test_retry_delay_includes_jitter(self):
+        """Retry delay should not be exactly 2^n — jitter must be added."""
+        from unittest.mock import patch
+        import requests as req
+        c = self._make_client()
+        err_resp = self._mock_response(500)
+        ok_resp  = self._mock_response(200, {"stat": "ok"})
+        sleep_calls = []
+        with patch.object(c._session, 'get', side_effect=[err_resp, ok_resp]):
+            with patch('time.sleep', side_effect=lambda d: sleep_calls.append(d)):
+                c._call("flickr.test.login")
+        # Filter out the 0-second rate_delay sleeps, find the actual retry sleep
+        retry_sleeps = [d for d in sleep_calls if d > 0]
+        self.assertTrue(retry_sleeps, "Expected at least one non-zero sleep (retry delay)")
+        retry_delay = retry_sleeps[0]
+        # First retry: 2^0 + jitter in [0, 0.5) → range [1.0, 1.5)
+        self.assertGreaterEqual(retry_delay, 1.0)
+        self.assertLess(retry_delay, 2.0)
+
 
 # ---------------------------------------------------------------------------
 # Poller auto-push: approved Photos record matched to new Flickr upload
@@ -1128,40 +1181,39 @@ class TestBpExitCodes(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestReconcileExitCodes(unittest.TestCase):
+    """
+    Exit code contract:
+      0 = clean
+      1 = mismatches found (without --fix)
+      2 = operational errors (API failures, fix failures)
+    """
 
-    def test_returns_zero_when_no_mismatches(self):
-        """reconcile.main() return value of 0 means all clear."""
-        # Indirectly test via the logic: no mismatches, no errors → 0
-        error_count = 0
-        fix_fail_count = 0
-        mismatch_count = 0
-        problems = error_count + fix_fail_count + mismatch_count
-        self.assertEqual(problems, 0)
+    def _exit_code(self, mismatch_count, error_count, fix_fail_count, is_fix):
+        """Mirror the exit code logic from reconcile.main()."""
+        if error_count or fix_fail_count:
+            return 2
+        if mismatch_count and not is_fix:
+            return 1
+        return 0
 
-    def test_returns_nonzero_on_mismatch_without_fix(self):
-        mismatch_count = 3
-        error_count = 0
-        fix_fail_count = 0
-        problems = error_count + fix_fail_count + mismatch_count
-        self.assertGreater(problems, 0)
+    def test_clean_returns_zero(self):
+        self.assertEqual(self._exit_code(0, 0, 0, False), 0)
 
-    def test_fix_failure_returns_nonzero(self):
-        """Partial --fix success still returns non-zero if any fix failed."""
-        mismatch_count = 2
-        error_count = 0
-        fix_fail_count = 1  # one fix attempt failed
-        # with --fix: only count errors + fix failures, not raw mismatches
-        problems = error_count + fix_fail_count
-        self.assertGreater(problems, 0)
+    def test_mismatch_without_fix_returns_one(self):
+        self.assertEqual(self._exit_code(3, 0, 0, False), 1)
 
-    def test_all_fixed_returns_zero(self):
-        """If --fix resolves everything, return 0."""
-        mismatch_count = 2
-        error_count = 0
-        fix_fail_count = 0
-        # with --fix: mismatch_count not added to problems
-        problems = error_count + fix_fail_count
-        self.assertEqual(problems, 0)
+    def test_mismatch_with_fix_and_all_fixed_returns_zero(self):
+        self.assertEqual(self._exit_code(2, 0, 0, True), 0)
+
+    def test_api_error_returns_two(self):
+        self.assertEqual(self._exit_code(0, 1, 0, False), 2)
+
+    def test_fix_failure_returns_two(self):
+        self.assertEqual(self._exit_code(2, 0, 1, True), 2)
+
+    def test_api_error_beats_mismatch(self):
+        # Errors take priority over plain mismatches
+        self.assertEqual(self._exit_code(3, 2, 0, False), 2)
 
 
 # ---------------------------------------------------------------------------

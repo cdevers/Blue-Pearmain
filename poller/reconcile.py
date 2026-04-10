@@ -221,29 +221,29 @@ def main():
                     print(f"        error:    {e}")
 
     print()
-    if args.fix:
-        log.info(
-            f"Done: {ok_count} ok, {mismatch_count} mismatches, {error_count} api-errors "
-            f"{fix_ok_count} fixed, {fix_fail_count} fix-failures "
-            f"(out of {total} checked)"
-        )
-    else:
-        log.info(
-            f"Done: {ok_count} ok, {mismatch_count} mismatches, {error_count} errors "
-            f"(out of {total} checked)"
-        )
+    # Structured summary — machine-readable and human-readable
+    print(
+        f"  checked={total}"
+        f"  ok={ok_count}"
+        f"  mismatched={mismatch_count}"
+        + (f"  fixed={fix_ok_count}  fix-failed={fix_fail_count}" if args.fix else "")
+        + f"  api-errors={error_count}"
+    )
 
     if mismatch_count > 0 and not args.fix:
-        log.info("Run with --fix to attempt automatic repair.")
+        print("  → Run with --fix to attempt automatic repair.")
 
     db.close()
-    # Non-zero exit if there's anything still wrong:
-    #   - without --fix: any mismatch or API error
-    #   - with --fix: any fix failure or API error (fully-fixed mismatches are ok)
-    problems = error_count + fix_fail_count
-    if not args.fix:
-        problems += mismatch_count
-    return problems
+    # Exit code differentiation:
+    #   0 = clean (no mismatches, no errors)
+    #   1 = mismatches found (without --fix), or unfixed mismatches remain (with --fix)
+    #   2 = operational errors (API failures, fix failures)
+    # This lets callers distinguish "needs attention" from "broken".
+    if error_count or fix_fail_count:
+        return 2
+    if mismatch_count and not args.fix:
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
