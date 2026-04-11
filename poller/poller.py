@@ -331,8 +331,16 @@ def _push_to_flickr(client, flickr_id: str, db_record: dict, db, dry_run: bool) 
             )
             log.info(f"  add_tags OK for {flickr_id} ({len(tags)} tags)")
         except FlickrError as e:
-            log.error(f"  add_tags failed for {flickr_id}: {e}")
-            errors.append(str(e))
+            from flickr.flickr_client import FLICKR_ERR_MAX_TAGS
+            if e.code == FLICKR_ERR_MAX_TAGS:
+                log.warning(
+                    f"  add_tags skipped for {flickr_id}: "
+                    f"Flickr 75-tag limit reached — tags not pushed"
+                )
+                # Not counted as an error — perms were still set correctly
+            else:
+                log.error(f"  add_tags failed for {flickr_id}: {e}")
+                errors.append(str(e))
 
     if not errors:
         db.conn.commit()

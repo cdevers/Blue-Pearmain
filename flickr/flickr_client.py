@@ -38,6 +38,9 @@ _TRANSIENT_FLICKR_CODES = {
     106,  # service unavailable
 }
 
+# Specific Flickr error codes with special handling
+FLICKR_ERR_MAX_TAGS = 2  # Maximum number of tags reached (75 tag limit)
+
 
 class FlickrError(Exception):
     def __init__(self, code: int, message: str):

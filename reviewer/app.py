@@ -349,13 +349,21 @@ def api_decide():
             if final_tags:
                 try:
                     from analyzer.tagger import merge_tags
+                    from flickr.flickr_client import FLICKR_ERR_MAX_TAGS
                     existing = photo.get("flickr_tags") or []
                     merged   = merge_tags(existing, final_tags)
                     c.add_tags(flickr_id, merged)
                     tags_ok  = True
                 except FlickrError as e:
-                    log.error(f"addTags failed for flickr_id={flickr_id} photo_id={photo_id}: {e}")
-                    errors.append(f"tags: {e}")
+                    if e.code == FLICKR_ERR_MAX_TAGS:
+                        log.warning(
+                            f"addTags skipped for flickr_id={flickr_id}: "
+                            f"Flickr 75-tag limit reached — tags not pushed"
+                        )
+                        tags_ok = True  # treat as soft success: perms still pushed
+                    else:
+                        log.error(f"addTags failed for flickr_id={flickr_id} photo_id={photo_id}: {e}")
+                        errors.append(f"tags: {e}")
 
             # Only update DB push flags for operations that actually succeeded
             if perms_ok:

@@ -227,7 +227,7 @@ Photos that are already on Flickr when you approve them are pushed immediately.
 
 The Flickr API client uses exponential backoff with jitter on transient failures (HTTP 429/5xx, timeouts, connection errors), retrying up to 4 times with delays of approximately 1, 2, 4, and 8 seconds. HTTP 4xx errors (400, 401, 403, 404, etc.) are treated as permanent and raise immediately without retrying. Flickr application-level errors are classified as transient (codes 0, 106) or permanent, and handled accordingly. Every API call has a 30-second timeout.
 
-Write operations (permissions and tags) only update the DB push flags after each operation succeeds individually — a failed tag push does not mark tags as pushed, and a failed permission change does not mark the photo as public. Both failures are logged with the Flickr photo ID for traceability.
+Write operations (permissions and tags) only update the DB push flags after each operation succeeds individually — a failed tag push does not mark tags as pushed, and a failed permission change does not mark the photo as public. Both failures are logged with the Flickr photo ID for traceability. If Flickr's 75-tag limit is reached, the tag push is silently skipped and the permission change still proceeds normally.
 
 If you suspect a push operation failed silently, the reconciliation script checks your DB's expected state against what Flickr actually has:
 
@@ -257,7 +257,7 @@ Both scripts are idempotent and safe to re-run.
 python tests/test_core.py
 ```
 
-110 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429 handling, batch person actions, schema migrations, reconcile exit codes and precedence, and the `bp` CLI entry point.
+111 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, and the `bp` CLI entry point.
 
 ## License
 

@@ -1290,6 +1290,28 @@ class TestPollerPushErrors(unittest.TestCase):
         errors = _push_to_flickr(mock_client, "TEST2", record, self.db, dry_run=False)
         self.assertEqual(errors, 1)
 
+    def test_max_tags_error_not_counted_as_failure(self):
+        """Flickr error 2 (max tags) should be skipped, not counted as push error."""
+        from unittest.mock import MagicMock
+        from flickr.flickr_client import FlickrError, FLICKR_ERR_MAX_TAGS
+        from poller.poller import _push_to_flickr
+        import json
+
+        self.db.upsert_photo({
+            "flickr_id": "MAXTAGS",
+            "privacy_state": "approved_public",
+            "proposed_tags": json.dumps(["tag1"]),
+        })
+        record = self.db.get_photo_by_flickr_id("MAXTAGS")
+
+        mock_client = MagicMock()
+        mock_client.set_permissions.return_value = {"stat": "ok"}
+        mock_client.add_tags.side_effect = FlickrError(FLICKR_ERR_MAX_TAGS, "Maximum number of tags reached")
+
+        errors = _push_to_flickr(mock_client, "MAXTAGS", record, self.db, dry_run=False)
+        # Max tags is not an error — perms still pushed successfully
+        self.assertEqual(errors, 0)
+
     def test_db_flag_not_set_on_failed_push(self):
         from unittest.mock import MagicMock
         from flickr.flickr_client import FlickrError
