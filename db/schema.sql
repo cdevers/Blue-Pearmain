@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS photos (
     camera_make             TEXT,
     camera_model            TEXT,
     lens_model              TEXT,
+    width                   INTEGER,                -- pixel width of original file
+    height                  INTEGER,                -- pixel height of original file
 
     -- Timestamps
     date_taken              TEXT,                   -- ISO8601, from EXIF

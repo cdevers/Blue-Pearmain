@@ -156,6 +156,10 @@ def photos_record_to_db(photo) -> dict:
     # Fingerprint for matching
     row["fingerprint"] = getattr(photo, "fingerprint", None) or ""
 
+    # Dimensions
+    row["width"]  = getattr(photo, "width",  None)
+    row["height"] = getattr(photo, "height", None)
+
     return row
 
 
@@ -240,6 +244,7 @@ def build_enriched_row(
         "apple_unknown_faces", "apple_human_count",
         "apple_ai_caption", "apple_ai_caption_conf",
         "apple_aesthetic_score", "fingerprint",
+        "width", "height",
     ):
         if photo_row.get(field) is not None:
             merged[field] = photo_row[field]
@@ -406,6 +411,51 @@ def scan(
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
+
+def backfill_dimensions(db, library) -> int:
+    """
+    Update width/height for all Apple-Photos-matched rows that are missing
+    dimensions. Useful after migrate_002 adds the columns to an existing DB.
+
+    Returns the number of rows updated.
+    """
+    import logging
+    log = logging.getLogger(__name__)
+
+    rows = db.conn.execute("""
+        SELECT id, uuid FROM photos
+        WHERE uuid IS NOT NULL
+          AND (width IS NULL OR height IS NULL)
+    """).fetchall()
+
+    if not rows:
+        log.info("No rows need dimension backfill.")
+        return 0
+
+    log.info("Backfilling dimensions for %d photos …", len(rows))
+    updated = 0
+
+    # Build uuid→photo map from the library
+    uuid_map = {p.uuid: p for p in library}
+
+    for row in rows:
+        photo = uuid_map.get(row["uuid"])
+        if photo is None:
+            continue
+        w = getattr(photo, "width", None)
+        h = getattr(photo, "height", None)
+        if w and h:
+            db.conn.execute(
+                "UPDATE photos SET width = ?, height = ? WHERE id = ?",
+                (w, h, row["id"])
+            )
+            updated += 1
+
+    db.conn.commit()
+    log.info("Backfill complete: %d rows updated.", updated)
+    return updated
+
 
 def main():
     parser = argparse.ArgumentParser(

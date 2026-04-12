@@ -10,6 +10,8 @@ Named for the [Blue Pearmain apple](https://en.wikipedia.org/wiki/Blue_Pearmain)
 
 Flickr's iOS app syncs your entire camera roll automatically — which is convenient for backup, but means a large backlog of private photos accumulates over time. Manually reviewing tens of thousands of photos to decide what to make public, what to tag, and what to keep private is impractical.
 
+Auto-upload from multiple devices (iPhone and iPad, for instance) also produces duplicates: the same photo uploaded twice, each with a separate Flickr ID, wasting storage and cluttering the library. Nikon's Snapbridge feature compounds this by streaming low-resolution previews to the phone immediately after capture, then receiving the full-resolution original from the card reader later — resulting in two Apple Photos entries, and eventually two Flickr uploads, for the same shot.
+
 Blue Pearmain automates the triage:
 
 - Polls Flickr for newly uploaded photos
@@ -17,7 +19,8 @@ Blue Pearmain automates the triage:
 - Applies geofence rules to automatically keep photos from home and other private locations out of the review queue
 - Flags photos containing unidentified people for manual review
 - Proposes tags derived from Apple's ML labels and location data
-- Serves a local web UI for working through the review queue — approving tags, setting photos public, or keeping them private
+- Detects duplicate photos (Snapbridge low/high-res pairs, dual-device uploads) and queues them for review
+- Serves a local web UI for working through the review queue — approving tags, setting photos public, keeping them private, and resolving duplicates
 
 Nothing is pushed to Flickr without explicit human confirmation.
 
@@ -34,9 +37,11 @@ Apple Photos Library          Flickr (cloud)
                        ↓
            Tag proposals (from Apple ML labels + location)
                        ↓
+           Duplicate detection (Snapbridge pairs, device uploads)
+                       ↓
            SQLite database + thumbnail cache
                        ↓
-           Review UI  →  Flickr API (setPerms, addTags)
+           Review UI  →  Flickr API (setPerms, addTags, delete)
 ```
 
 ## Components
@@ -51,6 +56,7 @@ Apple Photos Library          Flickr (cloud)
 | `flickr/flickr_client.py` | Flickr API client (with retry/backoff) |
 | `poller/poller.py` | Scheduled sync: Flickr → local DB |
 | `poller/scanner.py` | Apple Photos → local DB sync and matching |
+| `poller/deduplicator.py` | Identify and classify duplicate photos |
 | `poller/thumbnailer.py` | Populate thumbnail paths for the review UI |
 | `poller/reconcile.py` | Compare DB push state against actual Flickr state |
 | `reviewer/app.py` | Flask web UI |
@@ -58,8 +64,9 @@ Apple Photos Library          Flickr (cloud)
 | `config/` | Configuration templates and launchd plists |
 | `db/migrate_001_privacy_state_check.py` | DB migration: adds CHECK constraint on privacy_state |
 | `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at, indexes on push state and tags, schema_migrations table |
+| `db/migrate_003_dimensions_and_dedup.py` | DB migration: adds width/height columns and duplicate_groups table |
 | `bp` | Unified command-line entry point |
-| `tests/` | Unit tests (88 tests) |
+| `tests/` | Unit tests (130 tests) |
 
 ## Requirements
 
@@ -210,6 +217,29 @@ Photos are automatically classified into one of these states:
 | `already_public` | Was already public on Flickr before this tool existed |
 | `keep_private` | Human said no |
 | `skipped` | Deferred |
+| `duplicate_flickr` | Identified as a duplicate and deleted from Flickr |
+
+## Duplicate detection
+
+The deduplicator (`poller/deduplicator.py`) identifies photos that share the same original filename and capture timestamp but represent the same shot uploaded or imported more than once.
+
+Three duplicate types are recognised:
+
+**snapbridge** — A Nikon Snapbridge low-resolution preview paired with the full-resolution original from the card reader. Identified by different file fingerprints and different pixel dimensions. The higher-resolution copy is always kept; the lower-resolution preview is marked for discard. Run after `bp scan --all` to ensure dimensions are populated.
+
+**device_upload** — The same file auto-uploaded to Flickr from two devices (e.g. iPhone and iPad), producing two Flickr IDs with staggered upload timestamps. The earlier upload is kept.
+
+**uncertain** — Same filename and timestamp, but the available signals don't cleanly fit either pattern (same dimensions, missing fingerprint data, or three or more copies). Flagged for manual review in the UI.
+
+Run the deduplicator after scanning:
+
+```bash
+python poller/deduplicator.py --config config/config.yml --dry-run   # preview
+python poller/deduplicator.py --config config/config.yml --write     # write groups to DB
+python poller/deduplicator.py --config config/config.yml --write --confirm  # also delete from Flickr
+```
+
+The `--confirm` flag is required to actually delete anything from Flickr. Without it, discard candidates are only marked in the local DB.
 
 ## Geofence zones
 
@@ -240,24 +270,25 @@ The structured summary output distinguishes checked, mismatched, fixed, and fail
 
 **Config validation** — both the poller and reviewer validate required config fields at startup and exit immediately with a readable error message if anything is missing, rather than failing deep in a request.
 
-**Database integrity** — `privacy_state` has a SQL `CHECK` constraint enforcing valid values. Applied migrations are tracked in the `schema_migrations` table. If you are upgrading an existing installation, run both migrations in order:
+**Database integrity** — `privacy_state` has a SQL `CHECK` constraint enforcing valid values. Applied migrations are tracked in the `schema_migrations` table. If you are upgrading an existing installation, run all migrations in order:
 
 ```bash
 python db/migrate_001_privacy_state_check.py --config config/config.yml
 python db/migrate_002_updated_at_and_indexes.py --config config/config.yml
+python db/migrate_003_dimensions_and_dedup.py --config config/config.yml
 ```
 
-Both scripts are idempotent and safe to re-run.
+All scripts are idempotent and safe to re-run.
 
 > **Note (migration 001):** If any photos have an unrecognised `privacy_state` value (e.g. from manual DB edits or a future code change), the migration will reset them to `needs_review` before adding the constraint. Check the output for any rows that are reset.
 
 ## Tests
 
 ```bash
-python tests/test_core.py
+python -m pytest tests/ -q
 ```
 
-111 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, and the `bp` CLI entry point.
+130 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, and duplicate detection logic.
 
 ## License
 
