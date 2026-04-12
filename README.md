@@ -241,6 +241,14 @@ python poller/deduplicator.py --config config/config.yml --write --confirm  # al
 
 The `--confirm` flag is required to actually delete anything from Flickr. Without it, discard candidates are only marked in the local DB.
 
+**Review UI (`/duplicates`):** After running `--write`, open the Duplicates page in the review UI to inspect each group before taking any action. Groups are shown in three sections — Snapbridge, Device Upload, Uncertain — with side-by-side thumbnails, dimensions, capture date, and Flickr links for each photo.
+
+- **Confirm resolution** (Snapbridge and Device Upload groups): records that you've reviewed the keeper/discard assignment and are satisfied with it. This is a local DB change only — nothing is deleted from Flickr or Apple Photos.
+- **Make keeper** (Uncertain groups): manually assigns keeper/discard roles when the classifier couldn't determine them automatically, then marks the group resolved.
+- **Not a duplicate**: dismisses the group entirely and clears all duplicate metadata from the member photos. Use this for false positives — edited versions of a photo, different shots that happen to share a filename after a card reformat, etc.
+
+Deletions from Flickr only happen when you subsequently run `--confirm`. The UI has no delete capability.
+
 ## Geofence zones
 
 Add private locations (home, school, etc.) via the Zones page in the UI. Each zone has a centre point, radius in metres, and a policy (`auto_private`, `flag_review`, or `auto_public`). Apple Photos' own home flag is also used automatically.

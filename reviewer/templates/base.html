@@ -58,6 +58,20 @@
       font-size: 12px;
       color: var(--muted);
     }
+    .nav-badge {
+      display: inline-block;
+      min-width: 18px;
+      padding: 1px 5px;
+      border-radius: 9px;
+      background: var(--amber);
+      color: #ffd;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.5;
+      text-align: center;
+      vertical-align: middle;
+      margin-left: 2px;
+    }
 
     /* Layout */
     .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
@@ -150,6 +164,7 @@
   <a href="{{ url_for('review', state='candidate_public') }}" {% if request.endpoint == 'review' %}class="active"{% endif %}>Review</a>
   <a href="{{ url_for('faces') }}" {% if request.endpoint == 'faces' %}class="active"{% endif %}>Faces</a>
   <a href="{{ url_for('zones') }}" {% if request.endpoint == 'zones' %}class="active"{% endif %}>Zones</a>
+  <a href="{{ url_for('duplicates') }}" {% if request.endpoint == 'duplicates' %}class="active"{% endif %}>Duplicates <span id="nav-dup-count" class="nav-badge" style="display:none"></span></a>
   <span class="spacer"></span>
   <span class="stats-pill" id="nav-stats">Loading…</span>
 </nav>
@@ -191,6 +206,10 @@ async function refreshStats() {
   const el = document.getElementById('nav-stats');
   const review = (s.by_state?.needs_review || 0) + (s.by_state?.candidate_public || 0);
   el.textContent = `${review.toLocaleString()} to review`;
+  const dupBadge = document.getElementById('nav-dup-count');
+  const dupCount = s.unresolved_duplicates || 0;
+  dupBadge.textContent = dupCount;
+  dupBadge.style.display = dupCount > 0 ? '' : 'none';
 }
 refreshStats();
 </script>

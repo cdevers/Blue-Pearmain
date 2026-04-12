@@ -287,6 +287,174 @@ def api_batch_person():
     return jsonify({"ok": True, "updated": count, "person": person, "decision": decision})
 
 
+@app.route("/duplicates")
+def duplicates():
+    try:
+        rows = db().conn.execute("""
+            SELECT
+                dg.id          AS group_id,
+                dg.match_key,
+                dg.group_type,
+                dg.photo_count,
+                dg.keeper_id,
+                dg.resolved,
+                dg.notes,
+                p.id           AS photo_id,
+                p.flickr_id,
+                p.uuid,
+                p.original_filename,
+                p.width,
+                p.height,
+                p.date_taken,
+                p.duplicate_role,
+                p.thumbnail_path,
+                p.flickr_secret,
+                p.flickr_server,
+                p.privacy_state
+            FROM duplicate_groups dg
+            JOIN photos p ON p.duplicate_group_id = dg.id
+            WHERE dg.resolved = 0
+            ORDER BY
+                CASE dg.group_type
+                    WHEN 'snapbridge'    THEN 0
+                    WHEN 'device_upload' THEN 1
+                    ELSE 2
+                END,
+                dg.id,
+                CASE p.duplicate_role
+                    WHEN 'keeper'  THEN 0
+                    WHEN 'discard' THEN 1
+                    ELSE 2
+                END,
+                p.id
+        """).fetchall()
+    except Exception:
+        rows = []
+
+    # Aggregate rows into groups, preserving ORDER BY order
+    groups: dict[int, dict] = {}
+    for r in rows:
+        gid = r["group_id"]
+        if gid not in groups:
+            key = r["match_key"] or ""
+            filename, _, date_key = key.partition("|")
+            groups[gid] = {
+                "id":          gid,
+                "match_key":   key,
+                "group_type":  r["group_type"],
+                "photo_count": r["photo_count"],
+                "keeper_id":   r["keeper_id"],
+                "resolved":    r["resolved"],
+                "notes":       r["notes"],
+                "filename":    filename,
+                "date_key":    date_key,
+                "photos":      [],
+            }
+        groups[gid]["photos"].append({
+            "id":                r["photo_id"],
+            "flickr_id":         r["flickr_id"],
+            "uuid":              r["uuid"],
+            "original_filename": r["original_filename"],
+            "width":             r["width"],
+            "height":            r["height"],
+            "date_taken":        r["date_taken"],
+            "duplicate_role":    r["duplicate_role"],
+            "thumbnail_path":    r["thumbnail_path"],
+            "flickr_secret":     r["flickr_secret"],
+            "flickr_server":     r["flickr_server"],
+            "privacy_state":     r["privacy_state"],
+        })
+
+    sections = []
+    for gtype, label, description in (
+        ("snapbridge",    "Snapbridge",    "Low-res phone preview vs. full-res card import — keeper is the higher-resolution copy"),
+        ("device_upload", "Device upload", "Same file uploaded from multiple devices — keeper is the earlier Flickr upload"),
+        ("uncertain",     "Uncertain",     "Same filename and timestamp but pattern unclear — needs manual review"),
+    ):
+        type_groups = [g for g in groups.values() if g["group_type"] == gtype]
+        if type_groups:
+            sections.append({
+                "type":        gtype,
+                "label":       label,
+                "description": description,
+                "groups":      type_groups,
+            })
+
+    total_unresolved = sum(len(s["groups"]) for s in sections)
+    return render_template(
+        "duplicates.html",
+        sections=sections,
+        total_unresolved=total_unresolved,
+        stats=db().stats(),
+    )
+
+
+@app.route("/api/duplicates/<int:group_id>/resolve", methods=["POST"])
+def api_dup_resolve(group_id: int):
+    row = db().conn.execute(
+        "SELECT id FROM duplicate_groups WHERE id = ?", (group_id,)
+    ).fetchone()
+    if not row:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    db().conn.execute(
+        "UPDATE duplicate_groups SET resolved = 1, resolved_at = datetime('now') WHERE id = ?",
+        (group_id,),
+    )
+    db().conn.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/duplicates/<int:group_id>/assign", methods=["POST"])
+def api_dup_assign(group_id: int):
+    data   = request.get_json(force=True)
+    action = data.get("action")
+
+    group = db().conn.execute(
+        "SELECT id FROM duplicate_groups WHERE id = ?", (group_id,)
+    ).fetchone()
+    if not group:
+        return jsonify({"ok": False, "error": "not found"}), 404
+
+    if action == "set_keeper":
+        photo_id = data.get("photo_id")
+        if not photo_id:
+            return jsonify({"ok": False, "error": "missing photo_id"}), 400
+        member = db().conn.execute(
+            "SELECT id FROM photos WHERE id = ? AND duplicate_group_id = ?",
+            (photo_id, group_id),
+        ).fetchone()
+        if not member:
+            return jsonify({"ok": False, "error": "photo not in group"}), 400
+        db().conn.execute(
+            "UPDATE photos SET duplicate_role = 'discard' WHERE duplicate_group_id = ?",
+            (group_id,),
+        )
+        db().conn.execute(
+            "UPDATE photos SET duplicate_role = 'keeper' WHERE id = ?",
+            (photo_id,),
+        )
+        db().conn.execute(
+            """UPDATE duplicate_groups
+               SET keeper_id = ?, resolved = 1, resolved_at = datetime('now')
+               WHERE id = ?""",
+            (photo_id, group_id),
+        )
+        db().conn.commit()
+        return jsonify({"ok": True})
+
+    elif action == "not_duplicate":
+        db().conn.execute(
+            "UPDATE photos SET duplicate_group_id = NULL, duplicate_role = NULL WHERE duplicate_group_id = ?",
+            (group_id,),
+        )
+        db().conn.execute("DELETE FROM duplicate_groups WHERE id = ?", (group_id,))
+        db().conn.commit()
+        return jsonify({"ok": True})
+
+    else:
+        return jsonify({"ok": False, "error": "invalid action"}), 400
+
+
 @app.route("/settings/zones")
 def zones():
     zone_rows = db().conn.execute(

@@ -1,0 +1,301 @@
+{% extends "base.html" %}
+{% block title %}Duplicates — Blue Pearmain{% endblock %}
+
+{% block extra_style %}
+.page-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+.page-header h1 {
+  font-size: 20px;
+  font-weight: 600;
+}
+.page-header .sub {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.dup-section { margin-bottom: 40px; }
+
+.section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.section-count {
+  font-size: 12px;
+  color: var(--muted);
+}
+.section-desc {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 14px;
+}
+
+.dup-group {
+  margin-bottom: 16px;
+}
+.dup-group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.dup-filename {
+  font-weight: 600;
+  font-size: 14px;
+}
+.dup-date {
+  color: var(--muted);
+  font-size: 12px;
+  font-family: monospace;
+}
+.dup-notes {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 14px;
+  font-style: italic;
+}
+
+.dup-photos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.dup-photo {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.dup-photo.is-keeper  { border-color: #2d7d46; }
+.dup-photo.is-discard { border-color: #5a1818; }
+.dup-photo.is-review  { border-color: #5a3e00; }
+
+.dup-thumb {
+  aspect-ratio: 4 / 3;
+  background: #111;
+  overflow: hidden;
+}
+.dup-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.dup-photo-meta {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.dup-meta-filename {
+  font-size: 12px;
+  word-break: break-all;
+  color: var(--text);
+}
+.dup-meta-dims {
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--text);
+}
+.dup-meta-date {
+  font-size: 11px;
+  color: var(--muted);
+}
+.dup-meta-link {
+  font-size: 12px;
+}
+.dup-make-keeper {
+  margin-top: 4px;
+}
+
+.dup-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Role badges (defined locally so they don't conflict with privacy badges) */
+.badge-keeper  { background: #0d2e1a; color: #66bb6a; }
+.badge-discard { background: #2a0d0d; color: #e57373; }
+.badge-review  { background: #4a2800; color: #f5a623; }
+
+/* Type badges */
+.badge-snapbridge    { background: #0d3a5c; color: #6ab4f5; }
+.badge-device_upload { background: #1e1e1e; color: #aaa; }
+.badge-uncertain     { background: #4a2800; color: #f5a623; }
+
+.empty-state {
+  text-align: center;
+  padding: 60px 24px;
+  color: var(--muted);
+  font-size: 14px;
+}
+{% endblock %}
+
+{% block content %}
+<div class="container">
+
+  <div class="page-header">
+    <h1>Duplicates</h1>
+    {% if total_unresolved > 0 %}
+    <span class="sub">{{ total_unresolved }} unresolved group{{ 's' if total_unresolved != 1 }}</span>
+    {% else %}
+    <span class="sub">No unresolved groups</span>
+    {% endif %}
+  </div>
+
+  {% if not sections %}
+  <div class="empty-state card">
+    No duplicate groups found. Run <code>python poller/deduplicator.py --write</code> to detect duplicates.
+  </div>
+  {% endif %}
+
+  {% for section in sections %}
+  <div class="dup-section">
+    <div class="section-header">
+      <div class="section-title">{{ section.label }}</div>
+      <div class="section-count">{{ section.groups | length }} group{{ 's' if section.groups | length != 1 }}</div>
+    </div>
+    <div class="section-desc">{{ section.description }}</div>
+
+    {% for group in section.groups %}
+    <div class="card dup-group" id="group-{{ group.id }}">
+      <div class="dup-group-header">
+        <span class="dup-filename">{{ group.filename }}</span>
+        <span class="dup-date">{{ group.date_key[:19] if group.date_key else '' }}</span>
+        <span class="badge badge-{{ group.group_type }}">{{ group.group_type.replace('_', ' ') }}</span>
+      </div>
+      {% if group.notes %}
+      <div class="dup-notes">{{ group.notes }}</div>
+      {% endif %}
+
+      <div class="dup-photos">
+        {% for photo in group.photos %}
+        <div class="dup-photo is-{{ photo.duplicate_role }}">
+          <div class="dup-thumb">
+            <img src="{{ url_for('thumb', photo_id=photo.id) }}"
+                 alt="{{ photo.original_filename }}"
+                 loading="lazy">
+          </div>
+          <div class="dup-photo-meta">
+            <span class="badge badge-{{ photo.duplicate_role }}">{{ photo.duplicate_role }}</span>
+            <div class="dup-meta-filename">{{ photo.original_filename }}</div>
+            {% if photo.width and photo.height %}
+            <div class="dup-meta-dims">{{ photo.width }} × {{ photo.height }}</div>
+            {% else %}
+            <div class="dup-meta-dims" style="color:var(--muted)">dimensions unknown</div>
+            {% endif %}
+            <div class="dup-meta-date">{{ photo.date_taken[:10] if photo.date_taken else '—' }}</div>
+            {% if photo.flickr_id %}
+            <div class="dup-meta-link">
+              <a href="https://www.flickr.com/photos/cdevers/{{ photo.flickr_id }}"
+                 target="_blank" rel="noopener">↗ Flickr</a>
+            </div>
+            {% endif %}
+            {% if section.type == 'uncertain' %}
+            <div class="dup-make-keeper">
+              <button class="btn" style="font-size:12px; padding:4px 10px"
+                      onclick="assignKeeper({{ group.id }}, {{ photo.id }}, this)">
+                Make keeper
+              </button>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="dup-actions">
+        {% if section.type in ('snapbridge', 'device_upload') %}
+        <button class="btn btn-primary"
+                onclick="resolveGroup({{ group.id }}, this)">
+          ✓ Confirm resolution
+        </button>
+        {% elif section.type == 'uncertain' %}
+        <button class="btn"
+                style="color:var(--muted)"
+                onclick="notDuplicate({{ group.id }}, this)">
+          Not a duplicate
+        </button>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function resolveGroup(groupId, btn) {
+  btn.disabled = true;
+  const r = await fetch(`/api/duplicates/${groupId}/resolve`, {method: 'POST'});
+  const d = await r.json();
+  if (d.ok) {
+    toast('Group resolved');
+    const card = document.getElementById(`group-${groupId}`);
+    card.style.opacity = '0.4';
+    btn.textContent = '✓ Resolved';
+    refreshStats();
+  } else {
+    toast('Error: ' + (d.error || 'unknown'), 'err');
+    btn.disabled = false;
+  }
+}
+
+async function assignKeeper(groupId, photoId, btn) {
+  btn.disabled = true;
+  const r = await fetch(`/api/duplicates/${groupId}/assign`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({action: 'set_keeper', photo_id: photoId}),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    toast('Keeper assigned, group resolved');
+    const card = document.getElementById(`group-${groupId}`);
+    card.style.opacity = '0.4';
+    card.querySelectorAll('button').forEach(b => b.disabled = true);
+    refreshStats();
+  } else {
+    toast('Error: ' + (d.error || 'unknown'), 'err');
+    btn.disabled = false;
+  }
+}
+
+async function notDuplicate(groupId, btn) {
+  btn.disabled = true;
+  const r = await fetch(`/api/duplicates/${groupId}/assign`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({action: 'not_duplicate'}),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    toast('Dismissed as not a duplicate');
+    document.getElementById(`group-${groupId}`).remove();
+    refreshStats();
+  } else {
+    toast('Error: ' + (d.error || 'unknown'), 'err');
+    btn.disabled = false;
+  }
+}
+</script>
+{% endblock %}

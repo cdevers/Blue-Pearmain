@@ -386,4 +386,12 @@ class Database:
         ).fetchall()
         counts = {r["privacy_state"]: r["n"] for r in rows}
         total = self.conn.execute("SELECT COUNT(*) AS n FROM photos").fetchone()["n"]
-        return {"total": total, "by_state": counts}
+        result = {"total": total, "by_state": counts}
+        try:
+            row = self.conn.execute(
+                "SELECT COUNT(*) AS n FROM duplicate_groups WHERE resolved = 0"
+            ).fetchone()
+            result["unresolved_duplicates"] = row["n"] if row else 0
+        except Exception:
+            result["unresolved_duplicates"] = 0
+        return result
