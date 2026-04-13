@@ -136,15 +136,18 @@ class Database:
 
         if existing:
             row_id = existing["id"]
-            # Don't clobber review decisions that have already been made
-            protected = {"review_decision", "reviewed_at", "review_notes",
-                         "privacy_state", "privacy_reason"}
-            # ... unless the caller explicitly passes them
-            has_review = any(k in data for k in protected)
+
+            # Check whether a human has ever made a review decision on this photo.
+            # If so, never overwrite the privacy fields from a background sync pass.
+            existing_full = self.conn.execute(
+                "SELECT review_decision FROM photos WHERE id = ?", (row_id,)
+            ).fetchone()
+            already_reviewed = bool(existing_full and existing_full["review_decision"])
 
             update_data = {k: v for k, v in data.items() if k != lookup_field}
-            if not has_review:
-                for p in protected:
+            if already_reviewed:
+                for p in ("privacy_state", "privacy_reason",
+                          "review_decision", "reviewed_at", "review_notes"):
                     update_data.pop(p, None)
 
             placeholders = ", ".join(f"{k} = ?" for k in update_data)

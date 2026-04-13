@@ -404,15 +404,19 @@ def poll(
 
                 row = flickr_photo_to_db(photo, info)
 
-                # Privacy classification
-                state, reason = classify_flickr_record(row, zones)
-                row["privacy_state"]  = state
-                row["privacy_reason"] = reason
-
-                # Already public on Flickr? Mark it.
-                if photo.get("ispublic") == 1 or row.get("flickr_is_public") == 1:
+                # Privacy classification — skip if a human has already decided
+                existing_for_review = db.get_photo_by_flickr_id(flickr_id)
+                if existing_for_review and existing_for_review.get("review_decision"):
+                    # Preserve the human decision; only update sync metadata
+                    row["privacy_state"]  = existing_for_review["privacy_state"]
+                    row["privacy_reason"] = existing_for_review["privacy_reason"]
+                elif photo.get("ispublic") == 1 or row.get("flickr_is_public") == 1:
                     row["privacy_state"]  = "already_public"
                     row["privacy_reason"] = "public on Flickr"
+                else:
+                    state, reason = classify_flickr_record(row, zones)
+                    row["privacy_state"]  = state
+                    row["privacy_reason"] = reason
 
                 # Tag proposals
                 proposed = propose_tags(row)

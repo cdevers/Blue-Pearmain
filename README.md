@@ -202,6 +202,26 @@ Both public and private decisions push tags to Flickr — tags are useful for se
 
 The `Z` key (or the "↩ Undo last" button, which appears after any decision) reverts the most recent review decision recorded in the current browser session — up to 20 decisions deep. Undo restores the photo to `needs_review` (if it has people signals) or `candidate_public` (if it does not), clears `review_decision` and `reviewed_at`, and resets the Flickr push flag. It does not reverse any Flickr API call that may have already completed in the background.
 
+## Data integrity
+
+Once a photo has been reviewed — any decision recorded via the review UI — its `privacy_state` is permanently protected from background sync operations. Running `bp scan`, `bp poll`, or `bp reconcile` after reviewing photos will re-enrich metadata (labels, GPS, tags) but will never revert a human decision.
+
+The `review_decision` column in the database is the authoritative source of truth. `privacy_state` only auto-updates for photos where `review_decision IS NULL`. This means `keep_private`, `approved_public`, and `skipped` photos are stable across any number of subsequent scans and polls.
+
+If previously reviewed photos were corrupted by the bug this fixes, you can repair them in place:
+
+```sql
+UPDATE photos
+SET privacy_state = CASE review_decision
+    WHEN 'make_public'   THEN 'approved_public'
+    WHEN 'keep_private'  THEN 'keep_private'
+    WHEN 'skip'          THEN 'skipped'
+    ELSE privacy_state
+END
+WHERE review_decision IS NOT NULL
+  AND privacy_state IN ('candidate_public', 'needs_review');
+```
+
 ## Album Sync
 
 Blue Pearmain mirrors Apple Photos albums as Flickr photosets. When `bp scan` runs, it records each photo's album membership in the local database. Album sync then creates or updates the corresponding Flickr photosets.

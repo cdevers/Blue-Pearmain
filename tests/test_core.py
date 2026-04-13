@@ -378,6 +378,127 @@ class TestDatabase(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# upsert_photo review protection
+# ---------------------------------------------------------------------------
+
+class TestUpsertReviewProtection(unittest.TestCase):
+    """upsert_photo must never clobber a human review decision."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+        self.db = Database(Path(self._tmp.name) / "test.db")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _insert_reviewed(self, flickr_id, decision):
+        """Insert a photo, record a human decision, and return the updated row."""
+        self.db.upsert_photo({"flickr_id": flickr_id,
+                              "privacy_state": "candidate_public"})
+        photo = self.db.get_photo_by_flickr_id(flickr_id)
+        self.db.record_review(photo["id"], decision)
+        return self.db.get_photo_by_flickr_id(flickr_id)
+
+    def test_keep_private_survives_scanner_upsert(self):
+        """A keep_private decision must survive a subsequent upsert_photo call."""
+        row = self._insert_reviewed("P1", "keep_private")
+        self.assertEqual(row["privacy_state"], "keep_private")
+
+        # Simulate scanner re-classifying and upserting
+        self.db.upsert_photo({
+            "flickr_id": "P1",
+            "privacy_state": "candidate_public",
+            "privacy_reason": "no people detected",
+        })
+        result = self.db.get_photo_by_flickr_id("P1")
+        self.assertEqual(result["privacy_state"], "keep_private",
+                         "Scanner upsert must not revert keep_private")
+
+    def test_approved_public_survives_scanner_upsert(self):
+        """An approved_public decision must survive a subsequent upsert_photo call."""
+        row = self._insert_reviewed("P2", "make_public")
+        self.assertEqual(row["privacy_state"], "approved_public")
+
+        self.db.upsert_photo({
+            "flickr_id": "P2",
+            "privacy_state": "needs_review",
+            "privacy_reason": "people detected",
+        })
+        result = self.db.get_photo_by_flickr_id("P2")
+        self.assertEqual(result["privacy_state"], "approved_public",
+                         "Scanner upsert must not revert approved_public")
+
+    def test_skipped_survives_scanner_upsert(self):
+        """A skipped decision must survive a subsequent upsert_photo call."""
+        row = self._insert_reviewed("P3", "skip")
+        self.assertEqual(row["privacy_state"], "skipped")
+
+        self.db.upsert_photo({
+            "flickr_id": "P3",
+            "privacy_state": "candidate_public",
+            "privacy_reason": "no people detected",
+        })
+        result = self.db.get_photo_by_flickr_id("P3")
+        self.assertEqual(result["privacy_state"], "skipped",
+                         "Scanner upsert must not revert skipped")
+
+    def test_unreviewed_photo_state_is_updated(self):
+        """upsert_photo must still update privacy_state for unreviewed photos."""
+        self.db.upsert_photo({"flickr_id": "P4",
+                              "privacy_state": "candidate_public"})
+        self.db.upsert_photo({
+            "flickr_id": "P4",
+            "privacy_state": "needs_review",
+            "privacy_reason": "people detected",
+        })
+        result = self.db.get_photo_by_flickr_id("P4")
+        self.assertEqual(result["privacy_state"], "needs_review",
+                         "Unreviewed photos must still get state updates")
+
+    def test_non_privacy_fields_still_updated_after_review(self):
+        """Metadata fields (tags, filename, etc.) must still update even after review."""
+        self._insert_reviewed("P5", "keep_private")
+        self.db.upsert_photo({
+            "flickr_id": "P5",
+            "original_filename": "updated_name.jpg",
+            "proposed_tags": ["new", "tag"],
+        })
+        result = self.db.get_photo_by_flickr_id("P5")
+        self.assertEqual(result["original_filename"], "updated_name.jpg")
+        self.assertEqual(result["privacy_state"], "keep_private")
+
+    def test_build_enriched_row_preserves_skipped(self):
+        """build_enriched_row must not reclassify skipped photos."""
+        from poller.scanner import build_enriched_row
+        existing = {
+            "id": 1, "flickr_id": "12345", "uuid": None,
+            "privacy_state": "skipped",
+            "privacy_reason": "user deferred",
+            "proposed_tags": [],
+            "latitude": None, "longitude": None,
+            "place_ishome": 0,
+        }
+        photo_row = {
+            "uuid": "ABC-123",
+            "original_filename": "IMG_0001.HEIC",
+            "date_taken": "2026-04-13T10:00:00-04:00",
+            "apple_labels": [],
+            "apple_persons": [],
+            "apple_named_faces": 0,
+            "apple_unknown_faces": 0,
+            "apple_human_count": 0,
+            "_is_screenshot": False,
+            "_is_selfie": False,
+            "_is_live": False,
+        }
+        enriched = build_enriched_row(photo_row, existing, [], "Chris Devers")
+        self.assertEqual(enriched["privacy_state"], "skipped",
+                         "build_enriched_row must preserve skipped state")
+
+
+# ---------------------------------------------------------------------------
 # undo_decision
 # ---------------------------------------------------------------------------
 
@@ -516,6 +637,20 @@ class TestBuildEnrichedRow(unittest.TestCase):
         enriched = build_enriched_row(row, existing, [], "Chris Devers")
         # Should not clobber approved_public even if people detected
         self.assertEqual(enriched["privacy_state"], "approved_public")
+
+    def test_keep_private_preserved(self):
+        existing = dict(self.EXISTING, privacy_state="keep_private",
+                        review_decision="keep_private")
+        row = self._photo_row(apple_labels=[])  # would normally be candidate_public
+        enriched = build_enriched_row(row, existing, [], "Chris Devers")
+        self.assertEqual(enriched["privacy_state"], "keep_private")
+
+    def test_skipped_preserved(self):
+        existing = dict(self.EXISTING, privacy_state="skipped",
+                        review_decision="skip")
+        row = self._photo_row(apple_labels=[])
+        enriched = build_enriched_row(row, existing, [], "Chris Devers")
+        self.assertEqual(enriched["privacy_state"], "skipped")
 
     def test_tags_proposed_from_labels(self):
         row = self._photo_row(

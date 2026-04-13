@@ -297,7 +297,7 @@ def build_enriched_row(
     # Re-run privacy classifier with enriched data
     # Only update state if not already human-reviewed
     if existing.get("privacy_state") not in (
-        "approved_public", "keep_private", "already_public"
+        "approved_public", "keep_private", "already_public", "skipped"
     ):
         state, reason = classify(merged, zones, self_name=self_name)
         merged["privacy_state"]  = state
