@@ -261,12 +261,9 @@
   {% endif %}
   <span>Page {{ page }} of {{ total_pages }}</span>
   {% if page < total_pages %}
-    <a href="{{ url_for('review', state=state_filter, page=page,
-                        person=person_filter or '') }}#top">
-      Reload ↺
-    </a>
+    <a href="#" onclick="event.preventDefault(); reloadPage();">Reload ↺</a>
     <a href="{{ url_for('review', state=state_filter, page=page+1, person=person_filter or '') }}"
-       style="font-size:11px; color:var(--muted)">Next page →</a>
+       style="opacity:0.5; font-size:0.9em;">Next page →</a>
   {% endif %}
 </div>
 
@@ -339,10 +336,6 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// Select first card on load
-const first = document.querySelector('.photo-card');
-if (first) selectCard(first);
-
 // Show undo button if there's history
 const _undoCount = {{ session.get('undo_history', [])|length }};
 if (_undoCount > 0) document.getElementById('undoBtn').style.display = '';
@@ -363,8 +356,22 @@ document.addEventListener('keydown', e => {
   }
 });
 
+function reloadPage() {
+  // Force a full reload; the load handler below then scrolls to top.
+  window.location.reload();
+}
+
+// Disable browser scroll restoration so our explicit scroll-to-top wins.
+if ('scrollRestoration' in history) {
+  history.scrollRestoration = 'manual';
+}
+
 window.addEventListener('load', () => {
   window.scrollTo({ top: 0, behavior: 'instant' });
+  // Reset selection state and activate the first card.
+  selected = null;
+  const first = document.querySelector('.photo-card');
+  if (first) selectCard(first);
 });
 </script>
 {% endblock %}

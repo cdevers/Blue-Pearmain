@@ -62,18 +62,23 @@ class TestPaginationReloadLink:
     _URL = "/review?state=needs_review&page=1&per_page=10"
 
     def test_reload_link_present_not_skip(self, client):
-        """Page 1 should show a Reload link pointing to page=1, not bare page=2."""
+        """Page 1 should show a Reload link, not just a bare page=2 link."""
         resp = client.get(self._URL)
         assert resp.status_code == 200
         html = resp.data.decode()
         assert "Reload" in html
 
-    def test_reload_link_stays_on_current_page(self, client):
-        """The Reload link URL must contain page=1 (not page=2) on page 1."""
+    def test_reload_uses_js_not_href(self, client):
+        """Reload link must call reloadPage() rather than navigate to same URL."""
         resp = client.get(self._URL)
         html = resp.data.decode()
-        # The reload anchor should reference the same page, not page+1
-        assert "page=1" in html
+        assert "reloadPage()" in html
+
+    def test_reload_function_defined(self, client):
+        """reloadPage() function must be defined in the page scripts."""
+        resp = client.get(self._URL)
+        html = resp.data.decode()
+        assert "function reloadPage" in html
 
     def test_next_page_link_still_present(self, client):
         """A secondary 'Next page →' link to page+1 should still be present."""
@@ -87,7 +92,7 @@ class TestPaginationReloadLink:
 # ---------------------------------------------------------------------------
 
 class TestScrollToTop:
-    def test_scroll_script_present(self, client):
+    def test_scroll_to_top_on_load(self, client):
         """The page must include a window.scrollTo call on load."""
         resp = client.get("/review?state=needs_review")
         assert resp.status_code == 200
@@ -101,10 +106,23 @@ class TestScrollToTop:
         assert "instant" in html
 
     def test_top_anchor_present(self, client):
-        """The toolbar must carry id='top' so #top links land correctly."""
+        """The toolbar must carry id='top' so #top fragment links land correctly."""
         resp = client.get("/review?state=needs_review")
         html = resp.data.decode()
         assert 'id="top"' in html
+
+    def test_scroll_restoration_disabled(self, client):
+        """Page must set history.scrollRestoration='manual' to defeat browser restore."""
+        resp = client.get("/review?state=needs_review")
+        html = resp.data.decode()
+        assert "scrollRestoration" in html
+        assert "manual" in html
+
+    def test_selected_reset_on_load(self, client):
+        """selected must be cleared before selectCard(first) on reload."""
+        resp = client.get("/review?state=needs_review")
+        html = resp.data.decode()
+        assert "selected = null" in html
 
 
 # ---------------------------------------------------------------------------
