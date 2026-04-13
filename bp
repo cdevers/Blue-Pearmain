@@ -230,6 +230,7 @@ def main():
     p_sync.add_argument("--dry-run", action="store_true")
     p_sync.add_argument("--album",   default=None, help="Sync only this album name")
     p_sync.add_argument("--limit",   type=int, default=None)
+    p_sync.add_argument("--verbose", action="store_true")
 
     args = parser.parse_args()
 

@@ -1359,6 +1359,21 @@ class TestBpCli(unittest.TestCase):
         _, stderr, code = self._run_bp("--config", "/nonexistent.yml", "stats")
         self.assertNotEqual(code, 0)
 
+    def test_sync_albums_help(self):
+        stdout, _, code = self._run_bp("sync-albums", "--help")
+        self.assertEqual(code, 0)
+        self.assertIn("--dry-run", stdout)
+        self.assertIn("--album",   stdout)
+        self.assertIn("--verbose", stdout)
+
+    def test_sync_albums_verbose_flag_accepted(self):
+        """bp sync-albums --verbose must not be rejected as an unrecognised argument."""
+        # --config is a global flag so it comes before the subcommand.
+        # --verbose on the subparser must be accepted without argparse complaining.
+        _, stderr, _ = self._run_bp("--config", "/nonexistent.yml",
+                                    "sync-albums", "--verbose")
+        self.assertNotIn("unrecognized", stderr.lower())
+
 
 # ---------------------------------------------------------------------------
 # updated_at stamping
@@ -1588,6 +1603,116 @@ class TestPollerPushErrors(unittest.TestCase):
         _push_to_flickr(mock_client, "TEST3", record, self.db, dry_run=False)
         updated = self.db.get_photo_by_flickr_id("TEST3")
         self.assertEqual(updated["perms_pushed_flickr"], 0)
+
+
+# ---------------------------------------------------------------------------
+# sync_photo_albums — scanner helper
+# ---------------------------------------------------------------------------
+
+class TestSyncPhotoAlbums(unittest.TestCase):
+    """sync_photo_albums must use photo.album_info (AlbumInfo objects), not photo.albums (strings)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        # Insert a photo to attach albums to
+        self.photo_id = self.db.upsert_photo({
+            "uuid": "test-uuid-001",
+            "original_filename": "IMG_001.jpg",
+            "privacy_state": "candidate_public",
+        })
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _make_album_info(self, title, uuid, album_type=None):
+        """Return a simple namespace mimicking an osxphotos AlbumInfo object."""
+        from types import SimpleNamespace
+        obj = SimpleNamespace(title=title, uuid=uuid)
+        if album_type is not None:
+            obj.album_type = album_type
+        return obj
+
+    def test_uses_album_info_not_albums(self):
+        """sync_photo_albums must read photo.album_info, not photo.albums."""
+        from poller.scanner import sync_photo_albums
+        from types import SimpleNamespace
+
+        album = self._make_album_info("Vacation 2024", "album-uuid-1")
+        # photo.albums is a plain list of strings — must be ignored
+        photo = SimpleNamespace(
+            albums=["Vacation 2024"],          # strings — wrong attribute
+            album_info=[album],                # AlbumInfo objects — correct
+        )
+        sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)
+
+        count = self.db.conn.execute("SELECT COUNT(*) AS n FROM albums").fetchone()["n"]
+        self.assertEqual(count, 1, "album must be inserted via album_info")
+        row = self.db.conn.execute("SELECT name FROM albums").fetchone()
+        self.assertEqual(row["name"], "Vacation 2024")
+
+    def test_skips_non_album_type_when_present(self):
+        """When album_type is available, non-'Album' entries must be skipped."""
+        from poller.scanner import sync_photo_albums
+        from types import SimpleNamespace
+
+        user_album  = self._make_album_info("My Trip", "uuid-user",  album_type="Album")
+        smart_album = self._make_album_info("Favourites", "uuid-smart", album_type="SmartAlbum")
+        photo = SimpleNamespace(album_info=[user_album, smart_album])
+
+        sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)
+
+        rows = self.db.conn.execute("SELECT name FROM albums").fetchall()
+        names = [r["name"] for r in rows]
+        self.assertIn("My Trip", names)
+        self.assertNotIn("Favourites", names)
+
+    def test_accepts_album_without_album_type_attr(self):
+        """When album_type is absent (osxphotos 0.75.x), the album must be accepted."""
+        from poller.scanner import sync_photo_albums
+        from types import SimpleNamespace
+
+        album = self._make_album_info("No Type Album", "uuid-notype")  # no album_type attr
+        photo = SimpleNamespace(album_info=[album])
+
+        sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)
+
+        count = self.db.conn.execute("SELECT COUNT(*) AS n FROM albums").fetchone()["n"]
+        self.assertEqual(count, 1)
+
+    def test_dry_run_does_not_write(self):
+        """dry_run=True must not insert any rows."""
+        from poller.scanner import sync_photo_albums
+        from types import SimpleNamespace
+
+        album = self._make_album_info("Dry Run Album", "uuid-dry")
+        photo = SimpleNamespace(album_info=[album])
+
+        sync_photo_albums(photo, self.photo_id, self.db, dry_run=True)
+
+        count = self.db.conn.execute("SELECT COUNT(*) AS n FROM albums").fetchone()["n"]
+        self.assertEqual(count, 0, "dry_run must not write albums")
+
+    def test_empty_album_info_is_safe(self):
+        """A photo with no albums must not error."""
+        from poller.scanner import sync_photo_albums
+        from types import SimpleNamespace
+
+        photo = SimpleNamespace(album_info=[])
+        sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)  # must not raise
+
+        count = self.db.conn.execute("SELECT COUNT(*) AS n FROM albums").fetchone()["n"]
+        self.assertEqual(count, 0)
+
+    def test_missing_album_info_attr_is_safe(self):
+        """A photo object with no album_info attribute at all must not error."""
+        from poller.scanner import sync_photo_albums
+        from types import SimpleNamespace
+
+        photo = SimpleNamespace()  # no album_info attribute
+        sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)  # must not raise
 
 
 # ---------------------------------------------------------------------------

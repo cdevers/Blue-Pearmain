@@ -170,12 +170,20 @@ def photos_record_to_db(photo) -> dict:
 def sync_photo_albums(photo, photo_db_id: int, db: Database, dry_run: bool) -> None:
     """
     Upsert album membership rows for one osxphotos PhotoInfo object.
-    Only processes user-created albums (album_type == 'Album').
-    Smart albums, folders, and system albums are skipped.
+
+    Uses photo.album_info (list of AlbumInfo objects with .title and .uuid).
+    photo.albums returns plain strings and must not be used here.
+
+    Filters to user-created albums only when album_type is available (osxphotos
+    >= some future version); when the attribute is absent (osxphotos 0.75.x),
+    album_info already excludes smart/system albums so all entries are accepted.
     """
-    albums = getattr(photo, "albums", []) or []
-    for album in albums:
-        if getattr(album, "album_type", None) != "Album":
+    album_infos = getattr(photo, "album_info", []) or []
+    for album in album_infos:
+        # album_type is only present in newer osxphotos versions.
+        # Default to "Album" (pass through) when missing.
+        album_type = getattr(album, "album_type", "Album")
+        if album_type != "Album":
             continue
         if dry_run:
             log.debug("  [dry-run] album: %r (%s)", album.title, album.uuid)
