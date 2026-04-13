@@ -66,7 +66,7 @@ Apple Photos Library          Flickr (cloud)
 | `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at, indexes on push state and tags, schema_migrations table |
 | `db/migrate_003_dimensions_and_dedup.py` | DB migration: adds width/height columns and duplicate_groups table |
 | `bp` | Unified command-line entry point |
-| `tests/` | Unit tests (130 tests) |
+| `tests/` | Unit tests (118 tests) |
 
 ## Requirements
 
@@ -171,6 +171,7 @@ The grid view shows photos with proposed tags and action buttons. Keyboard short
 | `X` | Keep private + push tags to Flickr |
 | `Space` | Skip (decide later) |
 | `Enter` | Open detail view |
+| `Z` | Undo last decision |
 
 **Detail view:**
 
@@ -185,10 +186,15 @@ The grid view shows photos with proposed tags and action buttons. Keyboard short
 | `J` / `→` | Next photo |
 | `K` / `←` | Previous photo |
 | `Esc` | Return to grid |
+| `Z` | Undo last decision |
 
 In the detail view the action buttons are pinned to the top of the sidebar, so their position stays consistent regardless of how much metadata or how many tags a photo has. Any decision automatically advances to the next photo.
 
-Both public and private decisions push tags to Flickr — tags are useful for search even on private photos.
+Both public and private decisions push tags to Flickr — tags are useful for search even on private photos. Flickr pushes happen in a background thread, so the UI response is immediate; push errors are logged but do not block the review flow.
+
+### Undo
+
+The `Z` key (or the "↩ Undo last" button, which appears after any decision) reverts the most recent review decision recorded in the current browser session — up to 20 decisions deep. Undo restores the photo to `needs_review` (if it has people signals) or `candidate_public` (if it does not), clears `review_decision` and `reviewed_at`, and resets the Flickr push flag. It does not reverse any Flickr API call that may have already completed in the background.
 
 ## Faces
 

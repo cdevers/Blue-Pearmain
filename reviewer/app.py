@@ -22,13 +22,15 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
+import threading
 from pathlib import Path
 
 import yaml
 from flask import (
     Flask, Response, abort, jsonify, redirect,
-    render_template, request, send_file, url_for,
+    render_template, request, send_file, session, url_for,
 )
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -37,6 +39,7 @@ from flickr.flickr_client import FlickrClient, FlickrError
 
 log = logging.getLogger("blue-pearmain.reviewer")
 app = Flask(__name__)
+app.secret_key = os.urandom(24)
 
 # Globals set at startup
 _db: Database | None = None
@@ -165,8 +168,8 @@ def photo_detail(photo_id: int):
     if person_filter:
         nav = db().conn.execute(
             """SELECT DISTINCT photos.id,
-                   LAG(photos.id)  OVER (ORDER BY photos.date_taken, photos.id) AS prev_id,
-                   LEAD(photos.id) OVER (ORDER BY photos.date_taken, photos.id) AS next_id
+                   LAG(photos.id)  OVER (ORDER BY COALESCE(photos.date_taken, photos.date_uploaded_flickr, photos.date_added_photos) DESC, photos.id DESC) AS prev_id,
+                   LEAD(photos.id) OVER (ORDER BY COALESCE(photos.date_taken, photos.date_uploaded_flickr, photos.date_added_photos) DESC, photos.id DESC) AS next_id
                FROM photos, json_each(photos.apple_persons) AS p
                WHERE p.value = ?
                  AND photos.privacy_state = ?
@@ -176,8 +179,8 @@ def photo_detail(photo_id: int):
     else:
         nav = db().conn.execute(
             """SELECT id,
-                   LAG(id)  OVER (ORDER BY date_taken, id) AS prev_id,
-                   LEAD(id) OVER (ORDER BY date_taken, id) AS next_id
+                   LAG(id)  OVER (ORDER BY COALESCE(date_taken, date_uploaded_flickr, date_added_photos) DESC, id DESC) AS prev_id,
+                   LEAD(id) OVER (ORDER BY COALESCE(date_taken, date_uploaded_flickr, date_added_photos) DESC, id DESC) AS next_id
                FROM photos
                WHERE privacy_state = ?
             """,
@@ -484,6 +487,16 @@ def api_decide():
     if not photo:
         return jsonify({"ok": False, "error": "not found"}), 404
 
+    # Capture current state for undo before writing anything
+    old = db().conn.execute(
+        "SELECT privacy_state, review_decision FROM photos WHERE id = ?", (photo_id,)
+    ).fetchone()
+    if old:
+        history = session.get("undo_history", [])
+        history.append({"photo_id": photo_id, "prev_state": dict(old)})
+        session["undo_history"] = history[-20:]
+        session.modified = True
+
     # Update tags if provided
     if tags is not None:
         db().conn.execute(
@@ -494,59 +507,59 @@ def api_decide():
 
     db().record_review(photo_id, decision, notes)
 
-    # Push to Flickr if we have a flickr_id and something to do
+    # Push to Flickr in a background thread so the response returns immediately
     if push and photo.get("flickr_id"):
         c = client()
         if c:
-            errors        = []
-            flickr_id     = photo["flickr_id"]
-            perms_ok      = False
-            tags_ok       = False
+            _flickr_id  = photo["flickr_id"]
+            _decision   = decision
+            _photo_id   = photo_id
+            _final_tags = tags if tags is not None else photo.get("proposed_tags", [])
+            _existing   = photo.get("flickr_tags") or []
 
-            # Only change visibility for make_public decisions
-            if decision == "make_public":
+            def _push():
                 try:
-                    c.set_permissions(flickr_id, is_public=1)
-                    perms_ok = True
-                except FlickrError as e:
-                    log.error(f"setPerms failed for flickr_id={flickr_id} photo_id={photo_id}: {e}")
-                    errors.append(f"perms: {e}")
+                    perms_ok = False
+                    tags_ok  = False
 
-            # Always push tags regardless of privacy decision
-            final_tags = tags if tags is not None else photo.get("proposed_tags", [])
-            if final_tags:
-                try:
-                    from analyzer.tagger import merge_tags
-                    from flickr.flickr_client import FLICKR_ERR_MAX_TAGS
-                    existing = photo.get("flickr_tags") or []
-                    merged   = merge_tags(existing, final_tags)
-                    c.add_tags(flickr_id, merged)
-                    tags_ok  = True
-                except FlickrError as e:
-                    if e.code == FLICKR_ERR_MAX_TAGS:
-                        log.warning(
-                            f"addTags skipped for flickr_id={flickr_id}: "
-                            f"Flickr 75-tag limit reached — tags not pushed"
+                    if _decision == "make_public":
+                        try:
+                            c.set_permissions(_flickr_id, is_public=1)
+                            perms_ok = True
+                        except FlickrError as e:
+                            log.error("background push: setPerms failed flickr_id=%s: %s", _flickr_id, e)
+
+                    if _final_tags:
+                        try:
+                            from analyzer.tagger import merge_tags
+                            from flickr.flickr_client import FLICKR_ERR_MAX_TAGS
+                            merged = merge_tags(_existing, _final_tags)
+                            c.add_tags(_flickr_id, merged)
+                            tags_ok = True
+                        except FlickrError as e:
+                            if e.code == FLICKR_ERR_MAX_TAGS:
+                                log.warning(
+                                    "background push: addTags skipped flickr_id=%s: 75-tag limit",
+                                    _flickr_id,
+                                )
+                                tags_ok = True
+                            else:
+                                log.error("background push: addTags failed flickr_id=%s: %s", _flickr_id, e)
+
+                    if perms_ok:
+                        db().conn.execute(
+                            "UPDATE photos SET perms_pushed_flickr = 1 WHERE id = ?", (_photo_id,)
                         )
-                        tags_ok = True  # treat as soft success: perms still pushed
-                    else:
-                        log.error(f"addTags failed for flickr_id={flickr_id} photo_id={photo_id}: {e}")
-                        errors.append(f"tags: {e}")
+                    if tags_ok:
+                        db().conn.execute(
+                            "UPDATE photos SET tags_pushed_flickr = 1 WHERE id = ?", (_photo_id,)
+                        )
+                    if perms_ok or tags_ok:
+                        db().conn.commit()
+                except Exception as e:
+                    log.error("background push failed photo_id=%s: %s", _photo_id, e)
 
-            # Only update DB push flags for operations that actually succeeded
-            if perms_ok:
-                db().conn.execute(
-                    "UPDATE photos SET perms_pushed_flickr = 1 WHERE id = ?", (photo_id,)
-                )
-            if tags_ok:
-                db().conn.execute(
-                    "UPDATE photos SET tags_pushed_flickr = 1 WHERE id = ?", (photo_id,)
-                )
-            if perms_ok or tags_ok:
-                db().conn.commit()
-
-            if errors:
-                return jsonify({"ok": False, "errors": errors, "flickr_id": flickr_id}), 500
+            threading.Thread(target=_push, daemon=True).start()
 
     return jsonify({"ok": True})
 
@@ -567,6 +580,19 @@ def api_tags():
     )
     db().conn.commit()
     return jsonify({"ok": True})
+
+
+@app.route("/api/undo", methods=["POST"])
+def api_undo():
+    """Undo the most recent review decision recorded in this session."""
+    history = session.get("undo_history", [])
+    if not history:
+        return jsonify({"ok": False, "error": "nothing to undo"}), 400
+    entry = history.pop()
+    session["undo_history"] = history
+    session.modified = True
+    success = db().undo_decision(entry["photo_id"])
+    return jsonify({"ok": success, "photo_id": entry["photo_id"]})
 
 
 @app.route("/api/zone", methods=["POST"])

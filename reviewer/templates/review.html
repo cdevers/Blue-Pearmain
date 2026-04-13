@@ -179,12 +179,18 @@
 
   <span class="spacer"></span>
 
+  <button id="undoBtn" class="btn" onclick="doUndo()" title="Undo last decision (Z)"
+          style="display:none; color:#f5a623; border-color:#7a5c00">
+    ↩ Undo last
+  </button>
+
   <div class="shortcuts">
     <span><kbd>P</kbd> public</span>
     <span><kbd>X</kbd> private</span>
     <span><kbd>Space</kbd> skip</span>
     <span><kbd>J</kbd><kbd>K</kbd> navigate</span>
     <span><kbd>Enter</kbd> detail</span>
+    <span><kbd>Z</kbd> undo</span>
   </div>
 </div>
 
@@ -328,5 +334,25 @@ document.addEventListener('keydown', e => {
 // Select first card on load
 const first = document.querySelector('.photo-card');
 if (first) selectCard(first);
+
+// Show undo button if there's history
+const _undoCount = {{ session.get('undo_history', [])|length }};
+if (_undoCount > 0) document.getElementById('undoBtn').style.display = '';
+
+async function doUndo() {
+  const r = await fetch('/api/undo', { method: 'POST' });
+  const d = await r.json();
+  if (d.ok) {
+    location.reload();
+  } else {
+    toast('Nothing to undo.', 'err');
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if ((e.key === 'z' || e.key === 'Z') && !e.target.matches('input, textarea, select')) {
+    doUndo();
+  }
+});
 </script>
 {% endblock %}

@@ -346,6 +346,127 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(updated["privacy_state"], "approved_public")
         self.assertEqual(updated["review_decision"], "make_public")
 
+    def test_review_queue_newest_first(self):
+        """review_queue returns photos newest-first by date_taken."""
+        self.db.upsert_photo({
+            "flickr_id": "OLD", "privacy_state": "candidate_public",
+            "date_taken": "2020-01-01 00:00:00",
+        })
+        self.db.upsert_photo({
+            "flickr_id": "NEW", "privacy_state": "candidate_public",
+            "date_taken": "2024-06-01 00:00:00",
+        })
+        queue = self.db.review_queue()
+        ids = [p["flickr_id"] for p in queue]
+        self.assertEqual(ids[0], "NEW")
+        self.assertEqual(ids[1], "OLD")
+
+    def test_review_queue_coalesce_fallback(self):
+        """review_queue falls back to date_uploaded_flickr when date_taken is NULL."""
+        self.db.upsert_photo({
+            "flickr_id": "NOTAKEN", "privacy_state": "candidate_public",
+            "date_uploaded_flickr": "2023-03-01 00:00:00",
+        })
+        self.db.upsert_photo({
+            "flickr_id": "WITHTAKEN", "privacy_state": "candidate_public",
+            "date_taken": "2022-01-01 00:00:00",
+        })
+        queue = self.db.review_queue()
+        ids = [p["flickr_id"] for p in queue]
+        # NOTAKEN (2023) should sort before WITHTAKEN (2022)
+        self.assertLess(ids.index("NOTAKEN"), ids.index("WITHTAKEN"))
+
+
+# ---------------------------------------------------------------------------
+# undo_decision
+# ---------------------------------------------------------------------------
+
+class TestUndoDecision(unittest.TestCase):
+
+    def setUp(self):
+        fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.db = Database(self.tmp_path)
+
+    def tearDown(self):
+        self.db.close()
+        os.unlink(self.tmp_path)
+
+    def test_undo_returns_to_candidate_public(self):
+        """Photo with no people reverts to candidate_public on undo."""
+        self.db.upsert_photo({
+            "flickr_id": "U1",
+            "privacy_state": "approved_public",
+            "review_decision": "make_public",
+            "reviewed_at": "2026-01-01T00:00:00",
+            "apple_persons": "[]",
+            "apple_unknown_faces": 0,
+            "apple_named_faces": 0,
+        })
+        photo = self.db.get_photo_by_flickr_id("U1")
+        result = self.db.undo_decision(photo["id"])
+        self.assertTrue(result)
+        updated = self.db.get_photo_by_flickr_id("U1")
+        self.assertEqual(updated["privacy_state"], "candidate_public")
+        self.assertIsNone(updated["review_decision"])
+        self.assertIsNone(updated["reviewed_at"])
+
+    def test_undo_returns_to_needs_review_with_persons(self):
+        """Photo with named persons reverts to needs_review on undo."""
+        import json as _json
+        self.db.upsert_photo({
+            "flickr_id": "U2",
+            "privacy_state": "keep_private",
+            "review_decision": "keep_private",
+            "reviewed_at": "2026-01-01T00:00:00",
+            "apple_persons": _json.dumps(["Alice"]),
+            "apple_named_faces": 1,
+            "apple_unknown_faces": 0,
+        })
+        photo = self.db.get_photo_by_flickr_id("U2")
+        result = self.db.undo_decision(photo["id"])
+        self.assertTrue(result)
+        updated = self.db.get_photo_by_flickr_id("U2")
+        self.assertEqual(updated["privacy_state"], "needs_review")
+
+    def test_undo_returns_to_needs_review_with_unknown_faces(self):
+        """Photo with unknown faces reverts to needs_review on undo."""
+        self.db.upsert_photo({
+            "flickr_id": "U3",
+            "privacy_state": "approved_public",
+            "review_decision": "make_public",
+            "reviewed_at": "2026-01-01T00:00:00",
+            "apple_persons": "[]",
+            "apple_unknown_faces": 2,
+            "apple_named_faces": 0,
+        })
+        photo = self.db.get_photo_by_flickr_id("U3")
+        self.db.undo_decision(photo["id"])
+        updated = self.db.get_photo_by_flickr_id("U3")
+        self.assertEqual(updated["privacy_state"], "needs_review")
+
+    def test_undo_resets_perms_pushed(self):
+        """undo_decision resets perms_pushed_flickr to 0."""
+        self.db.upsert_photo({
+            "flickr_id": "U4",
+            "privacy_state": "approved_public",
+            "review_decision": "make_public",
+            "reviewed_at": "2026-01-01T00:00:00",
+            "perms_pushed_flickr": 1,
+            "apple_persons": "[]",
+            "apple_unknown_faces": 0,
+            "apple_named_faces": 0,
+        })
+        photo = self.db.get_photo_by_flickr_id("U4")
+        self.db.undo_decision(photo["id"])
+        updated = self.db.get_photo_by_flickr_id("U4")
+        self.assertEqual(updated["perms_pushed_flickr"], 0)
+
+    def test_undo_nonexistent_returns_false(self):
+        """undo_decision returns False for unknown photo_id."""
+        result = self.db.undo_decision(99999)
+        self.assertFalse(result)
+
 
 # ---------------------------------------------------------------------------
 # build_enriched_row (scanner)
@@ -761,11 +882,11 @@ class TestBatchPerson(unittest.TestCase):
             "date_taken": "2017-03-01 00:00:00",  # between NAV1 and NAV2
         })
 
-        # Simulate the person-scoped nav query from photo_detail route
+        # Simulate the person-scoped nav query from photo_detail route (newest-first)
         nav = self.db.conn.execute(
             """SELECT DISTINCT photos.id,
-                   LAG(photos.id)  OVER (ORDER BY photos.date_taken, photos.id) AS prev_id,
-                   LEAD(photos.id) OVER (ORDER BY photos.date_taken, photos.id) AS next_id
+                   LAG(photos.id)  OVER (ORDER BY COALESCE(photos.date_taken, photos.date_uploaded_flickr, photos.date_added_photos) DESC, photos.id DESC) AS prev_id,
+                   LEAD(photos.id) OVER (ORDER BY COALESCE(photos.date_taken, photos.date_uploaded_flickr, photos.date_added_photos) DESC, photos.id DESC) AS next_id
                FROM photos, json_each(photos.apple_persons) AS p
                WHERE p.value = ?
                  AND photos.privacy_state = ?""",
@@ -777,10 +898,11 @@ class TestBatchPerson(unittest.TestCase):
 
         id_to_nav = {row["id"]: row for row in nav}
 
-        # Key assertion: NAV1 and NAV2 are adjacent in the Obama sequence
-        # NAV1 (Jan) → NAV2 (Jun), with NAV3 (Mar, Someone Else) absent
-        self.assertEqual(id_to_nav[nav1["id"]]["next_id"], nav2["id"])
-        self.assertEqual(id_to_nav[nav2["id"]]["prev_id"], nav1["id"])
+        # Newest-first: NAV2 (Jun) comes before NAV1 (Jan) in the window order,
+        # so NAV2's next points to NAV1, and NAV1's prev points to NAV2.
+        # NAV3 (Someone Else) should not appear in Obama's sequence either way.
+        self.assertEqual(id_to_nav[nav2["id"]]["next_id"], nav1["id"])
+        self.assertEqual(id_to_nav[nav1["id"]]["prev_id"], nav2["id"])
 
         # NAV3 (Someone Else) should NOT appear in Obama's nav sequence
         nav3 = self.db.get_photo_by_flickr_id("NAV3")

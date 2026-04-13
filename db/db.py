@@ -249,14 +249,14 @@ class Database:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict]:
-        """Return photos awaiting review, ordered oldest-first."""
+        """Return photos awaiting review, ordered newest-first."""
         if states is None:
             states = ["needs_review", "candidate_public"]
         placeholders = ",".join("?" * len(states))
         rows = self.conn.execute(
             f"""SELECT * FROM photos
                 WHERE privacy_state IN ({placeholders})
-                ORDER BY date_taken ASC
+                ORDER BY COALESCE(date_taken, date_uploaded_flickr, date_added_photos) DESC, id DESC
                 LIMIT ? OFFSET ?""",
             states + [limit, offset],
         ).fetchall()
@@ -374,6 +374,35 @@ class Database:
             ),
         )
         self.conn.commit()
+
+    def undo_decision(self, photo_id: int) -> bool:
+        """
+        Revert a review decision, returning the photo to the appropriate
+        pre-review state (needs_review if it has people signals, otherwise
+        candidate_public). Clears review_decision, reviewed_at, and resets
+        perms_pushed_flickr. Returns True if the photo was found and updated.
+        """
+        row = self.conn.execute(
+            """SELECT privacy_state, apple_persons, apple_unknown_faces, apple_named_faces
+               FROM photos WHERE id = ?""",
+            (photo_id,)
+        ).fetchone()
+        if not row:
+            return False
+        persons   = _json_loads_safe(row["apple_persons"])
+        has_faces = bool(persons) or (row["apple_unknown_faces"] or 0) > 0
+        new_state = "needs_review" if has_faces else "candidate_public"
+        self.conn.execute(
+            """UPDATE photos
+               SET privacy_state       = ?,
+                   review_decision     = NULL,
+                   reviewed_at         = NULL,
+                   perms_pushed_flickr = 0
+               WHERE id = ?""",
+            (new_state, photo_id),
+        )
+        self.conn.commit()
+        return True
 
     # -----------------------------------------------------------------------
     # Stats (for dashboard)

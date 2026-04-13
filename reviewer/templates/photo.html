@@ -234,6 +234,10 @@
       <button class="btn btn-skip" onclick="doDecide('skip', false)">
         <span class="key-hint">Space</span> Skip for now
       </button>
+      <button id="undoBtn" class="btn" onclick="doUndo()" title="Undo last decision (Z)"
+              style="display:none; color:#f5a623; border-color:#7a5c00">
+        <span class="key-hint">Z</span> ↩ Undo last
+      </button>
     </div>
 
     <!-- Keyboard hint -->
@@ -412,8 +416,26 @@ async function doDecide(decision, push) {
   }
 }
 
+// Show undo button if there's session history
+const _undoCount = {{ session.get('undo_history', [])|length }};
+if (_undoCount > 0) document.getElementById('undoBtn').style.display = '';
+
+async function doUndo() {
+  const r = await fetch('/api/undo', { method: 'POST' });
+  const d = await r.json();
+  if (d.ok) {
+    window.location.href = '/review?state=' + {{ state | tojson }};
+  } else {
+    toast('Nothing to undo.', 'err');
+  }
+}
+
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
+  if ((e.key === 'z' || e.key === 'Z') && !e.target.matches('input, textarea, select')) {
+    doUndo();
+    return;
+  }
   if (e.key === 'p' || e.key === 'P') doDecide('make_public', true);
   else if (e.key === 'a' || e.key === 'A') doDecide('make_public', false);
   else if (e.key === 'x' || e.key === 'X') doDecide('keep_private', true);
