@@ -164,6 +164,27 @@ def photos_record_to_db(photo) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Album sync helper
+# ---------------------------------------------------------------------------
+
+def sync_photo_albums(photo, photo_db_id: int, db: Database, dry_run: bool) -> None:
+    """
+    Upsert album membership rows for one osxphotos PhotoInfo object.
+    Only processes user-created albums (album_type == 'Album').
+    Smart albums, folders, and system albums are skipped.
+    """
+    albums = getattr(photo, "albums", []) or []
+    for album in albums:
+        if getattr(album, "album_type", None) != "Album":
+            continue
+        if dry_run:
+            log.debug("  [dry-run] album: %r (%s)", album.title, album.uuid)
+            continue
+        album_id = db.upsert_album(album.uuid, album.title)
+        db.upsert_photo_album(photo_db_id, album_id)
+
+
+# ---------------------------------------------------------------------------
 # Matching logic
 # ---------------------------------------------------------------------------
 
@@ -340,7 +361,10 @@ def scan(
         existing_by_uuid = db.get_photo_by_uuid(photo.uuid)
 
         if existing_by_uuid:
-            # Already matched — just re-enrich if Apple has updated its analysis
+            # Always sync album membership — it can change independently of ML analysis
+            sync_photo_albums(photo, existing_by_uuid["id"], db, dry_run)
+
+            # Only re-enrich if Apple has updated its analysis
             if existing_by_uuid.get("date_analyzed") == photo_row.get("date_analyzed"):
                 continue  # nothing new from Apple
             enriched_row = build_enriched_row(
@@ -361,7 +385,8 @@ def scan(
             enriched_row = build_enriched_row(photo_row, primary, zones, self_name)
 
             if not dry_run:
-                db.upsert_photo(enriched_row)
+                row_id = db.upsert_photo(enriched_row)
+                sync_photo_albums(photo, row_id, db, dry_run)
 
             # Flag additional duplicate Flickr records
             for dup in candidates[1:]:
@@ -402,7 +427,8 @@ def scan(
                 photo_row["proposed_tags"]  = propose_tags(photo_row)
 
             if not dry_run:
-                db.upsert_photo(photo_row)
+                row_id = db.upsert_photo(photo_row)
+                sync_photo_albums(photo, row_id, db, dry_run)
             inserted += 1
 
     return scanned, matched, enriched, inserted

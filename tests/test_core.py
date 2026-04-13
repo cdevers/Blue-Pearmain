@@ -1455,5 +1455,305 @@ class TestPollerPushErrors(unittest.TestCase):
         self.assertEqual(updated["perms_pushed_flickr"], 0)
 
 
+# ---------------------------------------------------------------------------
+# Album DB methods
+# ---------------------------------------------------------------------------
+
+def _make_db(tmp_dir: str):
+    from db.db import Database
+    return Database(Path(tmp_dir) / "test.db")
+
+
+def _seed_photo(db, flickr_id=None, perms_pushed=0) -> int:
+    import uuid as _uuid
+    return db.upsert_photo({
+        "uuid": str(_uuid.uuid4()),
+        "original_filename": "IMG_0001.JPG",
+        "privacy_state": "approved_public" if flickr_id else "candidate_public",
+        "flickr_id": flickr_id,
+        "perms_pushed_flickr": perms_pushed,
+        "proposed_tags": [],
+        "apple_persons": [],
+        "apple_labels": [],
+    })
+
+
+class TestAlbumDB(unittest.TestCase):
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = _make_db(self._tmp.name)
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def test_upsert_album_creates_and_returns_id(self):
+        aid = self.db.upsert_album("apple-uuid-1", "Vacation 2024")
+        self.assertIsInstance(aid, int)
+        self.assertGreater(aid, 0)
+
+    def test_upsert_album_idempotent(self):
+        aid1 = self.db.upsert_album("apple-uuid-1", "Vacation 2024")
+        aid2 = self.db.upsert_album("apple-uuid-1", "Vacation 2024")
+        self.assertEqual(aid1, aid2)
+
+    def test_upsert_album_updates_name(self):
+        aid = self.db.upsert_album("apple-uuid-1", "Old Name")
+        self.db.upsert_album("apple-uuid-1", "New Name")
+        row = self.db.conn.execute("SELECT name FROM albums WHERE id = ?", (aid,)).fetchone()
+        self.assertEqual(row["name"], "New Name")
+
+    def test_upsert_photo_album_creates_row(self):
+        photo_id = _seed_photo(self.db)
+        album_id = self.db.upsert_album("apple-uuid-1", "Test Album")
+        self.db.upsert_photo_album(photo_id, album_id)
+        row = self.db.conn.execute(
+            "SELECT * FROM photo_albums WHERE photo_id = ? AND album_id = ?",
+            (photo_id, album_id),
+        ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["flickr_pushed"], 0)
+
+    def test_upsert_photo_album_idempotent(self):
+        photo_id = _seed_photo(self.db)
+        album_id = self.db.upsert_album("apple-uuid-1", "Test Album")
+        self.db.upsert_photo_album(photo_id, album_id)
+        self.db.upsert_photo_album(photo_id, album_id)  # second call must not error
+        count = self.db.conn.execute(
+            "SELECT COUNT(*) AS n FROM photo_albums WHERE photo_id = ? AND album_id = ?",
+            (photo_id, album_id),
+        ).fetchone()["n"]
+        self.assertEqual(count, 1)
+
+    def test_get_pending_album_pushes_requires_flickr_id_and_perms(self):
+        # Photo with no flickr_id — should NOT appear
+        photo_no_flickr = _seed_photo(self.db, flickr_id=None, perms_pushed=0)
+        album_id = self.db.upsert_album("uuid-a", "Album A")
+        self.db.upsert_photo_album(photo_no_flickr, album_id)
+
+        # Photo with flickr_id but perms not pushed — should NOT appear
+        photo_no_perms = _seed_photo(self.db, flickr_id="f001", perms_pushed=0)
+        album_id2 = self.db.upsert_album("uuid-b", "Album B")
+        self.db.upsert_photo_album(photo_no_perms, album_id2)
+
+        # Photo with flickr_id AND perms pushed — SHOULD appear
+        photo_ready = _seed_photo(self.db, flickr_id="f002", perms_pushed=1)
+        album_id3 = self.db.upsert_album("uuid-c", "Album C")
+        self.db.upsert_photo_album(photo_ready, album_id3)
+
+        pending = self.db.get_pending_album_pushes()
+        photo_ids = [r["photo_id"] for r in pending]
+        self.assertNotIn(photo_no_flickr, photo_ids)
+        self.assertNotIn(photo_no_perms, photo_ids)
+        self.assertIn(photo_ready, photo_ids)
+
+    def test_mark_album_pushed(self):
+        photo_id = _seed_photo(self.db, flickr_id="f001", perms_pushed=1)
+        album_id = self.db.upsert_album("uuid-a", "Album A")
+        self.db.upsert_photo_album(photo_id, album_id)
+
+        self.db.mark_album_pushed(photo_id, album_id)
+
+        row = self.db.conn.execute(
+            "SELECT flickr_pushed, pushed_at FROM photo_albums WHERE photo_id = ? AND album_id = ?",
+            (photo_id, album_id),
+        ).fetchone()
+        self.assertEqual(row["flickr_pushed"], 1)
+        self.assertIsNotNone(row["pushed_at"])
+
+    def test_set_album_flickr_set_id(self):
+        album_id = self.db.upsert_album("uuid-a", "Album A")
+        self.db.set_album_flickr_set_id(album_id, "72157720000001", "https://www.flickr.com/photos/me/sets/72157720000001/")
+        row = self.db.conn.execute(
+            "SELECT flickr_set_id, flickr_set_url FROM albums WHERE id = ?", (album_id,)
+        ).fetchone()
+        self.assertEqual(row["flickr_set_id"], "72157720000001")
+        self.assertIn("flickr.com", row["flickr_set_url"])
+
+    def test_get_pending_excludes_already_pushed(self):
+        photo_id = _seed_photo(self.db, flickr_id="f001", perms_pushed=1)
+        album_id = self.db.upsert_album("uuid-a", "Album A")
+        self.db.upsert_photo_album(photo_id, album_id)
+        self.db.mark_album_pushed(photo_id, album_id)
+
+        pending = self.db.get_pending_album_pushes()
+        self.assertEqual(pending, [])
+
+
+# ---------------------------------------------------------------------------
+# Album pusher
+# ---------------------------------------------------------------------------
+
+class TestAlbumPusher(unittest.TestCase):
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = _make_db(self._tmp.name)
+        self.photo_id = _seed_photo(self.db, flickr_id="flickr001", perms_pushed=1)
+        self.album_id = self.db.upsert_album("apple-uuid-1", "Trip Photos")
+        self.db.upsert_photo_album(self.photo_id, self.album_id)
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _mock_flickr(self, new_set_id="SET001"):
+        from unittest.mock import MagicMock
+        m = MagicMock()
+        m.create_photoset.return_value = new_set_id
+        m.add_photo_to_photoset.return_value = None
+        return m
+
+    def test_skips_photo_with_no_flickr_id(self):
+        from flickr.album_pusher import push_photo_to_albums
+        photo_id = _seed_photo(self.db, flickr_id=None)
+        album_id = self.db.upsert_album("uuid-nf", "No Flickr Album")
+        self.db.upsert_photo_album(photo_id, album_id)
+        flickr = self._mock_flickr()
+        result = push_photo_to_albums(self.db, flickr, photo_id)
+        self.assertEqual(result, 0)
+        flickr.create_photoset.assert_not_called()
+
+    def test_creates_photoset_when_none_exists(self):
+        from flickr.album_pusher import push_photo_to_albums
+        flickr = self._mock_flickr(new_set_id="NEW_SET")
+        push_photo_to_albums(self.db, flickr, self.photo_id)
+        flickr.create_photoset.assert_called_once_with("Trip Photos", "flickr001")
+
+    def test_adds_to_existing_photoset(self):
+        from flickr.album_pusher import push_photo_to_albums
+        self.db.set_album_flickr_set_id(self.album_id, "EXISTING_SET")
+        flickr = self._mock_flickr()
+        push_photo_to_albums(self.db, flickr, self.photo_id)
+        flickr.add_photo_to_photoset.assert_called_once_with("EXISTING_SET", "flickr001")
+        flickr.create_photoset.assert_not_called()
+
+    def test_marks_pushed_on_success(self):
+        from flickr.album_pusher import push_photo_to_albums
+        flickr = self._mock_flickr(new_set_id="SET001")
+        push_photo_to_albums(self.db, flickr, self.photo_id)
+        row = self.db.conn.execute(
+            "SELECT flickr_pushed FROM photo_albums WHERE photo_id = ? AND album_id = ?",
+            (self.photo_id, self.album_id),
+        ).fetchone()
+        self.assertEqual(row["flickr_pushed"], 1)
+
+    def test_stores_flickr_set_id_after_create(self):
+        from flickr.album_pusher import push_photo_to_albums
+        flickr = self._mock_flickr(new_set_id="CREATED_SET")
+        push_photo_to_albums(self.db, flickr, self.photo_id)
+        row = self.db.conn.execute(
+            "SELECT flickr_set_id FROM albums WHERE id = ?", (self.album_id,)
+        ).fetchone()
+        self.assertEqual(row["flickr_set_id"], "CREATED_SET")
+
+    def test_returns_count_of_successes(self):
+        from flickr.album_pusher import push_photo_to_albums
+        # Add a second album
+        album_id2 = self.db.upsert_album("uuid-b", "Another Album")
+        self.db.upsert_photo_album(self.photo_id, album_id2)
+        flickr = self._mock_flickr()
+        result = push_photo_to_albums(self.db, flickr, self.photo_id)
+        self.assertEqual(result, 2)
+
+    def test_logs_and_continues_on_flickr_error(self):
+        from flickr.album_pusher import push_photo_to_albums
+        from flickr.flickr_client import FlickrError
+        from unittest.mock import MagicMock
+
+        # Two albums — first raises FlickrError, second succeeds
+        album_id2 = self.db.upsert_album("uuid-b", "Album B")
+        self.db.upsert_photo_album(self.photo_id, album_id2)
+
+        flickr = MagicMock()
+        flickr.create_photoset.side_effect = [
+            FlickrError(1, "error"),
+            "SET_OK",
+        ]
+
+        result = push_photo_to_albums(self.db, flickr, self.photo_id)
+        # One failed, one succeeded
+        self.assertEqual(result, 1)
+
+    def test_returns_zero_when_no_pending(self):
+        from flickr.album_pusher import push_photo_to_albums
+        flickr = self._mock_flickr()
+        # Push once to mark done
+        push_photo_to_albums(self.db, flickr, self.photo_id)
+        # Second call should find nothing pending
+        result = push_photo_to_albums(self.db, flickr, self.photo_id)
+        self.assertEqual(result, 0)
+
+
+# ---------------------------------------------------------------------------
+# sync-albums CLI
+# ---------------------------------------------------------------------------
+
+class TestSyncAlbumsCLI(unittest.TestCase):
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._db_path = Path(self._tmp.name) / "test.db"
+        from db.db import Database
+        self.db = Database(self._db_path)
+
+        # Write a minimal config file
+        self._config_path = Path(self._tmp.name) / "config.yml"
+        self._config_path.write_text(
+            f"database:\n  path: {self._db_path}\n"
+            "flickr:\n"
+            "  api_key: test\n"
+            "  api_secret: test\n"
+            "  oauth_token: test\n"
+            "  oauth_token_secret: test\n"
+            "  user_nsid: test\n"
+        )
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _run_cli(self, extra_argv=None):
+        import subprocess
+        cmd = [
+            sys.executable,
+            str(Path(__file__).parent.parent / "flickr" / "sync_albums.py"),
+            "--config", str(self._config_path),
+        ] + (extra_argv or [])
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return result
+
+    def test_exit_0_when_nothing_to_do(self):
+        result = self._run_cli()
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("photos added=0", result.stdout)
+
+    def test_dry_run_does_not_write(self):
+        photo_id = _seed_photo(self.db, flickr_id="f001", perms_pushed=1)
+        album_id = self.db.upsert_album("uuid-a", "Album A")
+        self.db.upsert_photo_album(photo_id, album_id)
+
+        result = self._run_cli(["--dry-run"])
+        self.assertEqual(result.returncode, 0)
+
+        # Row must still be unpushed after dry-run
+        row = self.db.conn.execute(
+            "SELECT flickr_pushed FROM photo_albums WHERE photo_id = ? AND album_id = ?",
+            (photo_id, album_id),
+        ).fetchone()
+        self.assertEqual(row["flickr_pushed"], 0)
+
+    def test_album_filter_excludes_other_albums(self):
+        photo_id = _seed_photo(self.db, flickr_id="f001", perms_pushed=1)
+        album_id = self.db.upsert_album("uuid-a", "Family Photos")
+        self.db.upsert_photo_album(photo_id, album_id)
+
+        # Filter to a different album name — nothing pending for "Other Album"
+        result = self._run_cli(["--dry-run", "--album", "Other Album"])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("photos added=0", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

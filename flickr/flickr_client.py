@@ -323,6 +323,31 @@ class FlickrClient:
             http_method="POST",
         )
 
+    def get_photosets(self) -> list[dict]:
+        """Return all photosets for the authenticated user."""
+        data = self._call(
+            "flickr.photosets.getList",
+            {"user_id": self.user_nsid or "me"},
+        )
+        return data.get("photosets", {}).get("photoset", [])
+
+    def create_photoset(self, title: str, primary_photo_id: str) -> str:
+        """Create a Flickr photoset. Returns the new photoset ID."""
+        data = self._call(
+            "flickr.photosets.create",
+            {"title": title, "primary_photo_id": primary_photo_id},
+            http_method="POST",
+        )
+        return data["photoset"]["id"]
+
+    def add_photo_to_photoset(self, photoset_id: str, photo_id: str) -> None:
+        """Add a photo to an existing Flickr photoset."""
+        self._call(
+            "flickr.photosets.addPhoto",
+            {"photoset_id": photoset_id, "photo_id": photo_id},
+            http_method="POST",
+        )
+
     # -----------------------------------------------------------------------
     # Thumbnail download
     # -----------------------------------------------------------------------

@@ -107,6 +107,9 @@ bp scan                            # Scan recent Photos additions (last 7 days)
 bp thumbs                          # Populate missing thumbnail paths
 bp reconcile                       # Check DB vs actual Flickr state
 bp reconcile --fix                 # Check and repair mismatches
+bp sync-albums                     # Sync Apple Photos albums → Flickr photosets (backfill)
+bp sync-albums --dry-run           # Preview what would be pushed without writing
+bp sync-albums --album "Vacation"  # Sync a single named album only
 bp ui                              # Start the review UI (http://localhost:5173)
 ```
 
@@ -198,6 +201,41 @@ Both public and private decisions push tags to Flickr — tags are useful for se
 ### Undo
 
 The `Z` key (or the "↩ Undo last" button, which appears after any decision) reverts the most recent review decision recorded in the current browser session — up to 20 decisions deep. Undo restores the photo to `needs_review` (if it has people signals) or `candidate_public` (if it does not), clears `review_decision` and `reviewed_at`, and resets the Flickr push flag. It does not reverse any Flickr API call that may have already completed in the background.
+
+## Album Sync
+
+Blue Pearmain mirrors Apple Photos albums as Flickr photosets. When `bp scan` runs, it records each photo's album membership in the local database. Album sync then creates or updates the corresponding Flickr photosets.
+
+### How it works
+
+1. **At review time** — when you approve a photo in the reviewer UI (mark it public), it is immediately added to any corresponding Flickr photosets in the same background push that sets permissions and tags. New photosets are created automatically if none exists yet for that album.
+
+2. **Batch backfill** (`bp sync-albums`) — for photos already approved and pushed before album sync was set up, run this command to reconcile in arrears.
+
+### Filtering
+
+Albums are filtered to user-created albums only. Smart Albums, system albums (Recents, Favourites, All Photos), and folder objects are skipped automatically — only albums with `album_type == "Album"` in osxphotos are synced.
+
+### Commands
+
+```bash
+bp sync-albums                      # Push all pending album memberships to Flickr
+bp sync-albums --dry-run            # Preview what would be pushed without writing
+bp sync-albums --album "Vacation"   # Sync a single named album only
+bp sync-albums --limit 100          # Process at most 100 photo+album pairs
+```
+
+The command prints a one-line summary on completion:
+
+```
+albums created=2  photos added=47  skipped=0  failed=0
+```
+
+Exit codes follow the same convention as `bp reconcile`: `0` = success, `1` = some pushes failed, `2` = operational error (DB or API unavailable).
+
+### New photosets
+
+When a photoset is created for an album, the first photo being pushed to it is used as the primary (cover) photo. The photoset URL is stored in the database so subsequent syncs can add to the existing set rather than creating duplicates.
 
 ## Faces
 

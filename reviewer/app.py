@@ -556,6 +556,22 @@ def api_decide():
                         )
                     if perms_ok or tags_ok:
                         db().conn.commit()
+
+                    if perms_ok and _decision == "make_public":
+                        try:
+                            from flickr.album_pusher import push_photo_to_albums
+                            n = push_photo_to_albums(db(), c, _photo_id)
+                            if n:
+                                log.info(
+                                    "background push: added to %d photoset(s) photo_id=%s",
+                                    n, _photo_id,
+                                )
+                        except Exception as album_err:
+                            log.error(
+                                "background push: album sync failed photo_id=%s: %s",
+                                _photo_id, album_err,
+                            )
+
                 except Exception as e:
                     log.error("background push failed photo_id=%s: %s", _photo_id, e)
 

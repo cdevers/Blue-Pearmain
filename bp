@@ -160,6 +160,17 @@ def cmd_ui(args):
     ])
 
 
+def cmd_sync_albums(args):
+    from flickr.sync_albums import main
+    _run(main, args, [
+        ("--config",  args.config),
+        ("--dry-run", args.dry_run),
+        ("--album",   args.album),
+        ("--limit",   str(args.limit) if args.limit else None),
+        ("--verbose", args.verbose),
+    ])
+
+
 def _inject_argv(args, pairs):
     """Rebuild sys.argv from parsed args so subcommand main()s parse correctly."""
     new_argv = [sys.argv[0]]
@@ -214,6 +225,12 @@ def main():
     p_ui.add_argument("--port",  type=int, default=5173)
     p_ui.add_argument("--debug", action="store_true")
 
+    # sync-albums
+    p_sync = sub.add_parser("sync-albums", help="Sync Apple Photos albums → Flickr photosets")
+    p_sync.add_argument("--dry-run", action="store_true")
+    p_sync.add_argument("--album",   default=None, help="Sync only this album name")
+    p_sync.add_argument("--limit",   type=int, default=None)
+
     args = parser.parse_args()
 
     # Attach config/verbose to all subcommands
@@ -226,14 +243,16 @@ def main():
     if not hasattr(args, "limit"):    args.limit = None
     if not hasattr(args, "port"):     args.port = 5173
     if not hasattr(args, "debug"):    args.debug = False
+    if not hasattr(args, "album"):    args.album = None
 
     dispatch = {
-        "stats":     cmd_stats,
-        "poll":      cmd_poll,
-        "scan":      cmd_scan,
-        "thumbs":    cmd_thumbs,
-        "reconcile": cmd_reconcile,
-        "ui":        cmd_ui,
+        "stats":       cmd_stats,
+        "poll":        cmd_poll,
+        "scan":        cmd_scan,
+        "thumbs":      cmd_thumbs,
+        "reconcile":   cmd_reconcile,
+        "ui":          cmd_ui,
+        "sync-albums": cmd_sync_albums,
     }
     dispatch[args.command](args)
 

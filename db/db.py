@@ -405,6 +405,67 @@ class Database:
         return True
 
     # -----------------------------------------------------------------------
+    # Album sync
+    # -----------------------------------------------------------------------
+
+    def upsert_album(self, apple_uuid: str, name: str) -> int:
+        """Insert or update an album record. Returns the album row id."""
+        self.conn.execute(
+            "INSERT OR IGNORE INTO albums (apple_uuid, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (apple_uuid, name, _now_iso(), _now_iso()),
+        )
+        self.conn.execute(
+            "UPDATE albums SET name = ?, updated_at = ? WHERE apple_uuid = ?",
+            (name, _now_iso(), apple_uuid),
+        )
+        self.conn.commit()
+        row = self.conn.execute(
+            "SELECT id FROM albums WHERE apple_uuid = ?", (apple_uuid,)
+        ).fetchone()
+        return row["id"]
+
+    def upsert_photo_album(self, photo_id: int, album_id: int) -> None:
+        """Record that a photo belongs to an album. No-op if already exists."""
+        self.conn.execute(
+            "INSERT OR IGNORE INTO photo_albums (photo_id, album_id) VALUES (?, ?)",
+            (photo_id, album_id),
+        )
+        self.conn.commit()
+
+    def get_pending_album_pushes(self, limit: int = 500) -> list[dict]:
+        """Return photo+album pairs ready to push: flickr_id present, perms pushed, not yet synced."""
+        rows = self.conn.execute(
+            """SELECT pa.photo_id, pa.album_id,
+                      p.flickr_id,
+                      a.name AS album_name, a.flickr_set_id
+               FROM photo_albums pa
+               JOIN photos p ON p.id = pa.photo_id
+               JOIN albums  a ON a.id = pa.album_id
+               WHERE pa.flickr_pushed = 0
+                 AND p.flickr_id IS NOT NULL
+                 AND p.perms_pushed_flickr = 1
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_album_pushed(self, photo_id: int, album_id: int) -> None:
+        """Mark a photo→album pair as successfully pushed to Flickr."""
+        self.conn.execute(
+            "UPDATE photo_albums SET flickr_pushed = 1, pushed_at = ? WHERE photo_id = ? AND album_id = ?",
+            (_now_iso(), photo_id, album_id),
+        )
+        self.conn.commit()
+
+    def set_album_flickr_set_id(self, album_id: int, flickr_set_id: str, flickr_set_url: str = "") -> None:
+        """Store the Flickr photoset ID after creating a new photoset."""
+        self.conn.execute(
+            "UPDATE albums SET flickr_set_id = ?, flickr_set_url = ?, updated_at = ? WHERE id = ?",
+            (flickr_set_id, flickr_set_url, _now_iso(), album_id),
+        )
+        self.conn.commit()
+
+    # -----------------------------------------------------------------------
     # Stats (for dashboard)
     # -----------------------------------------------------------------------
 

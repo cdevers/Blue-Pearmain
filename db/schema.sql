@@ -172,3 +172,32 @@ CREATE INDEX IF NOT EXISTS idx_tag_events_photo     ON tag_events(photo_id);
 CREATE INDEX IF NOT EXISTS idx_photos_push_state    ON photos(privacy_state, perms_pushed_flickr);
 CREATE INDEX IF NOT EXISTS idx_photos_tags_pushed   ON photos(tags_pushed_flickr);
 CREATE INDEX IF NOT EXISTS idx_photos_updated       ON photos(updated_at);
+
+
+-- ============================================================
+-- Albums: Apple Photos album membership mirrored as Flickr photosets
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS albums (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    apple_uuid      TEXT NOT NULL UNIQUE,   -- Photos album UUID
+    name            TEXT NOT NULL,
+    flickr_set_id   TEXT,                   -- NULL until created on Flickr
+    flickr_set_url  TEXT,
+    created_at      TEXT,
+    updated_at      TEXT
+);
+
+-- Per-photo album membership
+CREATE TABLE IF NOT EXISTS photo_albums (
+    photo_id        INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+    album_id        INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+    flickr_pushed   INTEGER DEFAULT 0,      -- boolean: added to Flickr photoset?
+    pushed_at       TEXT,
+    PRIMARY KEY (photo_id, album_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_photo_albums_photo   ON photo_albums(photo_id);
+CREATE INDEX IF NOT EXISTS idx_photo_albums_album   ON photo_albums(album_id);
+CREATE INDEX IF NOT EXISTS idx_photo_albums_pending ON photo_albums(flickr_pushed)
+    WHERE flickr_pushed = 0;
