@@ -835,7 +835,7 @@ def main():
     parser = argparse.ArgumentParser(description="Blue Pearmain review UI")
     parser.add_argument("--config", default="config/config.yml")
     parser.add_argument("--port",   type=int, default=5173)
-    parser.add_argument("--host",   default="127.0.0.1")
+    parser.add_argument("--host",   default="0.0.0.0")
     parser.add_argument("--debug",  action="store_true")
     args = parser.parse_args()
 

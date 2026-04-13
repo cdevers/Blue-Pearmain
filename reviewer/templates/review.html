@@ -144,7 +144,7 @@
 
 {% block content %}
 
-<div class="toolbar">
+<div class="toolbar" id="top">
   <select id="state-select" onchange="changeState(this.value)">
     <option value="candidate_public" {% if state_filter=='candidate_public' %}selected{% endif %}>
       Candidate public ({{ stats.by_state.get('candidate_public',0) }})
@@ -261,7 +261,12 @@
   {% endif %}
   <span>Page {{ page }} of {{ total_pages }}</span>
   {% if page < total_pages %}
-    <a href="{{ url_for('review', state=state_filter, page=page+1, person=person_filter or '') }}">Next →</a>
+    <a href="{{ url_for('review', state=state_filter, page=page,
+                        person=person_filter or '') }}#top">
+      Reload ↺
+    </a>
+    <a href="{{ url_for('review', state=state_filter, page=page+1, person=person_filter or '') }}"
+       style="font-size:11px; color:var(--muted)">Next page →</a>
   {% endif %}
 </div>
 
@@ -275,7 +280,10 @@ function selectCard(card) {
   if (selected) selected.classList.remove('selected');
   selected = card;
   card.classList.add('selected');
-  card.focus();
+  // 'nearest' doesn't scroll if already visible
+  card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  // preventScroll: true stops iOS Safari from overriding our scroll position
+  card.focus({ preventScroll: true });
 }
 
 function openDetail(id) {
@@ -314,11 +322,11 @@ document.addEventListener('keydown', e => {
   if (e.key === 'j' || e.key === 'ArrowDown') {
     e.preventDefault();
     const next = cards[idx + 1];
-    if (next) { selectCard(next); next.scrollIntoView({block:'nearest'}); }
+    if (next) selectCard(next);
   } else if (e.key === 'k' || e.key === 'ArrowUp') {
     e.preventDefault();
     const prev = cards[idx - 1];
-    if (prev) { selectCard(prev); prev.scrollIntoView({block:'nearest'}); }
+    if (prev) selectCard(prev);
   } else if (e.key === 'p' || e.key === 'P') {
     if (selected) quickDecide(+selected.dataset.id, 'make_public', selected);
   } else if (e.key === 'x' || e.key === 'X') {
@@ -353,6 +361,10 @@ document.addEventListener('keydown', e => {
   if ((e.key === 'z' || e.key === 'Z') && !e.target.matches('input, textarea, select')) {
     doUndo();
   }
+});
+
+window.addEventListener('load', () => {
+  window.scrollTo({ top: 0, behavior: 'instant' });
 });
 </script>
 {% endblock %}

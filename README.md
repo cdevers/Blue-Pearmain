@@ -190,6 +190,8 @@ The grid view shows photos with proposed tags and action buttons. Keyboard short
 
 In the detail view the action buttons are pinned to the top of the sidebar, so their position stays consistent regardless of how much metadata or how many tags a photo has. Any decision automatically advances to the next photo.
 
+**Mobile (iPhone/iPad):** The review grid works on iOS Safari. After reviewing a batch, tap **Reload ↺** at the bottom to refresh the queue in place — this avoids a pagination issue where "Next" would skip photos that had just been decided. The single-photo detail view is currently desktop-optimised; the sidebar overlaps the image on narrow screens, so the grid view is recommended on mobile.
+
 Both public and private decisions push tags to Flickr — tags are useful for search even on private photos. Flickr pushes happen in a background thread, so the UI response is immediate; push errors are logged but do not block the review flow.
 
 ### Undo
