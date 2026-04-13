@@ -1,7 +1,7 @@
 # Album & Metadata Sync: Apple Photos ↔ Flickr
 
 **Blue Pearmain — Architecture Plan**
-*Status: Proposed | Author: cdevers | Date: 2026-04-13*
+*Status: In progress (Phase 1) | Author: cdevers | Date: 2026-04-13*
 
 ---
 
@@ -17,6 +17,61 @@ time. This document specifies a two-phase extension to additionally sync:
   Photos albums are mirrored as Flickr photosets.
 - **Phase 2 (Flickr → Apple Photos):** metadata (title, description, tags)
   written back to Photos, with mismatch detection and resolution.
+
+---
+
+## Implementation Notes
+
+These notes were added after `claude` reviewed the actual codebase before
+implementing Phase 1. They refine details that the original design left
+underspecified.
+
+### Gap 1 — Scanner early-continue bypasses album sync
+
+`poller/scanner.py` skips further processing for photos whose
+`date_analyzed` hasn't changed:
+
+```python
+if existing_by_uuid.get("date_analyzed") == photo_row.get("date_analyzed"):
+    continue  # nothing new from Apple
+```
+
+Album membership can change without the ML analysis date changing — for
+example, when a user adds an existing photo to a new album days after it was
+taken. Album upserts must therefore happen **before** this `continue`, not
+after it. The scanner implementation must call `sync_photo_albums()` in
+three places: before the early-continue, after a changed-analysis upsert,
+and after a new-photo insert.
+
+### Gap 2 — Reviewer album push belongs inside `_push()`
+
+`reviewer/app.py` runs permission and tag pushes inside a `_push()`
+background thread. The album push call must live **inside** `_push()` —
+gated on `perms_ok` and `_decision == "make_public"` — so it shares the
+same thread, error handling, and DB commit path, rather than being spawned
+separately. The pseudocode in the Phase 1 section below reflects this.
+
+### Gap 3 — `db/migrations/` directory does not exist yet
+
+The migration for Phase 1 must create this directory. No `__init__.py` is
+needed since migration scripts are run directly.
+
+### Gap 4 — Primary photo for new photosets
+
+`flickr.photosets.create` requires a primary photo ID. The implementation
+uses the photo currently being pushed as the primary (not the oldest in the
+album), which avoids an extra DB query and is sufficient in practice.
+
+### Confirmed patterns to follow
+
+- `FlickrClient._call(method, params, http_method="POST")` — all write
+  methods use POST.
+- DB upserts: `INSERT OR IGNORE`, then `UPDATE` if needed; always
+  `conn.commit()`.
+- `bp` CLI: thin `cmd_*` dispatch functions, logic lives in separate
+  modules (e.g. `flickr/sync_albums.py`).
+- Tests: `unittest.TestCase` with `tempfile.TemporaryDirectory()` + real
+  SQLite; Flickr mocked via `unittest.mock.MagicMock`.
 
 ---
 
@@ -69,20 +124,28 @@ Add a migration: `db/migrations/migrate_003_albums.py`.
 ### Scanner Changes (`poller/scanner.py`)
 
 `osxphotos` already exposes album membership via `photo.albums` (a list of
-`AlbumInfo` objects, each with `.uuid` and `.title`). The scanner should:
+`AlbumInfo` objects, each with `.uuid` and `.title`). Add a helper:
 
-1. For each photo processed, collect its album list.
-2. Upsert each album into the `albums` table (by `apple_uuid`).
-3. Upsert rows into `photo_albums` for each (photo, album) pair, setting
-   `flickr_pushed = 0` if the row is new.
+```python
+def sync_photo_albums(photo, photo_db_id: int, db: Database, dry_run: bool) -> None:
+    albums = getattr(photo, "albums", []) or []
+    for album in albums:
+        if getattr(album, "album_type", None) != "Album":
+            continue  # skip SmartAlbum, Folder, system albums
+        album_id = db.upsert_album(album.uuid, album.title)
+        db.upsert_photo_album(photo_db_id, album_id)
+```
 
-This is additive — no change to existing scanner outputs or privacy
-classification.
+Call this in **three places** inside `scan()`:
 
-> **Note:** Filter out smart albums and system albums (e.g. "Recents",
-> "Favourites", "All Photos"). Only user-created albums should be synced.
-> `osxphotos` marks smart albums via `album.album_type`; filter to
-> `album_type == "Album"` (not `"SmartAlbum"` or `"Folder"`).
+1. **Before the early-continue** (photo matched, analysis date unchanged) —
+   album membership changes even when ML data doesn't; this is the critical
+   fix relative to the naive implementation.
+2. **After upsert** for matched photos with changed analysis data.
+3. **After upsert** for newly inserted Photos-only photos.
+
+> **Note:** Filter to `album_type == "Album"` only. Skip `"SmartAlbum"`,
+> `"Folder"`, and system albums (e.g. "Recents", "Favourites").
 
 ### Flickr Client Changes (`flickr/flickr_client.py`)
 
@@ -131,22 +194,26 @@ Key behaviour:
 
 ### Reviewer Integration (`reviewer/app.py`)
 
-The existing review approval path already calls tag-push and perm-push.
-Extend it to also call `push_photo_to_albums` after a successful perm push:
+Album push must live **inside** the existing `_push()` background thread,
+gated on both `perms_ok` and `_decision == "make_public"`. This ensures it
+shares the same error handling and DB commit path as tag and permission
+pushes. The correct placement is after the `if perms_ok:` DB update block,
+still inside the `try`:
 
 ```python
-# Existing flow (simplified):
-flickr.set_permissions(flickr_id, public=True)
-db.mark_perms_pushed(photo_id)
-flickr.add_tags(flickr_id, tags)
-db.mark_tags_pushed(photo_id)
-
-# New addition:
-album_pusher.push_photo_to_albums(db, flickr, photo_id)
+if perms_ok and _decision == "make_public":
+    try:
+        from flickr.album_pusher import push_photo_to_albums
+        n = push_photo_to_albums(db(), c, _photo_id)
+        if n:
+            log.info("background push: added to %d photosets photo_id=%s", n, _photo_id)
+    except Exception as e:
+        log.error("background push: album sync failed photo_id=%s: %s", _photo_id, e)
 ```
 
-This means every photo approved through the reviewer is immediately placed
-into its corresponding Flickr photosets as part of the same action.
+Do **not** spawn a separate thread for album push — it must run inside
+`_push()` so failures are logged consistently and don't leave the DB in a
+partial state relative to the permission push.
 
 ### CLI: `bp sync-albums`
 
@@ -258,15 +325,16 @@ CREATE TABLE IF NOT EXISTS metadata_conflicts (
 | File | Change |
 |------|--------|
 | `db/schema.sql` | Add `albums`, `photo_albums` tables and indexes |
-| `db/migrations/migrate_003_albums.py` | Migration script |
-| `db/db.py` | Add album CRUD methods |
-| `poller/scanner.py` | Populate `albums` / `photo_albums` during scan |
+| `db/migrations/migrate_003_albums.py` | New: idempotent migration + `schema_migrations` record; also creates `db/migrations/` directory |
+| `db/db.py` | Add `upsert_album`, `upsert_photo_album`, `get_pending_album_pushes`, `mark_album_pushed`, `set_album_flickr_set_id` |
+| `poller/scanner.py` | Add `sync_photo_albums()` helper; call in 3 places in `scan()` |
 | `flickr/flickr_client.py` | Add `create_photoset`, `add_photo_to_photoset`, `get_photosets` |
-| `flickr/album_pusher.py` | New: push logic for album sync |
-| `reviewer/app.py` | Call `push_photo_to_albums` on approval |
-| `bp` | Add `sync-albums` subcommand |
-| `tests/test_core.py` | Tests for album DB methods, pusher, CLI |
-| `README.md` | Document `sync-albums` command |
+| `flickr/album_pusher.py` | New: `push_photo_to_albums()` |
+| `flickr/sync_albums.py` | New: `bp sync-albums` subcommand logic (CLI stays thin) |
+| `reviewer/app.py` | Add album push inside existing `_push()` background thread |
+| `bp` | Add `sync-albums` subparser + `cmd_sync_albums` |
+| `tests/test_core.py` | Add `TestAlbumDB`, `TestAlbumPusher`, `TestSyncAlbumsCLI` |
+| `README.md` | Add `sync-albums` to CLI command table; add "Album Sync" section |
 
 ### Phase 2 — new or modified files (deferred)
 
@@ -293,8 +361,10 @@ CREATE TABLE IF NOT EXISTS metadata_conflicts (
    explicit `--remove` flag.
 
 3. **Primary photo for new photosets:** `flickr.photosets.create` requires
-   a primary photo. Use the oldest photo in the album (by `date_taken`) as
-   the primary, since that's the most natural ordering.
+   a primary photo. The implementation uses the photo currently being pushed
+   as the primary, which avoids an extra DB query. Using the oldest photo in
+   the album would be more semantically correct but is not worth the
+   additional complexity.
 
 4. **osxphotos write permissions (Phase 2):** macOS Automation permissions
    may require a one-time user prompt. Document this clearly in the Phase 2
@@ -302,86 +372,24 @@ CREATE TABLE IF NOT EXISTS metadata_conflicts (
 
 ---
 
-## Instructions for `claude` CLI — Phase 1 Implementation
+## Verification
 
-The following is a prompt you can give to the `claude` CLI tool to begin
-implementing Phase 1. Run it from the root of the Blue Pearmain repo:
+After implementation, confirm with:
 
+```bash
+# Schema applies cleanly to a fresh DB
+python -c "
+from db.db import Database; import tempfile, pathlib
+d = Database(pathlib.Path(tempfile.mkdtemp()) / 't.db')
+print(d.conn.execute(\"SELECT name FROM sqlite_master WHERE type='table'\").fetchall())
+"
+
+# Migration runs against the live DB
+python db/migrations/migrate_003_albums.py --config config/config.yml
+
+# Full test suite
+python tests/test_core.py
+
+# Dry-run batch sync (after a scanner run to populate photo_albums)
+bp sync-albums --dry-run --verbose
 ```
-claude
-```
-
-Then paste:
-
----
-
-**Prompt for `claude`:**
-
-> We are implementing Phase 1 of the album sync feature for Blue Pearmain,
-> as described in `docs/album-metadata-sync.md`. Please implement the
-> following in order, with tests after each step:
->
-> **Step 1 — Schema & migration**
-> - Add `albums` and `photo_albums` tables and their indexes to
->   `db/schema.sql` exactly as specified in the plan.
-> - Write `db/migrations/migrate_003_albums.py` (idempotent, registers in
->   `schema_migrations`).
-> - Add album CRUD methods to `db/db.py`:
->   - `upsert_album(apple_uuid, name) -> int` (returns album row id)
->   - `upsert_photo_album(photo_id, album_id)` (no-op if already exists)
->   - `get_pending_album_pushes(limit=500) -> list[dict]` (rows where
->     `flickr_pushed=0` and photo has a `flickr_id` and
->     `perms_pushed_flickr=1`)
->   - `mark_album_pushed(photo_id, album_id)`
->
-> **Step 2 — Scanner**
-> - In `poller/scanner.py`, after the existing per-photo upsert, collect
->   `photo.albums` from the `osxphotos` `PhotoInfo` object.
-> - Filter to user-created albums only: `album_type == "Album"` (skip smart
->   albums, system albums).
-> - Upsert each album, then upsert a `photo_albums` row for each
->   (photo, album) pair.
-> - Do not change any existing scanner output or privacy classification.
->
-> **Step 3 — Flickr client**
-> - Add `create_photoset(title, primary_photo_id) -> str` to
->   `flickr/flickr_client.py`. Returns the new photoset ID.
-> - Add `add_photo_to_photoset(photoset_id, photo_id) -> None`.
-> - Add `get_photosets() -> list[dict]`.
-> - All three must use the existing retry/jitter/429 infrastructure.
->
-> **Step 4 — Album pusher**
-> - Create `flickr/album_pusher.py` with
->   `push_photo_to_albums(db, flickr, photo_id) -> int`.
-> - Creates the Flickr photoset if `albums.flickr_set_id` is null (using
->   the photo being pushed as the primary).
-> - Adds the photo to the photoset.
-> - Marks `photo_albums.flickr_pushed = 1` only on confirmed API success.
-> - Returns the count of photosets updated.
->
-> **Step 5 — Reviewer integration**
-> - In `reviewer/app.py`, after the existing tag-push on approval, call
->   `push_photo_to_albums`. Import from `flickr.album_pusher`.
-> - Log how many photosets were updated (or zero if the photo has no albums).
->
-> **Step 6 — CLI**
-> - Add a `sync-albums` subcommand to `bp`.
-> - Accepts `--dry-run`, `--album NAME` (filter to one album), `--limit N`.
-> - Uses `db.get_pending_album_pushes()` and calls `push_photo_to_albums`.
-> - Prints summary: `albums created=N  photos added=N  skipped=N  failed=N`.
-> - Exit codes: 0 = success, 1 = partial failure, 2 = operational error.
->
-> **Step 7 — Tests & docs**
-> - Add tests to `tests/test_core.py` covering:
->   - Album DB CRUD methods
->   - `push_photo_to_albums` (mock Flickr client)
->   - `sync-albums` CLI exit codes (0/1/2)
->   - Reviewer approval path now calls album pusher
-> - Update `README.md`: add `sync-albums` to the CLI command table and
->   document the feature in a new "Album Sync" section.
-> - Run `python tests/test_core.py` and confirm all tests pass before
->   committing.
->
-> Work through all steps. Ask if anything is ambiguous before writing code.
-> Do not change existing behavior of the scanner, poller, reconciler, or
-> reviewer beyond what is specified above.
