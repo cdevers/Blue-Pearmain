@@ -86,6 +86,19 @@ class TestPaginationReloadLink:
         html = resp.data.decode()
         assert "Next page" in html
 
+    def test_r_key_shortcut_in_handler(self, client):
+        """Pressing R must call reloadPage() via the keyboard handler."""
+        resp = client.get(self._URL)
+        html = resp.data.decode()
+        assert "'r'" in html or '"r"' in html
+        assert "'R'" in html or '"R"' in html
+
+    def test_r_key_shown_in_shortcuts_hint(self, client):
+        """The toolbar shortcuts hint must list the R key."""
+        resp = client.get(self._URL)
+        html = resp.data.decode()
+        assert ">R<" in html or "kbd>R" in html
+
 
 # ---------------------------------------------------------------------------
 # Bug 2 — Scroll to top on page load

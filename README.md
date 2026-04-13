@@ -172,6 +172,7 @@ The grid view shows photos with proposed tags and action buttons. Keyboard short
 | `Space` | Skip (decide later) |
 | `Enter` | Open detail view |
 | `Z` | Undo last decision |
+| `R` | Reload queue (same page, scroll to top) |
 
 **Detail view:**
 

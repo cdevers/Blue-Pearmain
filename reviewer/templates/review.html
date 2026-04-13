@@ -191,6 +191,7 @@
     <span><kbd>J</kbd><kbd>K</kbd> navigate</span>
     <span><kbd>Enter</kbd> detail</span>
     <span><kbd>Z</kbd> undo</span>
+    <span><kbd>R</kbd> reload</span>
   </div>
 </div>
 
@@ -333,6 +334,8 @@ document.addEventListener('keydown', e => {
     if (selected) quickDecide(+selected.dataset.id, 'skip', selected);
   } else if (e.key === 'Enter') {
     if (selected) openDetail(+selected.dataset.id);
+  } else if (e.key === 'r' || e.key === 'R') {
+    reloadPage();
   }
 });
 
