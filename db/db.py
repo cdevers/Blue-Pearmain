@@ -436,7 +436,12 @@ class Database:
         self.conn.commit()
 
     def get_pending_album_pushes(self, limit: int = 500) -> list[dict]:
-        """Return photo+album pairs ready to push: flickr_id present, perms pushed, not yet synced."""
+        """Return photo+album pairs ready to push: flickr_id present, review decision made, not yet synced.
+
+        Includes both make_public photos (perms_pushed_flickr=1) and keep_private photos
+        (review_decision='keep_private'), since private photos should still appear in photosets
+        for personal archive organisation.
+        """
         rows = self.conn.execute(
             """SELECT pa.photo_id, pa.album_id,
                       p.flickr_id,
@@ -446,7 +451,7 @@ class Database:
                JOIN albums  a ON a.id = pa.album_id
                WHERE pa.flickr_pushed = 0
                  AND p.flickr_id IS NOT NULL
-                 AND p.perms_pushed_flickr = 1
+                 AND (p.perms_pushed_flickr = 1 OR p.review_decision = 'keep_private')
                LIMIT ?""",
             (limit,),
         ).fetchall()
@@ -467,6 +472,30 @@ class Database:
             (flickr_set_id, flickr_set_url, _now_iso(), album_id),
         )
         self.conn.commit()
+
+    def get_photo_albums(self, photo_id: int) -> list[dict]:
+        """Return album membership for one photo, with Flickr sync status."""
+        rows = self.conn.execute(
+            """SELECT a.id AS album_id, a.name, a.flickr_set_id, a.flickr_set_url,
+                      pa.flickr_pushed, pa.pushed_at
+               FROM photo_albums pa
+               JOIN albums a ON a.id = pa.album_id
+               WHERE pa.photo_id = ?
+               ORDER BY a.name""",
+            (photo_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_album_counts_for_photos(self, photo_ids: list[int]) -> dict[int, int]:
+        """Return {photo_id: album_count} for a batch of photo IDs."""
+        if not photo_ids:
+            return {}
+        placeholders = ",".join("?" * len(photo_ids))
+        rows = self.conn.execute(
+            f"SELECT photo_id, COUNT(*) AS cnt FROM photo_albums WHERE photo_id IN ({placeholders}) GROUP BY photo_id",
+            photo_ids,
+        ).fetchall()
+        return {r["photo_id"]: r["cnt"] for r in rows}
 
     # -----------------------------------------------------------------------
     # Stats (for dashboard)

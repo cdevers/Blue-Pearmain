@@ -222,14 +222,14 @@
     <!-- Actions — fixed at top so position is consistent across photos -->
     <div class="action-row">
       <button class="btn btn-public" onclick="doDecide('make_public', true)">
-        <span class="key-hint">P</span> Make public + push to Flickr
+        <span class="key-hint">P</span> Make public + push to Flickr{% if albums %} + photosets{% endif %}
       </button>
       <button class="btn btn-public" style="background:#1e5c30"
               onclick="doDecide('make_public', false)">
         <span class="key-hint">A</span> Approve (don't push yet)
       </button>
       <button class="btn btn-private" onclick="doDecide('keep_private', true)">
-        <span class="key-hint">X</span> Keep private (push tags)
+        <span class="key-hint">X</span> Keep private + push tags{% if albums %} + photosets{% endif %}
       </button>
       <button class="btn btn-skip" onclick="doDecide('skip', false)">
         <span class="key-hint">Space</span> Skip for now
@@ -326,6 +326,27 @@
         <span class="tag" style="background:#1a2a1a; color:#6a9e6a">{{ label }}</span>
         {% endfor %}
       </div>
+    </div>
+    {% endif %}
+
+    <!-- Albums / photosets -->
+    {% if albums %}
+    <div class="meta-section">
+      <h3>Albums → Photosets</h3>
+      {% for album in albums %}
+      <div class="meta-row" style="align-items:center">
+        <span class="label" style="min-width:0; flex:1">{{ album.name }}</span>
+        {% if album.flickr_pushed %}
+          {% if album.flickr_set_id %}
+          <span style="color:#6a9e6a; font-size:11px; white-space:nowrap">✓ synced</span>
+          {% else %}
+          <span style="color:#6a9e6a; font-size:11px; white-space:nowrap">✓ pushed</span>
+          {% endif %}
+        {% else %}
+          <span style="color:var(--muted); font-size:11px; white-space:nowrap">pending push</span>
+        {% endif %}
+      </div>
+      {% endfor %}
     </div>
     {% endif %}
 

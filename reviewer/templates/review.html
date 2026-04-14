@@ -104,6 +104,16 @@
   margin-bottom: 6px;
   min-height: 14px;
 }
+.album-badge {
+  display: inline-block;
+  font-size: 9px;
+  color: #7a9fc0;
+  background: #1a2533;
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-bottom: 4px;
+  white-space: nowrap;
+}
 .photo-card .actions {
   display: flex;
   gap: 4px;
@@ -230,6 +240,9 @@
           <span style="color:#444">no tags yet</span>
         {% endif %}
       </div>
+      {% if photo.album_count %}
+      <span class="album-badge">&#128193; {{ photo.album_count }} album{{ 's' if photo.album_count != 1 }}</span>
+      {% endif %}
       <div class="actions">
         <button class="btn-pub"
                 onclick="event.stopPropagation(); quickDecide({{ photo.id }}, 'make_public', this.closest('.photo-card'))">

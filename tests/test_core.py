@@ -1840,6 +1840,69 @@ class TestAlbumDB(unittest.TestCase):
         pending = self.db.get_pending_album_pushes()
         self.assertEqual(pending, [])
 
+    def test_get_pending_includes_keep_private_photos(self):
+        """keep_private photos with flickr_id but perms_pushed=0 should be included."""
+        import uuid as _uuid
+        photo_id = self.db.upsert_photo({
+            "uuid": str(_uuid.uuid4()),
+            "original_filename": "private.jpg",
+            "privacy_state": "keep_private",
+            "review_decision": "keep_private",
+            "flickr_id": "f999",
+            "perms_pushed_flickr": 0,
+            "proposed_tags": [],
+            "apple_persons": [],
+            "apple_labels": [],
+        })
+        album_id = self.db.upsert_album("uuid-prv", "Private Album")
+        self.db.upsert_photo_album(photo_id, album_id)
+
+        pending = self.db.get_pending_album_pushes()
+        photo_ids = [r["photo_id"] for r in pending]
+        self.assertIn(photo_id, photo_ids)
+
+    def test_get_photo_albums_returns_membership(self):
+        photo_id = _seed_photo(self.db, flickr_id="f001", perms_pushed=1)
+        album_id = self.db.upsert_album("uuid-a", "Trip Photos")
+        self.db.upsert_photo_album(photo_id, album_id)
+
+        albums = self.db.get_photo_albums(photo_id)
+        self.assertEqual(len(albums), 1)
+        self.assertEqual(albums[0]["name"], "Trip Photos")
+        self.assertEqual(albums[0]["flickr_pushed"], 0)
+
+    def test_get_photo_albums_shows_pushed_status(self):
+        photo_id = _seed_photo(self.db, flickr_id="f001", perms_pushed=1)
+        album_id = self.db.upsert_album("uuid-a", "Trip Photos")
+        self.db.upsert_photo_album(photo_id, album_id)
+        self.db.mark_album_pushed(photo_id, album_id)
+
+        albums = self.db.get_photo_albums(photo_id)
+        self.assertEqual(albums[0]["flickr_pushed"], 1)
+        self.assertIsNotNone(albums[0]["pushed_at"])
+
+    def test_get_photo_albums_empty_for_photo_with_no_albums(self):
+        photo_id = _seed_photo(self.db, flickr_id="f001")
+        albums = self.db.get_photo_albums(photo_id)
+        self.assertEqual(albums, [])
+
+    def test_get_album_counts_for_photos(self):
+        photo1 = _seed_photo(self.db, flickr_id="f001")
+        photo2 = _seed_photo(self.db, flickr_id="f002")
+        album_a = self.db.upsert_album("uuid-a", "Album A")
+        album_b = self.db.upsert_album("uuid-b", "Album B")
+        self.db.upsert_photo_album(photo1, album_a)
+        self.db.upsert_photo_album(photo1, album_b)
+        self.db.upsert_photo_album(photo2, album_a)
+
+        counts = self.db.get_album_counts_for_photos([photo1, photo2])
+        self.assertEqual(counts[photo1], 2)
+        self.assertEqual(counts[photo2], 1)
+
+    def test_get_album_counts_empty_input(self):
+        counts = self.db.get_album_counts_for_photos([])
+        self.assertEqual(counts, {})
+
 
 # ---------------------------------------------------------------------------
 # Album pusher

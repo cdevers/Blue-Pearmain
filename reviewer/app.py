@@ -96,7 +96,7 @@ def review():
     state_filter = request.args.get("state", "candidate_public")
     person_filter = request.args.get("person", "").strip()
     page = int(request.args.get("page", 1))
-    per_page = int(request.args.get("per_page", 48))
+    per_page = int(request.args.get("per_page", 60))
     offset = (page - 1) * per_page
 
     valid_states = ["candidate_public", "needs_review", "auto_private",
@@ -141,6 +141,12 @@ def review():
         total = db().review_queue_count(states=[state_filter])
 
     total_pages = max(1, (total + per_page - 1) // per_page)
+
+    # Attach album count to each photo dict for the grid badge
+    photo_ids = [p["id"] for p in photos]
+    album_counts = db().get_album_counts_for_photos(photo_ids)
+    for p in photos:
+        p["album_count"] = album_counts.get(p["id"], 0)
 
     return render_template(
         "review.html",
@@ -198,6 +204,8 @@ def photo_detail(photo_id: int):
     if photo.get("flickr_id"):
         flickr_url = f"https://www.flickr.com/photos/cdevers/{photo['flickr_id']}"
 
+    albums = db().get_photo_albums(photo_id)
+
     return render_template(
         "photo.html",
         photo=photo,
@@ -206,6 +214,7 @@ def photo_detail(photo_id: int):
         next_id=next_id,
         state=state,
         person_filter=person_filter,
+        albums=albums,
     )
 
 
@@ -557,7 +566,10 @@ def api_decide():
                     if perms_ok or tags_ok:
                         db().conn.commit()
 
-                    if perms_ok and _decision == "make_public":
+                    # Album push: for make_public, wait until perms are confirmed;
+                    # for keep_private, push immediately (private photos still belong in photosets).
+                    do_album_push = (perms_ok and _decision == "make_public") or _decision == "keep_private"
+                    if do_album_push:
                         try:
                             from flickr.album_pusher import push_photo_to_albums
                             n = push_photo_to_albums(db(), c, _photo_id)

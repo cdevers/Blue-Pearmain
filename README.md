@@ -181,9 +181,9 @@ The grid view shows photos with proposed tags and action buttons. Keyboard short
 
 | Key | Action |
 |---|---|
-| `P` | Make public + push to Flickr |
+| `P` | Make public + push to Flickr (+ photosets if in any album) |
 | `A` | Approve (don't push yet) |
-| `X` | Keep private + push tags |
+| `X` | Keep private + push tags (+ photosets if in any album) |
 | `Space` | Skip |
 | `T` | Focus tag editor |
 | `N` | Go to Faces page for this person |
@@ -196,7 +196,9 @@ In the detail view the action buttons are pinned to the top of the sidebar, so t
 
 **Mobile (iPhone/iPad):** The review grid works on iOS Safari. After reviewing a batch, tap **Reload ↺** at the bottom to refresh the queue in place — this avoids a pagination issue where "Next" would skip photos that had just been decided. The single-photo detail view is currently desktop-optimised; the sidebar overlaps the image on narrow screens, so the grid view is recommended on mobile.
 
-Both public and private decisions push tags to Flickr — tags are useful for search even on private photos. Flickr pushes happen in a background thread, so the UI response is immediate; push errors are logged but do not block the review flow.
+Both public and private decisions push tags to Flickr — tags are useful for search even on private photos. Both decisions also push album membership to Flickr photosets — if a photo belongs to an Apple Photos album, it is added to the corresponding Flickr photoset regardless of its privacy setting. Flickr pushes happen in a background thread, so the UI response is immediate; push errors are logged but do not block the review flow.
+
+**Album membership** is displayed on the single-photo detail page, under an "Albums → Photosets" section that shows each album name and whether it has been synced to Flickr. The review grid shows a small album badge (e.g. "📁 2 albums") on any photo that belongs to at least one album. Action button labels on the detail page include "+ photosets" to make this push explicit.
 
 ### Undo
 
@@ -228,9 +230,11 @@ Blue Pearmain mirrors Apple Photos albums as Flickr photosets. When `bp scan` ru
 
 ### How it works
 
-1. **At review time** — when you approve a photo in the reviewer UI (mark it public), it is immediately added to any corresponding Flickr photosets in the same background push that sets permissions and tags. New photosets are created automatically if none exists yet for that album.
+1. **At review time** — when you make a decision in the reviewer UI, the photo is immediately added to any corresponding Flickr photosets in the same background push that sets permissions and tags. New photosets are created automatically if none exists yet for that album.
+   - **Make public** — pushes permissions, tags, and album membership.
+   - **Keep private** — pushes tags and album membership (no permission change). Private photos still belong in photosets so your full archive is organised by album on Flickr, regardless of visibility.
 
-2. **Batch backfill** (`bp sync-albums`) — for photos already approved and pushed before album sync was set up, run this command to reconcile in arrears.
+2. **Batch backfill** (`bp sync-albums`) — for photos already reviewed and pushed before album sync was set up, run this command to reconcile in arrears.
 
 ### Filtering
 

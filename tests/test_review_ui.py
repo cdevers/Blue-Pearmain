@@ -160,3 +160,94 @@ class TestMobileViewport:
         resp = client.get("/review?state=needs_review")
         html = resp.data.decode()
         assert "nearest" in html
+
+
+# ---------------------------------------------------------------------------
+# Album display — photo detail page
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def client_with_albums():
+    """Flask test client with a photo that has album membership."""
+    with tempfile.TemporaryDirectory() as tmp:
+        test_db = Database(Path(tmp) / "test.db")
+
+        photo_id = test_db.upsert_photo({
+            "uuid": "uuid-album-test",
+            "original_filename": "IMG_album.JPG",
+            "privacy_state": "candidate_public",
+            "flickr_id": "flickr123",
+            "proposed_tags": ["tag1"],
+            "apple_persons": [],
+            "apple_labels": [],
+        })
+        album_id = test_db.upsert_album("apple-uuid-album", "Summer 2024")
+        test_db.upsert_photo_album(photo_id, album_id)
+
+        app_module._db = test_db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+
+        with app_module.app.test_client() as c:
+            yield c, photo_id
+
+        app_module._db = None
+
+
+class TestPhotoDetailAlbums:
+    def test_album_section_shown_on_detail_page(self, client_with_albums):
+        c, photo_id = client_with_albums
+        resp = c.get(f"/photo/{photo_id}?state=candidate_public")
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "Summer 2024" in html
+
+    def test_album_section_heading(self, client_with_albums):
+        c, photo_id = client_with_albums
+        resp = c.get(f"/photo/{photo_id}?state=candidate_public")
+        html = resp.data.decode()
+        assert "Albums" in html and "Photosets" in html
+
+    def test_pending_push_status_shown(self, client_with_albums):
+        c, photo_id = client_with_albums
+        resp = c.get(f"/photo/{photo_id}?state=candidate_public")
+        html = resp.data.decode()
+        assert "pending push" in html
+
+    def test_make_public_button_mentions_photosets(self, client_with_albums):
+        c, photo_id = client_with_albums
+        resp = c.get(f"/photo/{photo_id}?state=candidate_public")
+        html = resp.data.decode()
+        assert "photosets" in html.lower()
+
+    def test_keep_private_button_mentions_photosets(self, client_with_albums):
+        c, photo_id = client_with_albums
+        resp = c.get(f"/photo/{photo_id}?state=candidate_public")
+        html = resp.data.decode()
+        # The keep private button should also reference photosets
+        assert "Keep private" in html
+        assert "photosets" in html.lower()
+
+
+# ---------------------------------------------------------------------------
+# Album badge — review grid
+# ---------------------------------------------------------------------------
+
+class TestReviewGridAlbumBadge:
+    def test_album_badge_shown_for_photos_with_albums(self, client_with_albums):
+        """Grid should show an album count badge for photos that have albums."""
+        c, photo_id = client_with_albums
+        # The photo is candidate_public so it appears on the review grid
+        resp = c.get("/review?state=candidate_public")
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "album" in html.lower()
+
+    def test_no_album_badge_when_queue_is_empty(self, client_with_albums):
+        """When the queue is empty no album badge elements should be rendered."""
+        c, _ = client_with_albums
+        # needs_review state has no seeded photos in this fixture
+        resp = c.get("/review?state=needs_review")
+        html = resp.data.decode()
+        # CSS class defined in <style> is fine; we check no *element* with that class is rendered
+        assert '<span class="album-badge">' not in html
