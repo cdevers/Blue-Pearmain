@@ -35,7 +35,7 @@ from flask import (
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.db import Database
-from flickr.flickr_client import FlickrClient, FlickrError
+from flickr.flickr_client import FlickrClient, FlickrError, FLICKR_ERR_NOT_FOUND
 
 log = logging.getLogger("blue-pearmain.reviewer")
 app = Flask(__name__)
@@ -96,7 +96,7 @@ def review():
     state_filter = request.args.get("state", "candidate_public")
     person_filter = request.args.get("person", "").strip()
     page = int(request.args.get("page", 1))
-    per_page = int(request.args.get("per_page", 60))
+    per_page = int(request.args.get("per_page", 120))
     offset = (page - 1) * per_page
 
     valid_states = ["candidate_public", "needs_review", "auto_private",
@@ -680,12 +680,13 @@ def api_push_approved():
     if not rows:
         return jsonify({"ok": True, "pushed": 0, "failed": 0, "message": "Nothing to push"})
 
-    pushed = failed = 0
+    pushed = failed = skipped = 0
     for row in rows:
         photo_id  = row["id"]
         flickr_id = row["flickr_id"]
         tags      = _json_loads_safe(row["proposed_tags"])
         errors    = []
+        not_found = False
 
         try:
             c.set_permissions(flickr_id, is_public=1)
@@ -693,9 +694,17 @@ def api_push_approved():
                 "UPDATE photos SET perms_pushed_flickr = 1 WHERE id = ?", (photo_id,)
             )
         except FlickrError as e:
-            errors.append(str(e))
+            if e.code == FLICKR_ERR_NOT_FOUND:
+                log.warning(f"Photo {flickr_id} not found on Flickr (possibly deleted); skipping")
+                db().conn.execute(
+                    "UPDATE photos SET perms_pushed_flickr = 1, tags_pushed_flickr = 1 WHERE id = ?",
+                    (photo_id,)
+                )
+                not_found = True
+            else:
+                errors.append(str(e))
 
-        if tags:
+        if not not_found and tags:
             try:
                 from analyzer.tagger import merge_tags
                 c.add_tags(flickr_id, tags)
@@ -705,14 +714,16 @@ def api_push_approved():
             except FlickrError as e:
                 errors.append(str(e))
 
-        if errors:
+        if not_found:
+            skipped += 1
+        elif errors:
             failed += 1
             log.warning(f"Push failed for {flickr_id}: {errors}")
         else:
             pushed += 1
 
     db().conn.commit()
-    return jsonify({"ok": True, "pushed": pushed, "failed": failed})
+    return jsonify({"ok": True, "pushed": pushed, "failed": failed, "skipped": skipped})
 
 
 def _json_loads_safe(value):
