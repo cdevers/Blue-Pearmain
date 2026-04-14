@@ -338,6 +338,8 @@ The Flickr API client uses exponential backoff with jitter on transient failures
 
 Write operations (permissions and tags) only update the DB push flags after each operation succeeds individually — a failed tag push does not mark tags as pushed, and a failed permission change does not mark the photo as public. Both failures are logged with the Flickr photo ID for traceability. If Flickr's 75-tag limit is reached, the tag push is silently skipped and the permission change still proceeds normally.
 
+If a photo has been manually deleted from Flickr since it was approved, the batch push logs a warning and marks the photo as done (so it is not retried on subsequent pushes) rather than counting it as a failure. The rest of the batch continues unaffected. The dashboard toast shows a `skipped` count for these cases alongside the usual `pushed` and `failed` counts.
+
 If you suspect a push operation failed silently, the reconciliation script checks your DB's expected state against what Flickr actually has:
 
 ```bash

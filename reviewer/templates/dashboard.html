@@ -161,7 +161,9 @@ async function pushApproved() {
   const d = await r.json();
   btn.disabled = false;
   if (d.ok) {
-    const msg = d.message || `Pushed ${d.pushed} photos${d.failed ? ', ' + d.failed + ' failed' : ''}`;
+    const skippedPart = d.skipped ? `, ${d.skipped} skipped (deleted on Flickr)` : '';
+    const failedPart  = d.failed  ? `, ${d.failed} failed` : '';
+    const msg = d.message || `Pushed ${d.pushed} photos${skippedPart}${failedPart}`;
     toast(msg, d.failed ? 'err' : 'ok');
     document.getElementById('push-result').textContent = msg;
     setTimeout(() => location.reload(), 1500);
