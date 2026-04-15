@@ -1,7 +1,7 @@
 # Album & Metadata Sync: Apple Photos ↔ Flickr
 
 **Blue Pearmain — Architecture Plan**
-*Status: Phase 1 complete, Phase 2 deferred | Author: cdevers | Date: 2026-04-13*
+*Status: Phase 1 complete, Phase 2 deferred | Author: cdevers | Last updated: 2026-04-15*
 
 ---
 
@@ -194,21 +194,27 @@ Key behaviour:
 
 ### Reviewer Integration (`reviewer/app.py`)
 
-Album push must live **inside** the existing `_push()` background thread,
-gated on both `perms_ok` and `_decision == "make_public"`. This ensures it
-shares the same error handling and DB commit path as tag and permission
-pushes. The correct placement is after the `if perms_ok:` DB update block,
-still inside the `try`:
+Album push lives **inside** the existing `_push()` background thread,
+after the permission and tag push blocks. It is triggered for both
+`make_public` and `keep_private` decisions — private photos should still
+appear in photosets so the full archive is organised by album on Flickr
+regardless of visibility. For `make_public`, the album push waits until
+`perms_ok` is confirmed (i.e. the permission change succeeded) before
+adding the photo to any photoset. For `keep_private`, it fires
+unconditionally (there is no permission change to wait on).
 
 ```python
-if perms_ok and _decision == "make_public":
+# Album push: for make_public, wait until perms are confirmed;
+# for keep_private, push immediately (private photos still belong in photosets).
+do_album_push = (perms_ok and _decision == "make_public") or _decision == "keep_private"
+if do_album_push:
     try:
         from flickr.album_pusher import push_photo_to_albums
         n = push_photo_to_albums(db(), c, _photo_id)
         if n:
-            log.info("background push: added to %d photosets photo_id=%s", n, _photo_id)
-    except Exception as e:
-        log.error("background push: album sync failed photo_id=%s: %s", _photo_id, e)
+            log.info("background push: added to %d photoset(s) photo_id=%s", n, _photo_id)
+    except Exception as album_err:
+        log.error("background push: album sync failed photo_id=%s: %s", _photo_id, album_err)
 ```
 
 Do **not** spawn a separate thread for album push — it must run inside
@@ -228,7 +234,8 @@ Behaviour:
 1. Queries `photo_albums JOIN photos` for rows where:
    - `photo_albums.flickr_pushed = 0`
    - `photos.flickr_id IS NOT NULL`
-   - `photos.perms_pushed_flickr = 1` (already public on Flickr)
+   - `photos.perms_pushed_flickr = 1` (already public on Flickr) **or**
+     `photos.review_decision = 'keep_private'` (private photos still belong in photosets)
 2. Calls `push_photo_to_albums` for each.
 3. Prints a summary: `albums created=N  photos added=N  skipped=N  failed=N`.
 
@@ -326,7 +333,7 @@ CREATE TABLE IF NOT EXISTS metadata_conflicts (
 |------|--------|
 | `db/schema.sql` | Add `albums`, `photo_albums` tables and indexes |
 | `db/migrations/migrate_003_albums.py` | New: idempotent migration + `schema_migrations` record; also creates `db/migrations/` directory |
-| `db/db.py` | Add `upsert_album`, `upsert_photo_album`, `get_pending_album_pushes`, `mark_album_pushed`, `set_album_flickr_set_id` |
+| `db/db.py` | Add `upsert_album`, `upsert_photo_album`, `get_pending_album_pushes`, `mark_album_pushed`, `set_album_flickr_set_id`, `get_photo_albums`, `get_album_counts_for_photos` |
 | `poller/scanner.py` | Add `sync_photo_albums()` helper; call in 3 places in `scan()` |
 | `flickr/flickr_client.py` | Add `create_photoset`, `add_photo_to_photoset`, `get_photosets` |
 | `flickr/album_pusher.py` | New: `push_photo_to_albums()` |
@@ -355,18 +362,24 @@ CREATE TABLE IF NOT EXISTS metadata_conflicts (
    albums. Should these be mirrored as Flickr collections (which can contain
    photosets)? Flickr collections are a Pro feature — leave for later.
 
-2. **Album deletion:** if a photo is removed from an Apple Photos album,
-   should it be removed from the Flickr photoset? The safe default is *no*
-   — only additive sync in Phase 1. Removal can be added later with an
-   explicit `--remove` flag.
+2. **Album deletion:** *(decision made)* If a photo is removed from an
+   Apple Photos album, it is **not** removed from the Flickr photoset.
+   Phase 1 is additive-only. Removal can be added later with an explicit
+   `--remove` flag on `bp sync-albums`.
 
-3. **Primary photo for new photosets:** `flickr.photosets.create` requires
-   a primary photo. The implementation uses the photo currently being pushed
-   as the primary, which avoids an extra DB query. Using the oldest photo in
-   the album would be more semantically correct but is not worth the
-   additional complexity.
+3. **Primary photo for new photosets:** *(resolved)* `flickr.photosets.create`
+   requires a primary photo. The implementation uses the photo currently
+   being pushed as the primary, avoiding an extra DB query. This is
+   sufficient in practice.
 
-4. **osxphotos write permissions (Phase 2):** macOS Automation permissions
+4. **Private photos in photosets:** *(resolved)* Private photos (`keep_private`
+   decisions) are included in the album push. Both the reviewer integration
+   and `get_pending_album_pushes` treat `review_decision = 'keep_private'`
+   the same as a fully-pushed public photo for the purpose of photoset
+   membership, so the full archive is organised on Flickr regardless of
+   visibility.
+
+5. **osxphotos write permissions (Phase 2):** macOS Automation permissions
    may require a one-time user prompt. Document this clearly in the Phase 2
    implementation.
 
