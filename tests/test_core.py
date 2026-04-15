@@ -2078,5 +2078,158 @@ class TestSyncAlbumsCLI(unittest.TestCase):
         self.assertIn("photos added=0", result.stdout)
 
 
+# ---------------------------------------------------------------------------
+# End-to-end reconcile lifecycle: mismatch → fix → idempotent clean
+# ---------------------------------------------------------------------------
+
+class TestReconcileLifecycle(unittest.TestCase):
+    """
+    Full lifecycle test covering:
+      1. DB marks photo as pushed-public but Flickr still shows it private
+         → reconcile detects perm_mismatch, returns exit 1
+      2. reconcile --fix corrects Flickr, returns exit 0
+      3. Second reconcile run finds no mismatch, returns exit 0 (idempotent)
+    """
+
+    def setUp(self):
+        from unittest.mock import MagicMock
+        self._tmp = tempfile.mkdtemp()
+        self.db   = Database(Path(self._tmp) / "test.db")
+
+        # Seed: photo approved_public, perms pushed, tags pushed
+        self.photo_id = self.db.upsert_photo({
+            "uuid":               "uuid-e2e-001",
+            "original_filename":  "IMG_e2e.JPG",
+            "privacy_state":      "approved_public",
+            "flickr_id":          "flickr-e2e-001",
+            "perms_pushed_flickr": 1,
+            "tags_pushed_flickr":  1,
+            "proposed_tags":      ["nature", "landscape"],
+            "apple_persons":      [],
+            "apple_labels":       [],
+        })
+
+        # Build a reusable mock FlickrClient
+        self.mock_client = MagicMock()
+
+    def tearDown(self):
+        self.db.close()
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _photo_row(self):
+        return dict(self.db.conn.execute(
+            "SELECT * FROM photos WHERE id = ?", (self.photo_id,)
+        ).fetchone())
+
+    def _flickr_info_response(self, is_public: int, tags: list[str]):
+        """Build a minimal get_photo_info payload."""
+        return {
+            "photo": {
+                "visibility": {"ispublic": is_public},
+                "tags": {
+                    "tag": [{"raw": t} for t in tags]
+                },
+            }
+        }
+
+    def test_1_mismatch_detected_when_flickr_is_private(self):
+        """DB says public+pushed; Flickr says private → perm_mismatch."""
+        from poller.reconcile import check_photo
+        self.mock_client.get_photo_info.return_value = self._flickr_info_response(
+            is_public=0, tags=["nature", "landscape"]
+        )
+
+        result = check_photo(self.mock_client, self._photo_row(), fix=False, verbose=False)
+
+        self.assertEqual(result["status"], "perm_mismatch")
+        self.assertEqual(result["perm_expected"], "public")
+        self.assertEqual(result["perm_actual"],   "private")
+        self.assertEqual(result["fixes"],  [])   # fix=False — no API write
+        self.assertEqual(result["errors"], [])
+        self.mock_client.set_permissions.assert_not_called()
+
+    def test_2_fix_corrects_mismatch_and_calls_api(self):
+        """fix=True: reconcile calls set_permissions; result carries the fix."""
+        from poller.reconcile import check_photo
+        self.mock_client.get_photo_info.return_value = self._flickr_info_response(
+            is_public=0, tags=["nature", "landscape"]
+        )
+
+        result = check_photo(self.mock_client, self._photo_row(), fix=True, verbose=False)
+
+        self.assertEqual(result["status"], "perm_mismatch")
+        self.assertIn("perm", result["fixes"])
+        self.assertEqual(result["errors"], [])
+        self.mock_client.set_permissions.assert_called_once_with(
+            "flickr-e2e-001", is_public=1
+        )
+
+    def test_3_idempotent_second_run_is_clean(self):
+        """After Flickr is consistent, a second reconcile pass returns ok."""
+        from poller.reconcile import check_photo
+        self.mock_client.get_photo_info.return_value = self._flickr_info_response(
+            is_public=1, tags=["nature", "landscape"]
+        )
+
+        result = check_photo(self.mock_client, self._photo_row(), fix=True, verbose=False)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["fixes"],  [])
+        self.assertEqual(result["errors"], [])
+        self.mock_client.set_permissions.assert_not_called()
+
+    def test_4_tag_mismatch_detected_and_fixed(self):
+        """Tags on Flickr are missing some expected tags → tag_mismatch, then fixed."""
+        from poller.reconcile import check_photo
+        # Flickr has only "nature"; "landscape" is missing
+        self.mock_client.get_photo_info.return_value = self._flickr_info_response(
+            is_public=1, tags=["nature"]
+        )
+
+        result = check_photo(self.mock_client, self._photo_row(), fix=True, verbose=False)
+
+        self.assertEqual(result["status"], "tag_mismatch")
+        self.assertIn("tags", result["fixes"])
+        self.mock_client.add_tags.assert_called_once_with("flickr-e2e-001", ["landscape"])
+
+    def test_5_api_error_propagates_to_failed_count(self):
+        """Flickr API failure on get_photo_info → flickr_error status, not a crash."""
+        from poller.reconcile import check_photo
+        from flickr.flickr_client import FlickrError
+        self.mock_client.get_photo_info.side_effect = FlickrError(500, "Server Error")
+
+        result = check_photo(self.mock_client, self._photo_row(), fix=False, verbose=False)
+
+        self.assertEqual(result["status"], "flickr_error")
+        self.assertTrue(len(result["errors"]) > 0)
+        self.assertEqual(result["fixes"], [])
+
+    def test_6_updated_at_stamped_by_all_write_paths(self):
+        """set_privacy_state, record_review, and undo_decision must all update updated_at."""
+        import time
+
+        # set_privacy_state
+        before = self._photo_row()["updated_at"]
+        time.sleep(0.01)
+        self.db.set_privacy_state(self.photo_id, "keep_private", "test")
+        self.assertGreater(self._photo_row()["updated_at"], before,
+                           "set_privacy_state must update updated_at")
+
+        # record_review
+        before = self._photo_row()["updated_at"]
+        time.sleep(0.01)
+        self.db.record_review(self.photo_id, "make_public")
+        self.assertGreater(self._photo_row()["updated_at"], before,
+                           "record_review must update updated_at")
+
+        # undo_decision
+        before = self._photo_row()["updated_at"]
+        time.sleep(0.01)
+        self.db.undo_decision(self.photo_id)
+        self.assertGreater(self._photo_row()["updated_at"], before,
+                           "undo_decision must update updated_at")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

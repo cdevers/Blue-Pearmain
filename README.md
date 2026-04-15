@@ -340,6 +340,8 @@ Write operations (permissions and tags) only update the DB push flags after each
 
 If a photo has been manually deleted from Flickr since it was approved, the batch push logs a warning and marks the photo as done (so it is not retried on subsequent pushes) rather than counting it as a failure. The rest of the batch continues unaffected. The dashboard toast shows a `skipped` count for these cases alongside the usual `pushed` and `failed` counts.
 
+`updated_at` is stamped on every write path — `upsert_photo`, `set_privacy_state`, `record_review`, and `undo_decision` — so the modification time of any row always reflects its true last-changed time regardless of how the change was made.
+
 If you suspect a push operation failed silently, the reconciliation script checks your DB's expected state against what Flickr actually has:
 
 ```bash

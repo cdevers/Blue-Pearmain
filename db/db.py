@@ -177,8 +177,8 @@ class Database:
 
     def set_privacy_state(self, photo_id: int, state: str, reason: str = ""):
         self.conn.execute(
-            "UPDATE photos SET privacy_state = ?, privacy_reason = ?, date_synced = ? WHERE id = ?",
-            (state, reason, _now_iso(), photo_id),
+            "UPDATE photos SET privacy_state = ?, privacy_reason = ?, date_synced = ?, updated_at = ? WHERE id = ?",
+            (state, reason, _now_iso(), _now_iso(), photo_id),
         )
         self.conn.commit()
 
@@ -193,9 +193,9 @@ class Database:
         self.conn.execute(
             """UPDATE photos
                SET review_decision = ?, review_notes = ?, reviewed_at = ?,
-                   privacy_state = ?, date_synced = ?
+                   privacy_state = ?, date_synced = ?, updated_at = ?
                WHERE id = ?""",
-            (decision, notes, _now_iso(), new_state, _now_iso(), photo_id),
+            (decision, notes, _now_iso(), new_state, _now_iso(), _now_iso(), photo_id),
         )
         self.conn.commit()
 
@@ -404,9 +404,10 @@ class Database:
                SET privacy_state       = ?,
                    review_decision     = NULL,
                    reviewed_at         = NULL,
-                   perms_pushed_flickr = 0
+                   perms_pushed_flickr = 0,
+                   updated_at          = ?
                WHERE id = ?""",
-            (new_state, photo_id),
+            (new_state, _now_iso(), photo_id),
         )
         self.conn.commit()
         return True
