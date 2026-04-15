@@ -14,6 +14,7 @@ Usage:
 import json
 import math
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -59,7 +60,7 @@ class Database:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: sqlite3.Connection | None = None
+        self._local = threading.local()  # per-thread connection storage
         self._ensure_schema()
 
     # -----------------------------------------------------------------------
@@ -67,7 +68,7 @@ class Database:
     # -----------------------------------------------------------------------
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        conn = sqlite3.connect(str(self.path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA foreign_keys = ON")
@@ -75,14 +76,17 @@ class Database:
 
     @property
     def conn(self) -> sqlite3.Connection:
-        if self._conn is None:
-            self._conn = self._connect()
-        return self._conn
+        """Return a per-thread SQLite connection, opening one if needed."""
+        if not getattr(self._local, "conn", None):
+            self._local.conn = self._connect()
+        return self._local.conn
 
     def close(self):
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        """Close the calling thread's connection."""
+        conn = getattr(self._local, "conn", None)
+        if conn:
+            conn.close()
+            self._local.conn = None
 
     def _ensure_schema(self):
         schema_path = Path(__file__).parent / "schema.sql"
