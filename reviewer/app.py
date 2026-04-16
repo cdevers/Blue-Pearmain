@@ -56,6 +56,13 @@ def client() -> FlickrClient | None:
     return _client
 
 
+@app.teardown_appcontext
+def _close_db_connection(exc):
+    """Close the per-thread SQLite connection at the end of every request."""
+    if _db is not None:
+        _db.close()
+
+
 # ---------------------------------------------------------------------------
 # Template helpers
 # ---------------------------------------------------------------------------
