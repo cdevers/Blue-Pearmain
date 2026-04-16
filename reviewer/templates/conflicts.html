@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% block title %}Metadata Conflicts — Blue Pearmain{% endblock %}
+
+{% block extra_style %}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.toolbar .count { color: var(--muted); font-size: 13px; }
+.toolbar .spacer { flex: 1; }
+.toolbar .shortcuts { display: flex; gap: 12px; font-size: 12px; color: var(--muted); }
+.toolbar .shortcuts kbd {
+  background: var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 11px;
+}
+
+.conflict-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 16px 24px;
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  overflow: hidden;
+  outline: none;
+}
+.conflict-card.selected { border-color: var(--accent); }
+.conflict-card .thumb {
+  width: 120px;
+  aspect-ratio: 4/3;
+  object-fit: cover;
+  background: var(--border);
+  display: block;
+}
+.conflict-card .body { padding: 14px 16px; }
+.conflict-card .filename {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 1fr 180px;
+  gap: 8px;
+  align-items: start;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+.field-row:first-of-type { border-top: none; }
+.field-name {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding-top: 2px;
+}
+.field-val {
+  word-break: break-word;
+  line-height: 1.4;
+}
+.field-val.flickr  { color: #6ab4f5; }
+.field-val.photos  { color: #f5a623; }
+.field-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn-flickr { background: #0a3d6b; border-color: #1a5fa8; color: #6ab4f5; }
+.btn-flickr:hover { background: #1a5fa8; }
+.btn-photos { background: #3d2a00; border-color: #7a5c00; color: #f5a623; }
+.btn-photos:hover { background: #7a5c00; color: #fff; }
+.btn-skip   { background: transparent; border-color: var(--border); color: var(--muted); }
+.resolved-badge {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 80px 24px;
+  color: var(--muted);
+}
+.empty-state p { margin-top: 8px; font-size: 14px; }
+{% endblock %}
+
+{% block content %}
+<div class="toolbar" id="top">
+  <strong>Metadata Conflicts</strong>
+  <span class="count">{{ conflict_groups | length }} photo{{ 's' if conflict_groups | length != 1 }}</span>
+  <span class="spacer"></span>
+  <div class="shortcuts">
+    <span><kbd>J</kbd><kbd>K</kbd> navigate</span>
+    <span><kbd>F</kbd> use Flickr</span>
+    <span><kbd>P</kbd> keep Photos</span>
+  </div>
+</div>
+
+{% if conflict_groups %}
+<div id="conflict-list">
+  {% for group in conflict_groups %}
+  <div class="conflict-card"
+       id="group-{{ group.photo_id }}"
+       tabindex="0"
+       data-photo-id="{{ group.photo_id }}">
+
+    {% if group.flickr_id and group.flickr_secret and group.flickr_server %}
+      <img class="thumb"
+           src="https://live.staticflickr.com/{{ group.flickr_server }}/{{ group.flickr_id }}_{{ group.flickr_secret }}_q.jpg"
+           loading="lazy" alt="">
+    {% elif group.thumbnail_path %}
+      <img class="thumb" src="{{ url_for('thumb', photo_id=group.photo_id) }}" loading="lazy" alt="">
+    {% else %}
+      <div class="thumb"></div>
+    {% endif %}
+
+    <div class="body">
+      <div class="filename">{{ group.original_filename }}</div>
+
+      {% for f in group.fields %}
+      <div class="field-row" id="field-{{ f.conflict_id }}" data-conflict-id="{{ f.conflict_id }}">
+        <div class="field-name">{{ f.field }}</div>
+        <div class="field-val flickr" title="Flickr value">
+          {% if f.field == 'tags' %}
+            {{ f.flickr_value | tojson | replace('"','') | replace('[','') | replace(']','') }}
+          {% else %}
+            {{ f.flickr_value or '—' }}
+          {% endif %}
+        </div>
+        <div class="field-val photos" title="Photos value">
+          {% if f.field == 'tags' %}
+            {{ f.photos_value | tojson | replace('"','') | replace('[','') | replace(']','') }}
+          {% else %}
+            {{ f.photos_value or '—' }}
+          {% endif %}
+        </div>
+        <div class="field-actions">
+          <button class="btn btn-flickr btn-sm"
+                  onclick="resolve({{ f.conflict_id }}, 'flickr')">
+            Use Flickr
+          </button>
+          <button class="btn btn-photos btn-sm"
+                  onclick="resolve({{ f.conflict_id }}, 'photos')">
+            Keep Photos
+          </button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% else %}
+<div class="empty-state">
+  <strong>No conflicts</strong>
+  <p>All metadata is in sync. Run <code>bp sync-metadata</code> to check for new conflicts.</p>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const cards = Array.from(document.querySelectorAll('.conflict-card'));
+let selectedIdx = cards.length ? 0 : -1;
+
+function selectCard(idx) {
+  cards.forEach(c => c.classList.remove('selected'));
+  if (idx < 0 || idx >= cards.length) return;
+  selectedIdx = idx;
+  cards[idx].classList.add('selected');
+  cards[idx].scrollIntoView({ block: 'nearest' });
+  cards[idx].focus({ preventScroll: true });
+}
+
+if (cards.length) selectCard(0);
+
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input, textarea, select, button')) return;
+  if (e.key === 'j' || e.key === 'J' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    selectCard(Math.min(selectedIdx + 1, cards.length - 1));
+  } else if (e.key === 'k' || e.key === 'K' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    selectCard(Math.max(selectedIdx - 1, 0));
+  } else if ((e.key === 'f' || e.key === 'F') && selectedIdx >= 0) {
+    resolveSelectedCard('flickr');
+  } else if ((e.key === 'p' || e.key === 'P') && selectedIdx >= 0) {
+    resolveSelectedCard('photos');
+  }
+});
+
+async function resolve(conflictId, resolution) {
+  const row = document.getElementById('field-' + conflictId);
+  const r = await fetch('/api/conflict/' + conflictId + '/resolve', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({resolution}),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    row.style.opacity = '0.35';
+    row.querySelector('.field-actions').innerHTML =
+      '<span class="resolved-badge">resolved: ' + resolution + '</span>';
+    // If all fields in this card are resolved, dim the whole card
+    const card = row.closest('.conflict-card');
+    const remaining = card.querySelectorAll('.field-actions button');
+    if (remaining.length === 0) card.style.opacity = '0.4';
+  } else {
+    toast('Resolve failed: ' + (d.error || 'unknown'), 'err');
+  }
+}
+
+function resolveSelectedCard(resolution) {
+  if (selectedIdx < 0) return;
+  const card = cards[selectedIdx];
+  const firstBtn = card.querySelector('.field-actions button');
+  if (!firstBtn) return;
+  // Resolve all unresolved fields in the selected card with the chosen resolution
+  const conflictIds = Array.from(card.querySelectorAll('.field-row[data-conflict-id]'))
+    .filter(row => row.querySelector('button'))
+    .map(row => parseInt(row.dataset.conflictId));
+  conflictIds.forEach(id => resolve(id, resolution));
+}
+</script>
+{% endblock %}

@@ -1,7 +1,7 @@
 # Album & Metadata Sync: Apple Photos ↔ Flickr
 
 **Blue Pearmain — Architecture Plan**
-*Status: Phase 1 complete, Phase 2 deferred | Author: cdevers | Last updated: 2026-04-15*
+*Status: Phase 1 complete, Phase 2 complete | Author: cdevers | Last updated: 2026-04-15*
 
 ---
 
@@ -260,7 +260,7 @@ its next run.
 
 ## Phase 2: Flickr Metadata → Apple Photos
 
-> **Status:** Deferred. Design only — no implementation yet.
+> **Status:** Implemented.
 
 ### Goal
 

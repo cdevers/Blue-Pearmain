@@ -110,6 +110,9 @@ bp reconcile --fix                 # Check and repair mismatches
 bp sync-albums                     # Sync Apple Photos albums → Flickr photosets (backfill)
 bp sync-albums --dry-run           # Preview what would be pushed without writing
 bp sync-albums --album "Vacation"  # Sync a single named album only
+bp sync-metadata                   # Pull Flickr metadata back into Apple Photos
+bp sync-metadata --dry-run         # Detect differences without writing anything
+bp sync-metadata --conflicts-only  # Record conflicts only; skip Photos writes
 bp ui                              # Start the review UI (http://localhost:5173)
 ```
 
@@ -260,6 +263,56 @@ Exit codes follow the same convention as `bp reconcile`: `0` = success, `1` = so
 ### New photosets
 
 When a photoset is created for an album, the first photo being pushed to it is used as the primary (cover) photo. The photoset URL is stored in the database so subsequent syncs can add to the existing set rather than creating duplicates.
+
+## Metadata sync (Flickr → Apple Photos)
+
+`bp sync-metadata` compares Flickr title, description, and tags against the corresponding Apple Photos fields for every photo that has a linked `flickr_id` and `uuid`. It applies a simple policy per field:
+
+| Situation | Action |
+|-----------|--------|
+| Flickr has a value, Photos doesn't | Write Flickr value to Photos |
+| Both sides have the same value | No-op |
+| Both sides have different non-empty values | Record a **conflict** for manual resolution |
+| Only Photos has a value | Preserve it — no-op |
+
+Tags are compared as sets (case-insensitive) so capitalisation differences alone do not trigger a conflict.
+
+### Commands
+
+```bash
+bp sync-metadata                        # Write clear Flickr wins; record conflicts
+bp sync-metadata --dry-run              # Log what would change; no writes to Photos or DB
+bp sync-metadata --conflicts-only       # Record conflicts only; skip Photos writes
+bp sync-metadata --limit 100            # Process at most 100 photos
+bp sync-metadata --photo-id 42          # Process a single photo (useful for debugging)
+```
+
+Output:
+
+```
+written=12  conflicts=3  skipped=847  failed=0
+```
+
+Exit codes: `0` = success, `1` = some photos had write or API failures, `2` = operational error (DB unavailable, Photos library not found, `osxphotos` not installed).
+
+### Resolving conflicts
+
+When both Flickr and Photos have different values for a field, the conflict is recorded in the database and surfaced in the **Conflicts** page of the reviewer UI (`/conflicts`). Each conflict shows the Flickr value and the Photos value side by side with two action buttons:
+
+- **Use Flickr** — marks the conflict resolved in favour of Flickr. Run `bp sync-metadata` afterwards to write the value to Photos.
+- **Keep Photos** — marks the conflict resolved in favour of Photos. The Photos value is left as-is; optionally push it up to Flickr with `bp reconcile --fix`.
+
+The conflict count appears as a badge on the Conflicts nav link and as a stat card on the dashboard whenever there are open conflicts.
+
+### Requirements
+
+`bp sync-metadata` writes to Apple Photos via the `osxphotos` library's `PhotoInfo.update()` API. This requires:
+
+1. **Photos.app must be running** when the write step executes. The command checks for this and exits with a clear error message if Photos is not open.
+2. **Automation permission**: on macOS 14+, the first run may prompt for permission to allow the terminal to control Photos. Grant it once and it persists.
+3. `osxphotos` version 0.67 or later (for `update()` support).
+
+`--dry-run` and `--conflicts-only` do not require Photos to be running.
 
 ## Faces
 

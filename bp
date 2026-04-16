@@ -171,6 +171,18 @@ def cmd_sync_albums(args):
     ])
 
 
+def cmd_sync_metadata(args):
+    from flickr.sync_metadata import main
+    _run(main, args, [
+        ("--config",         args.config),
+        ("--dry-run",        args.dry_run),
+        ("--limit",          str(args.limit) if args.limit else None),
+        ("--photo-id",       str(args.photo_id) if args.photo_id else None),
+        ("--conflicts-only", args.conflicts_only),
+        ("--verbose",        args.verbose),
+    ])
+
+
 def _inject_argv(args, pairs):
     """Rebuild sys.argv from parsed args so subcommand main()s parse correctly."""
     new_argv = [sys.argv[0]]
@@ -232,28 +244,42 @@ def main():
     p_sync.add_argument("--limit",   type=int, default=None)
     p_sync.add_argument("--verbose", action="store_true")
 
+    # sync-metadata
+    p_meta = sub.add_parser("sync-metadata", help="Pull Flickr metadata → Apple Photos")
+    p_meta.add_argument("--dry-run",        action="store_true",
+                        help="Compare and log; do not write to Photos or DB")
+    p_meta.add_argument("--limit",          type=int, default=None)
+    p_meta.add_argument("--photo-id",       type=int, default=None,
+                        help="Process only this DB photo_id")
+    p_meta.add_argument("--conflicts-only", action="store_true",
+                        help="Detect and record conflicts only; skip Photos writes")
+    p_meta.add_argument("--verbose",        action="store_true")
+
     args = parser.parse_args()
 
     # Attach config/verbose to all subcommands
-    if not hasattr(args, "oneliner"): args.oneliner = False
-    if not hasattr(args, "dry_run"):  args.dry_run = False
-    if not hasattr(args, "all"):      args.all = False
-    if not hasattr(args, "days"):     args.days = None
-    if not hasattr(args, "backfill"): args.backfill = False
-    if not hasattr(args, "fix"):      args.fix = False
-    if not hasattr(args, "limit"):    args.limit = None
-    if not hasattr(args, "port"):     args.port = 5173
-    if not hasattr(args, "debug"):    args.debug = False
-    if not hasattr(args, "album"):    args.album = None
+    if not hasattr(args, "oneliner"):        args.oneliner = False
+    if not hasattr(args, "dry_run"):         args.dry_run = False
+    if not hasattr(args, "all"):             args.all = False
+    if not hasattr(args, "days"):            args.days = None
+    if not hasattr(args, "backfill"):        args.backfill = False
+    if not hasattr(args, "fix"):             args.fix = False
+    if not hasattr(args, "limit"):           args.limit = None
+    if not hasattr(args, "port"):            args.port = 5173
+    if not hasattr(args, "debug"):           args.debug = False
+    if not hasattr(args, "album"):           args.album = None
+    if not hasattr(args, "photo_id"):        args.photo_id = None
+    if not hasattr(args, "conflicts_only"):  args.conflicts_only = False
 
     dispatch = {
-        "stats":       cmd_stats,
-        "poll":        cmd_poll,
-        "scan":        cmd_scan,
-        "thumbs":      cmd_thumbs,
-        "reconcile":   cmd_reconcile,
-        "ui":          cmd_ui,
-        "sync-albums": cmd_sync_albums,
+        "stats":         cmd_stats,
+        "poll":          cmd_poll,
+        "scan":          cmd_scan,
+        "thumbs":        cmd_thumbs,
+        "reconcile":     cmd_reconcile,
+        "ui":            cmd_ui,
+        "sync-albums":   cmd_sync_albums,
+        "sync-metadata": cmd_sync_metadata,
     }
     dispatch[args.command](args)
 

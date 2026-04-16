@@ -503,6 +503,85 @@ class Database:
         return {r["photo_id"]: r["cnt"] for r in rows}
 
     # -----------------------------------------------------------------------
+    # Metadata conflicts (Flickr vs. Apple Photos)
+    # -----------------------------------------------------------------------
+
+    def upsert_metadata_conflict(
+        self,
+        photo_id: int,
+        field: str,
+        flickr_value: str,
+        photos_value: str,
+    ) -> int:
+        """
+        Insert or replace a conflict record for (photo_id, field).
+        Uses INSERT OR REPLACE so re-running the puller is idempotent.
+        Returns the conflict row id.
+        """
+        cursor = self.conn.execute(
+            """INSERT OR REPLACE INTO metadata_conflicts
+               (photo_id, field, flickr_value, photos_value, resolved, resolution, resolved_at, created_at)
+               VALUES (?, ?, ?, ?, 0, NULL, NULL, ?)""",
+            (photo_id, field, flickr_value, photos_value, _now_iso()),
+        )
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def resolve_metadata_conflict(self, conflict_id: int, resolution: str) -> None:
+        """Mark a conflict as resolved with the given resolution strategy."""
+        self.conn.execute(
+            """UPDATE metadata_conflicts
+               SET resolved = 1, resolution = ?, resolved_at = ?
+               WHERE id = ?""",
+            (resolution, _now_iso(), conflict_id),
+        )
+        self.conn.commit()
+
+    def get_unresolved_conflicts(
+        self,
+        photo_id: int | None = None,
+        limit: int = 200,
+    ) -> list[dict]:
+        """
+        Return unresolved metadata conflicts, optionally filtered to one photo.
+        Each row includes photo fields needed for the UI (filename, thumbnail, flickr_id).
+        """
+        rows = self.conn.execute(
+            """SELECT mc.id, mc.photo_id, mc.field,
+                      mc.flickr_value, mc.photos_value, mc.created_at,
+                      p.flickr_id, p.uuid, p.original_filename,
+                      p.thumbnail_path, p.flickr_secret, p.flickr_server
+               FROM metadata_conflicts mc
+               JOIN photos p ON p.id = mc.photo_id
+               WHERE mc.resolved = 0
+                 AND (mc.photo_id = ? OR ? IS NULL)
+               ORDER BY mc.created_at DESC
+               LIMIT ?""",
+            (photo_id, photo_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_conflict_counts(self) -> dict[str, int]:
+        """Return per-field and total counts of unresolved conflicts."""
+        row = self.conn.execute(
+            """SELECT
+                   COUNT(*)                                               AS total,
+                   SUM(CASE WHEN field = 'title'       THEN 1 ELSE 0 END) AS title,
+                   SUM(CASE WHEN field = 'description' THEN 1 ELSE 0 END) AS description,
+                   SUM(CASE WHEN field = 'tags'        THEN 1 ELSE 0 END) AS tags
+               FROM metadata_conflicts
+               WHERE resolved = 0"""
+        ).fetchone()
+        if not row or row["total"] is None:
+            return {"total": 0, "title": 0, "description": 0, "tags": 0}
+        return {
+            "total":       row["total"]       or 0,
+            "title":       row["title"]       or 0,
+            "description": row["description"] or 0,
+            "tags":        row["tags"]        or 0,
+        }
+
+    # -----------------------------------------------------------------------
     # Stats (for dashboard)
     # -----------------------------------------------------------------------
 
@@ -521,4 +600,8 @@ class Database:
             result["unresolved_duplicates"] = row["n"] if row else 0
         except Exception:
             result["unresolved_duplicates"] = 0
+        try:
+            result["metadata_conflicts"] = self.get_conflict_counts()
+        except Exception:
+            result["metadata_conflicts"] = {"total": 0, "title": 0, "description": 0, "tags": 0}
         return result

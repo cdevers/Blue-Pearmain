@@ -165,6 +165,7 @@
   <a href="{{ url_for('faces') }}" {% if request.endpoint == 'faces' %}class="active"{% endif %}>Faces</a>
   <a href="{{ url_for('zones') }}" {% if request.endpoint == 'zones' %}class="active"{% endif %}>Zones</a>
   <a href="{{ url_for('duplicates') }}" {% if request.endpoint == 'duplicates' %}class="active"{% endif %}>Duplicates <span id="nav-dup-count" class="nav-badge" style="display:none"></span></a>
+  <a href="{{ url_for('conflicts') }}" {% if request.endpoint == 'conflicts' %}class="active"{% endif %}>Conflicts <span id="nav-conflict-count" class="nav-badge" style="display:none"></span></a>
   <span class="spacer"></span>
   <span class="stats-pill" id="nav-stats">Loading…</span>
 </nav>
@@ -210,6 +211,10 @@ async function refreshStats() {
   const dupCount = s.unresolved_duplicates || 0;
   dupBadge.textContent = dupCount;
   dupBadge.style.display = dupCount > 0 ? '' : 'none';
+  const conflictBadge = document.getElementById('nav-conflict-count');
+  const conflictCount = s.metadata_conflicts?.total || 0;
+  conflictBadge.textContent = conflictCount;
+  conflictBadge.style.display = conflictCount > 0 ? '' : 'none';
 }
 refreshStats();
 </script>

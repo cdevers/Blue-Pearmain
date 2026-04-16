@@ -658,6 +658,59 @@ def api_stats():
     return jsonify(db().stats())
 
 
+@app.route("/conflicts")
+def conflicts():
+    """Show unresolved metadata conflicts queue."""
+    rows = db().get_unresolved_conflicts(limit=200)
+    # Group rows by photo_id so one card shows all fields for a photo
+    from collections import OrderedDict
+    grouped: dict = OrderedDict()
+    for row in rows:
+        pid = row["photo_id"]
+        if pid not in grouped:
+            grouped[pid] = {
+                "photo_id":         pid,
+                "flickr_id":        row["flickr_id"],
+                "uuid":             row["uuid"],
+                "original_filename": row["original_filename"],
+                "thumbnail_path":   row["thumbnail_path"],
+                "flickr_secret":    row["flickr_secret"],
+                "flickr_server":    row["flickr_server"],
+                "fields":           [],
+            }
+        grouped[pid]["fields"].append({
+            "conflict_id":  row["id"],
+            "field":        row["field"],
+            "flickr_value": row["flickr_value"],
+            "photos_value": row["photos_value"],
+            "created_at":   row["created_at"],
+        })
+    return render_template(
+        "conflicts.html",
+        conflict_groups=list(grouped.values()),
+        stats=db().stats(),
+    )
+
+
+@app.route("/api/conflict/<int:conflict_id>/resolve", methods=["POST"])
+def api_conflict_resolve(conflict_id: int):
+    """
+    Resolve a single metadata conflict.
+    Body JSON: {"resolution": "flickr" | "photos" | "manual"}
+    Resolution is recorded in the DB only — no automatic Photos write.
+    """
+    data = request.get_json(silent=True) or {}
+    resolution = data.get("resolution", "")
+    if resolution not in ("flickr", "photos", "manual"):
+        return jsonify({"ok": False, "error": "resolution must be flickr, photos, or manual"}), 400
+    try:
+        db().resolve_metadata_conflict(conflict_id, resolution)
+        return jsonify({"ok": True})
+    except Exception as e:
+        log.error("conflict resolve failed id=%s: %s", conflict_id, e)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/push_approved", methods=["POST"])
 def api_push_approved():
     """

@@ -109,6 +109,15 @@
       <div class="n n-total">{{ stats.total | int }}</div>
       <div class="label">Total photos</div>
     </div>
+    {% set conflict_count = stats.metadata_conflicts.total if stats.metadata_conflicts else 0 %}
+    {% if conflict_count > 0 %}
+    <div class="stat-card">
+      <a href="{{ url_for('conflicts') }}">
+        <div class="n" style="color:#e57373">{{ conflict_count | int }}</div>
+        <div class="label">Metadata conflicts</div>
+      </a>
+    </div>
+    {% endif %}
   </div>
 
   {% if recent %}

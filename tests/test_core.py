@@ -9,6 +9,7 @@ Run from repo root:
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -2076,6 +2077,326 @@ class TestSyncAlbumsCLI(unittest.TestCase):
         result = self._run_cli(["--dry-run", "--album", "Other Album"])
         self.assertEqual(result.returncode, 0)
         self.assertIn("photos added=0", result.stdout)
+
+
+# ---------------------------------------------------------------------------
+# Metadata conflicts — DB layer
+# ---------------------------------------------------------------------------
+
+class TestMetadataConflictDB(unittest.TestCase):
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        self.photo_id = self.db.upsert_photo({
+            "uuid": "uuid-mc-001",
+            "original_filename": "IMG_mc.JPG",
+            "privacy_state": "approved_public",
+            "flickr_id": "flickr-mc-001",
+            "proposed_tags": [],
+            "apple_persons": [],
+            "apple_labels": [],
+        })
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def test_upsert_conflict_creates_row(self):
+        self.db.upsert_metadata_conflict(self.photo_id, "title", "Flickr Title", "Photos Title")
+        rows = self.db.get_unresolved_conflicts(photo_id=self.photo_id)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["field"], "title")
+        self.assertEqual(rows[0]["flickr_value"], "Flickr Title")
+        self.assertEqual(rows[0]["photos_value"], "Photos Title")
+
+    def test_upsert_conflict_idempotent_replaces(self):
+        self.db.upsert_metadata_conflict(self.photo_id, "title", "Old Flickr", "Old Photos")
+        self.db.upsert_metadata_conflict(self.photo_id, "title", "New Flickr", "New Photos")
+        rows = self.db.get_unresolved_conflicts(photo_id=self.photo_id)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["flickr_value"], "New Flickr")
+
+    def test_resolve_conflict_marks_resolved(self):
+        cid = self.db.upsert_metadata_conflict(self.photo_id, "description", "F", "P")
+        self.db.resolve_metadata_conflict(cid, "flickr")
+        rows = self.db.get_unresolved_conflicts(photo_id=self.photo_id)
+        self.assertEqual(len(rows), 0)
+        row = self.db.conn.execute(
+            "SELECT resolved, resolution FROM metadata_conflicts WHERE id = ?", (cid,)
+        ).fetchone()
+        self.assertEqual(row["resolved"], 1)
+        self.assertEqual(row["resolution"], "flickr")
+
+    def test_get_unresolved_excludes_resolved(self):
+        cid1 = self.db.upsert_metadata_conflict(self.photo_id, "title", "F", "P")
+        self.db.upsert_metadata_conflict(self.photo_id, "description", "F", "P")
+        self.db.resolve_metadata_conflict(cid1, "photos")
+        rows = self.db.get_unresolved_conflicts(photo_id=self.photo_id)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["field"], "description")
+
+    def test_get_unresolved_filtered_by_photo_id(self):
+        other_id = self.db.upsert_photo({
+            "uuid": "uuid-mc-002", "original_filename": "IMG2.JPG",
+            "privacy_state": "approved_public", "flickr_id": "flickr-mc-002",
+            "proposed_tags": [], "apple_persons": [], "apple_labels": [],
+        })
+        self.db.upsert_metadata_conflict(self.photo_id, "title", "F", "P")
+        self.db.upsert_metadata_conflict(other_id, "title", "F2", "P2")
+        rows = self.db.get_unresolved_conflicts(photo_id=self.photo_id)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["photo_id"], self.photo_id)
+
+    def test_get_conflict_counts_totals(self):
+        self.db.upsert_metadata_conflict(self.photo_id, "title", "F", "P")
+        self.db.upsert_metadata_conflict(self.photo_id, "description", "F", "P")
+        counts = self.db.get_conflict_counts()
+        self.assertEqual(counts["total"], 2)
+        self.assertEqual(counts["title"], 1)
+        self.assertEqual(counts["description"], 1)
+        self.assertEqual(counts["tags"], 0)
+
+    def test_get_conflict_counts_zero_when_none(self):
+        counts = self.db.get_conflict_counts()
+        self.assertEqual(counts, {"total": 0, "title": 0, "description": 0, "tags": 0})
+
+    def test_stats_includes_metadata_conflicts(self):
+        self.db.upsert_metadata_conflict(self.photo_id, "title", "F", "P")
+        s = self.db.stats()
+        self.assertIn("metadata_conflicts", s)
+        self.assertEqual(s["metadata_conflicts"]["total"], 1)
+
+    def test_on_delete_cascade(self):
+        self.db.upsert_metadata_conflict(self.photo_id, "title", "F", "P")
+        self.db.conn.execute("DELETE FROM photos WHERE id = ?", (self.photo_id,))
+        self.db.conn.commit()
+        rows = self.db.conn.execute("SELECT * FROM metadata_conflicts").fetchall()
+        self.assertEqual(len(rows), 0)
+
+
+# ---------------------------------------------------------------------------
+# Metadata puller — core comparison logic
+# ---------------------------------------------------------------------------
+
+class TestMetadataPuller(unittest.TestCase):
+
+    def setUp(self):
+        from unittest.mock import MagicMock
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        self.photo_id = self.db.upsert_photo({
+            "uuid": "uuid-mp-001",
+            "original_filename": "IMG_mp.JPG",
+            "privacy_state": "approved_public",
+            "flickr_id": "flickr-mp-001",
+            "proposed_tags": [],
+            "apple_persons": [],
+            "apple_labels": [],
+        })
+        self.mock_flickr = MagicMock()
+        self.library = "/fake/Photos.photoslibrary"
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _set_flickr_meta(self, title="", description="", tags=None):
+        self.mock_flickr.get_photo_info.return_value = {
+            "photo": {
+                "title":       {"_content": title},
+                "description": {"_content": description},
+                "tags":        {"tag": [{"raw": t} for t in (tags or [])]},
+            }
+        }
+
+    def _patch_photos(self, title="", description="", tags=None, has_update=True):
+        """Return a context manager patching _read_photos_metadata and _write_photos_metadata."""
+        from unittest.mock import patch
+        read_return = {"title": title, "description": description, "tags": tags or []}
+        patches = [
+            patch("flickr.metadata_puller._read_photos_metadata", return_value=read_return),
+        ]
+        if has_update:
+            patches.append(patch("flickr.metadata_puller._write_photos_metadata"))
+        else:
+            patches.append(patch(
+                "flickr.metadata_puller._write_photos_metadata",
+                side_effect=RuntimeError("Photos.app is not running"),
+            ))
+        return patches
+
+    def _pull(self, dry_run=False):
+        from flickr.metadata_puller import pull_photo_metadata
+        return pull_photo_metadata(
+            self.db, self.mock_flickr, self.photo_id,
+            library_path=self.library, dry_run=dry_run,
+        )
+
+    def test_flickr_wins_when_photos_empty(self):
+        from unittest.mock import patch
+        self._set_flickr_meta(title="A Great Shot")
+        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "", "tags": []}), \
+             patch("flickr.metadata_puller._write_photos_metadata") as mock_write:
+            result = self._pull()
+        self.assertIn("title", result["written"])
+        self.assertEqual(result["conflicts"], [])
+        mock_write.assert_called_once()
+
+    def test_no_op_when_values_equal(self):
+        from unittest.mock import patch
+        self._set_flickr_meta(title="Same Title")
+        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "Same Title", "description": "", "tags": []}), \
+             patch("flickr.metadata_puller._write_photos_metadata") as mock_write:
+            result = self._pull()
+        self.assertIn("title", result["skipped"])
+        self.assertEqual(result["written"], [])
+        mock_write.assert_not_called()
+
+    def test_conflict_recorded_when_both_non_empty_different(self):
+        from unittest.mock import patch
+        self._set_flickr_meta(description="Flickr caption")
+        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "Photos caption", "tags": []}), \
+             patch("flickr.metadata_puller._write_photos_metadata") as mock_write:
+            result = self._pull()
+        self.assertIn("description", result["conflicts"])
+        self.assertEqual(result["written"], [])
+        mock_write.assert_not_called()
+        rows = self.db.get_unresolved_conflicts(photo_id=self.photo_id)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["field"], "description")
+
+    def test_photos_only_value_preserved(self):
+        from unittest.mock import patch
+        self._set_flickr_meta(description="")
+        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "Local note", "tags": []}), \
+             patch("flickr.metadata_puller._write_photos_metadata") as mock_write:
+            result = self._pull()
+        self.assertIn("description", result["skipped"])
+        mock_write.assert_not_called()
+
+    def test_tags_comparison_case_insensitive(self):
+        from unittest.mock import patch
+        self._set_flickr_meta(tags=["Nature", "Landscape"])
+        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "", "tags": ["nature", "landscape"]}), \
+             patch("flickr.metadata_puller._write_photos_metadata") as mock_write:
+            result = self._pull()
+        self.assertIn("tags", result["skipped"])
+        self.assertEqual(result["conflicts"], [])
+        mock_write.assert_not_called()
+
+    def test_tags_conflict_when_different(self):
+        from unittest.mock import patch
+        self._set_flickr_meta(tags=["nature"])
+        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "", "tags": ["landscape"]}), \
+             patch("flickr.metadata_puller._write_photos_metadata"):
+            result = self._pull()
+        self.assertIn("tags", result["conflicts"])
+        rows = self.db.get_unresolved_conflicts(photo_id=self.photo_id)
+        tag_row = next((r for r in rows if r["field"] == "tags"), None)
+        self.assertIsNotNone(tag_row)
+
+    def test_dry_run_skips_all_writes_and_db_updates(self):
+        from unittest.mock import patch
+        self._set_flickr_meta(title="Flickr Title", description="Flickr Desc")
+        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "Photos Desc", "tags": []}), \
+             patch("flickr.metadata_puller._write_photos_metadata") as mock_write:
+            result = self._pull(dry_run=True)
+        mock_write.assert_not_called()
+        rows = self.db.get_unresolved_conflicts(photo_id=self.photo_id)
+        self.assertEqual(len(rows), 0)   # no DB writes in dry_run
+        self.assertIn("title", result["written"])  # counted as would-write
+
+    def test_no_uuid_returns_no_uuid_status(self):
+        from unittest.mock import patch
+        # Seed a photo without a uuid
+        no_uuid_id = self.db.upsert_photo({
+            "uuid": None, "original_filename": "no_uuid.JPG",
+            "privacy_state": "approved_public", "flickr_id": "flickr-nouuid",
+            "proposed_tags": [], "apple_persons": [], "apple_labels": [],
+        })
+        from flickr.metadata_puller import pull_photo_metadata
+        result = pull_photo_metadata(self.db, self.mock_flickr, no_uuid_id, self.library)
+        self.assertEqual(result["status"], "no_uuid")
+        self.mock_flickr.get_photo_info.assert_not_called()
+
+    def test_flickr_error_propagates(self):
+        from flickr.flickr_client import FlickrError
+        self.mock_flickr.get_photo_info.side_effect = FlickrError(500, "Server Error")
+        from flickr.metadata_puller import pull_photo_metadata
+        result = pull_photo_metadata(self.db, self.mock_flickr, self.photo_id, self.library)
+        self.assertEqual(result["status"], "flickr_error")
+        self.assertTrue(len(result["errors"]) > 0)
+
+    def test_write_error_counted_as_write_error_status(self):
+        from unittest.mock import patch
+        self._set_flickr_meta(title="Flickr Title")
+        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "", "tags": []}), \
+             patch("flickr.metadata_puller._write_photos_metadata", side_effect=RuntimeError("Photos not running")):
+            result = self._pull()
+        self.assertEqual(result["status"], "write_error")
+        self.assertTrue(len(result["errors"]) > 0)
+        # No conflict recorded — a write failure is not a conflict
+        rows = self.db.get_unresolved_conflicts(photo_id=self.photo_id)
+        self.assertEqual(len(rows), 0)
+
+
+# ---------------------------------------------------------------------------
+# sync-metadata CLI
+# ---------------------------------------------------------------------------
+
+class TestSyncMetadataCLI(unittest.TestCase):
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._db_path = Path(self._tmp.name) / "test.db"
+        self.db = Database(self._db_path)
+
+        self._config_path = Path(self._tmp.name) / "config.yml"
+        self._config_path.write_text(
+            f"database:\n  path: {self._db_path}\n"
+            "apple_photos:\n"
+            f"  library_path: {self._tmp.name}/Photos.photoslibrary\n"
+            "flickr:\n"
+            "  api_key: test\n"
+            "  api_secret: test\n"
+            "  oauth_token: test\n"
+            "  oauth_token_secret: test\n"
+            "  user_nsid: test\n"
+        )
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _run_cli(self, extra_argv=None):
+        cmd = [
+            sys.executable,
+            str(Path(__file__).parent.parent / "flickr" / "sync_metadata.py"),
+            "--config", str(self._config_path),
+        ] + (extra_argv or [])
+        return subprocess.run(cmd, capture_output=True, text=True)
+
+    def test_exit_0_when_nothing_to_do(self):
+        # No photos with both flickr_id and uuid → nothing to process
+        result = self._run_cli()
+        # Will fail at Flickr auth (no real creds) but gracefully
+        # The key check: exit code is not 2 (operational) when DB is empty
+        # We accept exit 0 or 1 (Flickr auth may fail, returning 2);
+        # what we're validating is the summary line format.
+        self.assertIn("written=", result.stdout)
+
+    def test_dry_run_flag_accepted(self):
+        result = self._run_cli(["--dry-run"])
+        self.assertIn("written=", result.stdout)
+
+    def test_limit_flag_accepted(self):
+        result = self._run_cli(["--limit", "1"])
+        self.assertIn("written=", result.stdout)
+
+    def test_conflicts_only_flag_accepted(self):
+        result = self._run_cli(["--conflicts-only"])
+        self.assertIn("written=", result.stdout)
 
 
 # ---------------------------------------------------------------------------

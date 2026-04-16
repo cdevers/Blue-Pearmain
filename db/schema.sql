@@ -201,3 +201,29 @@ CREATE INDEX IF NOT EXISTS idx_photo_albums_photo   ON photo_albums(photo_id);
 CREATE INDEX IF NOT EXISTS idx_photo_albums_album   ON photo_albums(album_id);
 CREATE INDEX IF NOT EXISTS idx_photo_albums_pending ON photo_albums(flickr_pushed)
     WHERE flickr_pushed = 0;
+
+-- ============================================================
+-- Metadata conflicts: Flickr vs. Apple Photos field mismatches
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS metadata_conflicts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    photo_id        INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+    field           TEXT NOT NULL
+                        CHECK(field IN ('title', 'description', 'tags')),
+    flickr_value    TEXT,
+    photos_value    TEXT,
+    resolved        INTEGER DEFAULT 0,      -- boolean
+    resolution      TEXT                    -- 'flickr' | 'photos' | 'manual'
+                        CHECK(resolution IS NULL OR
+                              resolution IN ('flickr', 'photos', 'manual')),
+    resolved_at     TEXT,
+    created_at      TEXT NOT NULL,
+    UNIQUE(photo_id, field)                 -- one open conflict per field per photo
+);
+
+CREATE INDEX IF NOT EXISTS idx_metadata_conflicts_photo
+    ON metadata_conflicts(photo_id);
+CREATE INDEX IF NOT EXISTS idx_metadata_conflicts_unresolved
+    ON metadata_conflicts(resolved)
+    WHERE resolved = 0;
