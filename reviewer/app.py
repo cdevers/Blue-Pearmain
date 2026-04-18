@@ -593,8 +593,10 @@ def api_decide():
 
                 except Exception as e:
                     log.error("background push failed photo_id=%s: %s", _photo_id, e)
+                finally:
+                    db().close()
 
-            threading.Thread(target=_push, daemon=True).start()
+            threading.Thread(target=_push, name="_push", daemon=True).start()
 
     return jsonify({"ok": True})
 

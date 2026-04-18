@@ -419,3 +419,90 @@ class TestPushApprovedNotFound:
         data = resp.get_json()
         assert data["failed"] == 2
         assert data["skipped"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Background push — file descriptor leak
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def client_for_fd_leak():
+    """Flask test client with a single needs_review photo that has a Flickr ID."""
+    with tempfile.TemporaryDirectory() as tmp:
+        test_db = Database(Path(tmp) / "test.db")
+        pid = test_db.upsert_photo({
+            "uuid": "uuid-fd-leak",
+            "original_filename": "IMG_fd.JPG",
+            "privacy_state": "needs_review",
+            "flickr_id": "9990000001",
+            "proposed_tags": ["tag1"],
+            "apple_persons": [],
+            "apple_labels": [],
+        })
+
+        app_module._db = test_db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+
+        with app_module.app.test_client() as c:
+            yield c, pid, test_db
+
+        app_module._db = None
+        app_module._client = None
+
+
+class TestBackgroundPushClosesConnection:
+    """Background push threads must close their SQLite connection to avoid FD leaks."""
+
+    def _run_decide_and_wait(self, c, photo_id, test_db, mock_flickr):
+        """
+        Post to /api/decide with push=True, wait for the background thread to call
+        db().close(), and return the list of (thread_name, thread_ident) pairs that
+        called close — filtering to only non-main, non-request threads.
+        """
+        import threading
+
+        app_module._client = mock_flickr
+
+        push_thread_closes = []
+        close_done = threading.Event()
+        original_close = test_db.close
+
+        def tracking_close():
+            t = threading.current_thread()
+            # Only count closes from the background _push thread, not request threads
+            if t is not threading.main_thread() and t.name == "_push":
+                push_thread_closes.append(t.ident)
+                close_done.set()
+            original_close()
+
+        test_db.close = tracking_close
+
+        resp = c.post("/api/decide", json={
+            "photo_id": photo_id,
+            "decision": "make_public",
+            "push": True,
+        })
+        assert resp.status_code == 200
+
+        close_done.wait(timeout=5)
+        return push_thread_closes
+
+    def test_background_thread_closes_db_connection(self, client_for_fd_leak):
+        """After the background push thread finishes, its DB connection must be closed."""
+        c, photo_id, test_db = client_for_fd_leak
+        mock_flickr = MagicMock()
+        mock_flickr.set_permissions.return_value = None
+        mock_flickr.add_tags.return_value = None
+
+        closed = self._run_decide_and_wait(c, photo_id, test_db, mock_flickr)
+        assert len(closed) >= 1, "background push thread did not close its DB connection"
+
+    def test_background_thread_closes_connection_on_exception(self, client_for_fd_leak):
+        """Connection must be closed even when the push raises an unexpected exception."""
+        c, photo_id, test_db = client_for_fd_leak
+        mock_flickr = MagicMock()
+        mock_flickr.set_permissions.side_effect = RuntimeError("simulated crash")
+
+        closed = self._run_decide_and_wait(c, photo_id, test_db, mock_flickr)
+        assert len(closed) >= 1, "connection not closed after exception in background push thread"

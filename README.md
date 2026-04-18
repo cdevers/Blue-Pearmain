@@ -393,6 +393,8 @@ Write operations (permissions and tags) only update the DB push flags after each
 
 If a photo has been manually deleted from Flickr since it was approved, the batch push logs a warning and marks the photo as done (so it is not retried on subsequent pushes) rather than counting it as a failure. The rest of the batch continues unaffected. The dashboard toast shows a `skipped` count for these cases alongside the usual `pushed` and `failed` counts.
 
+**File descriptor management** — each review decision with `push=True` spawns a background thread that opens its own SQLite connection (Flask's `teardown_appcontext` only runs on the request thread, not on background threads). The background thread closes its connection in a `finally` block so the file descriptor is released promptly when the thread exits. Without this, reviewing several dozen photos in quick succession would exhaust the OS file-descriptor limit (macOS default: 256) and crash the server with `OSError: [Errno 24] Too many open files`.
+
 `updated_at` is stamped on every write path — `upsert_photo`, `set_privacy_state`, `record_review`, and `undo_decision` — so the modification time of any row always reflects its true last-changed time regardless of how the change was made.
 
 If you suspect a push operation failed silently, the reconciliation script checks your DB's expected state against what Flickr actually has:
@@ -424,7 +426,7 @@ All scripts are idempotent and safe to re-run.
 python -m pytest tests/ -q
 ```
 
-130 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, and duplicate detection logic.
+239 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, and background-thread file-descriptor lifecycle.
 
 ## License
 
