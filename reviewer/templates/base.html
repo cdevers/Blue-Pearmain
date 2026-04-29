@@ -134,6 +134,34 @@
       font-size: 11px;
     }
 
+    /* Keyboard hints — shared across pages */
+    .kbd-hints {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .kbd-hints kbd {
+      background: #2a2a2a;
+      border: 1px solid #3a3a3a;
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-family: monospace;
+      font-size: 10px;
+    }
+    /* Tiny key badge in the nav bar */
+    .nav-key {
+      font-size: 9px;
+      color: #444;
+      border: 1px solid #333;
+      border-radius: 2px;
+      padding: 0 3px;
+      font-family: monospace;
+      margin-right: 3px;
+      vertical-align: middle;
+    }
+
     /* Toast */
     #toast {
       position: fixed;
@@ -160,12 +188,12 @@
 
 <nav>
   <span class="brand">🍎 Blue Pearmain</span>
-  <a href="{{ url_for('dashboard') }}" {% if request.endpoint == 'dashboard' %}class="active"{% endif %}>Dashboard</a>
-  <a href="{{ url_for('review', state='candidate_public') }}" {% if request.endpoint == 'review' %}class="active"{% endif %}>Review</a>
-  <a href="{{ url_for('faces') }}" {% if request.endpoint == 'faces' %}class="active"{% endif %}>Faces</a>
-  <a href="{{ url_for('zones') }}" {% if request.endpoint == 'zones' %}class="active"{% endif %}>Zones</a>
-  <a href="{{ url_for('duplicates') }}" {% if request.endpoint == 'duplicates' %}class="active"{% endif %}>Duplicates <span id="nav-dup-count" class="nav-badge" style="display:none"></span></a>
-  <a href="{{ url_for('conflicts') }}" {% if request.endpoint == 'conflicts' %}class="active"{% endif %}>Conflicts <span id="nav-conflict-count" class="nav-badge" style="display:none"></span></a>
+  <a href="{{ url_for('dashboard') }}" {% if request.endpoint == 'dashboard' %}class="active"{% endif %}><kbd class="nav-key">1</kbd>Dashboard</a>
+  <a href="{{ url_for('review', state='candidate_public') }}" {% if request.endpoint == 'review' %}class="active"{% endif %}><kbd class="nav-key">2</kbd>Review</a>
+  <a href="{{ url_for('faces') }}" {% if request.endpoint == 'faces' %}class="active"{% endif %}><kbd class="nav-key">3</kbd>Faces</a>
+  <a href="{{ url_for('zones') }}" {% if request.endpoint == 'zones' %}class="active"{% endif %}><kbd class="nav-key">4</kbd>Zones</a>
+  <a href="{{ url_for('duplicates') }}" {% if request.endpoint == 'duplicates' %}class="active"{% endif %}><kbd class="nav-key">5</kbd>Duplicates <span id="nav-dup-count" class="nav-badge" style="display:none"></span></a>
+  <a href="{{ url_for('conflicts') }}" {% if request.endpoint == 'conflicts' %}class="active"{% endif %}><kbd class="nav-key">6</kbd>Conflicts <span id="nav-conflict-count" class="nav-badge" style="display:none"></span></a>
   <span class="spacer"></span>
   <span class="stats-pill" id="nav-stats">Loading…</span>
 </nav>
@@ -217,6 +245,25 @@ async function refreshStats() {
   conflictBadge.style.display = conflictCount > 0 ? '' : 'none';
 }
 refreshStats();
+
+// Global keyboard shortcuts: 1-6 navigate tabs, R reloads
+(function() {
+  const _nav = {
+    '1': {{ url_for('dashboard') | tojson }},
+    '2': {{ url_for('review', state='candidate_public') | tojson }},
+    '3': {{ url_for('faces') | tojson }},
+    '4': {{ url_for('zones') | tojson }},
+    '5': {{ url_for('duplicates') | tojson }},
+    '6': {{ url_for('conflicts') | tojson }},
+  };
+  document.addEventListener('keydown', e => {
+    if (e.target.matches('input, textarea, select')) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'r' || e.key === 'R') { location.reload(); return; }
+    const dest = _nav[e.key];
+    if (dest) { e.preventDefault(); window.location.href = dest; }
+  });
+})();
 </script>
 
 {% block scripts %}{% endblock %}

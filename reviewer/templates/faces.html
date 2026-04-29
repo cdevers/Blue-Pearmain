@@ -23,7 +23,8 @@
   align-items: center;
   gap: 16px;
 }
-.person-row:hover { border-color: #3a3a3a; }
+.person-row:hover    { border-color: #3a3a3a; }
+.person-row.selected { border-color: var(--accent); }
 
 .person-name {
   font-size: 14px;
@@ -113,6 +114,12 @@
     <h2>Faces</h2>
     <span class="sub">{{ named | length }} named people across your library</span>
   </div>
+  {% if named %}
+  <div class="kbd-hints" style="margin-bottom:16px">
+    <span><kbd>J</kbd><kbd>K</kbd> navigate</span>
+    <span><kbd>Enter</kbd> review person</span>
+  </div>
+  {% endif %}
 
   {% if named %}
   <div class="person-list">
@@ -243,8 +250,30 @@ document.getElementById('confirm-overlay').addEventListener('click', e => {
   if (e.target === e.currentTarget) closeConfirm();
 });
 
+let _faceIdx = -1;
+function selectFaceRow(idx) {
+  const rows = [...document.querySelectorAll('.person-row')];
+  rows.forEach(r => r.classList.remove('selected'));
+  if (idx < 0 || idx >= rows.length) { _faceIdx = -1; return; }
+  _faceIdx = idx;
+  rows[idx].classList.add('selected');
+  rows[idx].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeConfirm();
+  if (e.key === 'Escape') { closeConfirm(); return; }
+  if (e.target.matches('input, textarea, select, button')) return;
+  const rows = [...document.querySelectorAll('.person-row')];
+  if (e.key === 'j' || e.key === 'J' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    selectFaceRow(Math.min(_faceIdx + 1, rows.length - 1));
+  } else if (e.key === 'k' || e.key === 'K' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    selectFaceRow(Math.max(_faceIdx - 1, 0));
+  } else if (e.key === 'Enter' && _faceIdx >= 0) {
+    window.location.href = '/review?state=needs_review&person='
+      + encodeURIComponent(rows[_faceIdx].dataset.person);
+  }
 });
 
 // Scroll to and highlight person from URL hash (e.g. arriving from photo detail)

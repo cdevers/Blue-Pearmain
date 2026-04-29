@@ -145,6 +145,10 @@
   color: var(--muted);
   font-size: 14px;
 }
+.dup-group.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
 {% endblock %}
 
 {% block content %}
@@ -158,6 +162,13 @@
     <span class="sub">No unresolved groups</span>
     {% endif %}
   </div>
+  {% if sections %}
+  <div class="kbd-hints" style="margin-bottom:20px">
+    <span><kbd>J</kbd><kbd>K</kbd> navigate</span>
+    <span><kbd>Enter</kbd> confirm resolution</span>
+    <span><kbd>N</kbd> not a duplicate</span>
+  </div>
+  {% endif %}
 
   {% if not sections %}
   <div class="empty-state card">
@@ -279,6 +290,35 @@ async function assignKeeper(groupId, photoId, btn) {
     btn.disabled = false;
   }
 }
+
+let _dupIdx = -1;
+const _dupGroups = [...document.querySelectorAll('.dup-group')];
+
+function selectDupGroup(idx) {
+  _dupGroups.forEach(g => g.classList.remove('selected'));
+  if (idx < 0 || idx >= _dupGroups.length) { _dupIdx = -1; return; }
+  _dupIdx = idx;
+  _dupGroups[idx].classList.add('selected');
+  _dupGroups[idx].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input, textarea, select, button')) return;
+  if (e.key === 'j' || e.key === 'J' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    selectDupGroup(Math.min(_dupIdx + 1, _dupGroups.length - 1));
+  } else if (e.key === 'k' || e.key === 'K' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    selectDupGroup(Math.max(_dupIdx - 1, 0));
+  } else if ((e.key === 'Enter' || e.key === ' ') && _dupIdx >= 0) {
+    e.preventDefault();
+    const btn = _dupGroups[_dupIdx].querySelector('.dup-actions .btn-primary');
+    if (btn && !btn.disabled) btn.click();
+  } else if ((e.key === 'n' || e.key === 'N') && _dupIdx >= 0) {
+    const btn = _dupGroups[_dupIdx].querySelector('.dup-actions .btn:not(.btn-primary)');
+    if (btn && !btn.disabled) btn.click();
+  }
+});
 
 async function notDuplicate(groupId, btn) {
   btn.disabled = true;
