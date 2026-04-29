@@ -58,9 +58,10 @@ Apple Photos Library          Flickr (cloud)
 | `poller/scanner.py` | Apple Photos → local DB sync and matching |
 | `poller/deduplicator.py` | Identify and classify duplicate photos |
 | `poller/thumbnailer.py` | Populate thumbnail paths for the review UI |
+| `poller/link_orphans.py` | Batch-link Photos-only / Flickr-only record pairs by capture timestamp |
 | `poller/reconcile.py` | Compare DB push state against actual Flickr state |
 | `reviewer/app.py` | Flask web UI |
-| `reviewer/templates/` | Jinja2 templates (dashboard, review grid, photo detail, faces, zones) |
+| `reviewer/templates/` | Jinja2 templates (dashboard, review grid, photo detail, faces, zones, duplicates, conflicts) |
 | `config/` | Configuration templates and launchd plists |
 | `db/migrate_001_privacy_state_check.py` | DB migration: adds CHECK constraint on privacy_state |
 | `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at, indexes on push state and tags, schema_migrations table |
@@ -167,9 +168,21 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmai
 
 ## Review UI
 
-The grid view shows photos with proposed tags and action buttons. Keyboard shortcuts are available throughout:
+The grid view shows photos with proposed tags and action buttons. Keyboard shortcuts are available throughout. The nav bar shows `[1]`–`[6]` hints next to each tab.
 
-**Grid view:**
+**Global (all pages):**
+
+| Key | Action |
+|---|---|
+| `1` | Dashboard |
+| `2` | Review grid |
+| `3` | Faces |
+| `4` | Zones |
+| `5` | Duplicates |
+| `6` | Conflicts |
+| `R` | Reload current page |
+
+**Review grid:**
 
 | Key | Action |
 |---|---|
@@ -180,7 +193,6 @@ The grid view shows photos with proposed tags and action buttons. Keyboard short
 | `Space` | Skip (decide later) |
 | `Enter` | Open detail view |
 | `Z` | Undo last decision |
-| `R` | Reload queue (same page, scroll to top) |
 
 **Detail view:**
 
@@ -196,6 +208,38 @@ The grid view shows photos with proposed tags and action buttons. Keyboard short
 | `K` / `←` | Previous photo |
 | `Esc` | Return to grid |
 | `Z` | Undo last decision |
+
+**Faces page:**
+
+| Key | Action |
+|---|---|
+| `J` / `↓` | Select next person |
+| `K` / `↑` | Select previous person |
+| `Enter` | Open review queue for selected person |
+
+**Duplicates page:**
+
+| Key | Action |
+|---|---|
+| `J` / `↓` | Select next group |
+| `K` / `↑` | Select previous group |
+| `Enter` | Confirm resolution for selected group |
+| `N` | Mark selected group as not a duplicate |
+
+**Conflicts page:**
+
+| Key | Action |
+|---|---|
+| `J` / `↓` | Select next conflict |
+| `K` / `↑` | Select previous conflict |
+| `F` | Resolve all fields in selected conflict using Flickr value |
+| `P` | Resolve all fields in selected conflict keeping Photos value |
+
+**Dashboard:**
+
+| Key | Action |
+|---|---|
+| `P` | Push approved photos to Flickr |
 
 In the detail view the action buttons are pinned to the top of the sidebar, so their position stays consistent regardless of how much metadata or how many tags a photo has. Any decision automatically advances to the next photo.
 
@@ -242,7 +286,7 @@ bp link-orphans --dry-run   # preview how many pairs would be merged
 bp link-orphans             # merge all linkable pairs
 ```
 
-`bp stats` now reports **Linkable orphan pairs** if any exist, as a reminder to run this command. Pairs are matched by capture timestamp (to the second, timezone-normalised). Where a Photos record matches more than one Flickr record at the same second (genuine duplicate uploads), the lowest-id Flickr record is used as the primary.
+Pairs are matched by capture timestamp (to the second, timezone-normalised). Where a Photos record matches more than one Flickr record at the same second (genuine duplicate uploads), the lowest-id Flickr record is used as the primary.
 
 **`bp stats` also reports Approved + pushable** — the count of `approved_public` photos that have a `flickr_id` and haven't been pushed yet. This is the number the "Push approved" button in the review UI will actually act on. The larger "Approved public" total includes Photos-only records waiting for the Flickr iOS app to upload them; those cannot be pushed until they appear on Flickr and get linked.
 
@@ -445,7 +489,7 @@ All scripts are idempotent and safe to re-run.
 python -m pytest tests/ -q
 ```
 
-253 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging, and orphan-linking.
+254 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), and orphan-linking.
 
 ## License
 

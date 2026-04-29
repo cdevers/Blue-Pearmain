@@ -2652,6 +2652,30 @@ class TestMergeFlickrIntoPhotos(unittest.TestCase):
         row = self._row(self.photos_id)
         self.assertEqual(row["review_decision"], "keep_private")
 
+    def test_merge_migrates_tag_events(self):
+        # Insert a tag_event on the Flickr-only record
+        self.db.conn.execute(
+            """INSERT INTO tag_events (photo_id, event_at, destination, tags_before, tags_after)
+               VALUES (?, '2026-04-24T20:00:00', 'flickr', '[]', '["beach","travel"]')""",
+            (self.flickr_id_row,),
+        )
+        self.db.conn.commit()
+
+        self.db.merge_flickr_into_photos(self.flickr_id_row, self.photos_id)
+
+        # Event should now belong to the Photos record
+        events = self.db.conn.execute(
+            "SELECT * FROM tag_events WHERE photo_id = ?", (self.photos_id,)
+        ).fetchall()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["destination"], "flickr")
+
+        # Nothing left on the (now-deleted) Flickr record
+        orphaned = self.db.conn.execute(
+            "SELECT * FROM tag_events WHERE photo_id = ?", (self.flickr_id_row,)
+        ).fetchall()
+        self.assertEqual(len(orphaned), 0)
+
     def test_merge_migrates_album_memberships(self):
         album_id = self.db.upsert_album("apple-uuid-trip", "Beach Trip")
         self.db.upsert_photo_album(self.flickr_id_row, album_id)
