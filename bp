@@ -63,13 +63,12 @@ def cmd_stats(args):
              AND flickr_id IS NOT NULL
              AND perms_pushed_flickr = 0"""
     ).fetchone()["n"]
-    orphan_pairs = db.conn.execute(
-        """SELECT COUNT(*) AS n
-           FROM photos p1
-           JOIN photos p2 ON
-             replace(substr(p1.date_taken, 1, 19), 'T', ' ') = substr(p2.date_taken, 1, 19)
-             AND p1.uuid IS NOT NULL AND p1.flickr_id IS NULL
-             AND p2.uuid IS NULL     AND p2.flickr_id IS NOT NULL"""
+    # Cheap proxy for orphan count: Photos-only records that have a date_taken
+    # (the actual matchable-pair count requires a full cross-product join and is
+    # too slow to compute on every stats call — use bp link-orphans --dry-run).
+    photos_only_with_date = db.conn.execute(
+        """SELECT COUNT(*) AS n FROM photos
+           WHERE uuid IS NOT NULL AND flickr_id IS NULL AND date_taken IS NOT NULL"""
     ).fetchone()["n"]
     db.close()
 
@@ -94,8 +93,8 @@ def cmd_stats(args):
         parts.append(f"local={total - flickr_linked}")
         parts.append(f"pushed={pushed}")
         parts.append(f"pushable={approved_pushable}")
-        if orphan_pairs:
-            parts.append(f"orphans={orphan_pairs}")
+        if photos_only_with_date:
+            parts.append(f"unlinked={photos_only_with_date}")
         print("  ".join(parts))
         return
 
@@ -113,8 +112,8 @@ def cmd_stats(args):
     print(f"  Photos-only records:    {total - flickr_linked:>8,}")
     print(f"  Approved + pushed:      {pushed:>8,}")
     print(f"  Approved + pushable:    {approved_pushable:>8,}  (Flickr-linked, not yet pushed)")
-    if orphan_pairs:
-        print(f"  Linkable orphan pairs:  {orphan_pairs:>8,}  (run: bp link-orphans)")
+    if photos_only_with_date:
+        print(f"  Photos-only (unlinked): {photos_only_with_date:>8,}  (run: bp link-orphans)")
     print()
 
 

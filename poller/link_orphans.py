@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 import yaml
@@ -25,6 +26,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from db.db import Database
+from poller.scanner import normalise_dt
 
 log = logging.getLogger("blue-pearmain.link-orphans")
 
@@ -49,68 +51,101 @@ def setup_logging(config: dict, verbose: bool) -> None:
 def find_orphan_pairs(db: Database, limit: int) -> list[tuple[int, int]]:
     """
     Return (flickr_rec_id, photos_rec_id) pairs where timestamps match and
-    the Photos record has no flickr_id yet.  Ordered by Photos record id so
-    repeated runs are deterministic.
+    the Photos record has no flickr_id yet.
 
-    Where a single Photos record matches multiple Flickr records (timestamp
-    collision), the Flickr record with the smallest id is preferred — the
-    same tie-breaking the scanner uses (candidates are returned in DB order
-    and the first is taken as primary).
+    Matching is done in Python (not SQL) to avoid a full cross-product join
+    across hundreds of thousands of rows.  Both sides are loaded into memory,
+    normalised to second-precision, and matched via a hash dict — O(n + m)
+    rather than O(n * m).
+
+    Where a Photos record matches multiple Flickr records at the same second,
+    the Flickr record with the smallest id is used (same tie-breaking as the
+    scanner).  Each Flickr record is matched at most once.
     """
-    rows = db.conn.execute(
-        """SELECT p1.id AS photos_id, MIN(p2.id) AS flickr_id_row
-           FROM photos p1
-           JOIN photos p2 ON
-             replace(substr(p1.date_taken, 1, 19), 'T', ' ') = substr(p2.date_taken, 1, 19)
-             AND p1.uuid IS NOT NULL AND p1.flickr_id IS NULL
-             AND p2.uuid IS NULL     AND p2.flickr_id IS NOT NULL
-           GROUP BY p1.id
-           ORDER BY p1.id
-           LIMIT ?""",
-        (limit,),
+    log.info("Loading Flickr-only records …")
+    flickr_rows = db.conn.execute(
+        "SELECT id, date_taken FROM photos WHERE uuid IS NULL AND flickr_id IS NOT NULL"
     ).fetchall()
-    return [(row["flickr_id_row"], row["photos_id"]) for row in rows]
+    log.info("  %d Flickr-only records loaded.", len(flickr_rows))
+
+    # Build dict: normalised_dt → sorted list of Flickr row ids
+    flickr_by_dt: dict[str, list[int]] = defaultdict(list)
+    for r in flickr_rows:
+        dt = normalise_dt(r["date_taken"])
+        if dt:
+            flickr_by_dt[dt].append(r["id"])
+    for lst in flickr_by_dt.values():
+        lst.sort()
+
+    log.info("Loading Photos-only records …")
+    photos_rows = db.conn.execute(
+        "SELECT id, date_taken FROM photos WHERE uuid IS NOT NULL AND flickr_id IS NULL ORDER BY id"
+    ).fetchall()
+    log.info("  %d Photos-only records loaded.", len(photos_rows))
+
+    pairs: list[tuple[int, int]] = []
+    claimed: set[int] = set()   # Flickr ids already assigned to a pair
+
+    total = len(photos_rows)
+    for i, row in enumerate(photos_rows):
+        if len(pairs) >= limit:
+            break
+        if i > 0 and i % 10_000 == 0:
+            log.info("  Matching: %d / %d scanned, %d pairs found …", i, total, len(pairs))
+
+        dt = normalise_dt(row["date_taken"])
+        if not dt:
+            continue
+
+        for flickr_id in flickr_by_dt.get(dt, []):
+            if flickr_id not in claimed:
+                pairs.append((flickr_id, row["id"]))
+                claimed.add(flickr_id)
+                break
+
+    return pairs
 
 
 def link_orphans(db: Database, dry_run: bool, limit: int) -> tuple[int, int]:
-    """
-    Find and merge orphaned pairs.  Returns (linked, failed) counts.
-    """
+    """Find and merge orphaned pairs.  Returns (linked, failed) counts."""
     pairs = find_orphan_pairs(db, limit)
     if not pairs:
         log.info("No linkable orphan pairs found.")
         return 0, 0
 
-    log.info("Found %d orphan pair(s) to link%s.", len(pairs), " (dry-run)" if dry_run else "")
+    log.info(
+        "Found %d orphan pair(s) to link%s.",
+        len(pairs),
+        " (dry-run — no writes)" if dry_run else "",
+    )
+
+    if dry_run:
+        return len(pairs), 0
 
     linked = 0
     failed = 0
-    for flickr_rec_id, photos_rec_id in pairs:
-        flickr_row  = db.conn.execute("SELECT flickr_id, date_taken FROM photos WHERE id = ?", (flickr_rec_id,)).fetchone()
-        photos_row  = db.conn.execute("SELECT original_filename, date_taken FROM photos WHERE id = ?", (photos_rec_id,)).fetchone()
+    total  = len(pairs)
+    for i, (flickr_rec_id, photos_rec_id) in enumerate(pairs, 1):
+        if i % 1_000 == 0 or i == total:
+            log.info("  Merging: %d / %d …", i, total)
 
-        log.debug(
-            "  Linking photos_id=%d (%s %s) → flickr_id=%d (%s)",
-            photos_rec_id,
-            photos_row["original_filename"] if photos_row else "?",
-            photos_row["date_taken"][:19] if photos_row else "",
-            flickr_rec_id,
-            flickr_row["flickr_id"] if flickr_row else "?",
-        )
-
-        if dry_run:
-            linked += 1
-            continue
+        log.debug("  pair photos_id=%d → flickr_rec_id=%d", photos_rec_id, flickr_rec_id)
 
         try:
             ok = db.merge_flickr_into_photos(flickr_rec_id, photos_rec_id)
             if ok:
                 linked += 1
             else:
-                log.warning("  merge_flickr_into_photos returned False for pair (%d, %d)", flickr_rec_id, photos_rec_id)
+                log.warning(
+                    "  Skipped pair (photos=%d, flickr=%d): preconditions not met",
+                    photos_rec_id, flickr_rec_id,
+                )
                 failed += 1
         except Exception as exc:
-            log.error("  Failed to link pair (%d, %d): %s", flickr_rec_id, photos_rec_id, exc)
+            log.error(
+                "  Failed to link pair (photos=%d, flickr=%d): %s",
+                photos_rec_id, flickr_rec_id, exc,
+            )
             failed += 1
 
     return linked, failed

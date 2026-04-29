@@ -202,17 +202,6 @@ class Database:
         self.conn.commit()
         return True
 
-    def count_linkable_orphans(self) -> int:
-        """Count Photos-only records that have a matching Flickr-only record by timestamp."""
-        row = self.conn.execute(
-            """SELECT COUNT(*) AS n
-               FROM photos p1
-               JOIN photos p2 ON
-                 replace(substr(p1.date_taken, 1, 19), 'T', ' ') = substr(p2.date_taken, 1, 19)
-                 AND p1.uuid IS NOT NULL AND p1.flickr_id IS NULL
-                 AND p2.uuid IS NULL     AND p2.flickr_id IS NOT NULL"""
-        ).fetchone()
-        return row["n"] if row else 0
 
     def _ensure_schema(self):
         schema_path = Path(__file__).parent / "schema.sql"
