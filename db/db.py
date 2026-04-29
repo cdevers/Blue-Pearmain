@@ -137,11 +137,25 @@ class Database:
                 (photos_rec_id, a["album_id"], a["flickr_pushed"], a["pushed_at"]),
             )
 
-        # 2. Migrate tag_events
-        self.conn.execute(
-            "UPDATE tag_events SET photo_id = ? WHERE photo_id = ?",
-            (photos_rec_id, flickr_rec_id),
-        )
+        # 2. Migrate tag_events — DELETE + re-INSERT rather than UPDATE to work
+        #    around a SQLite 3.51.0 bug: UPDATE on a FK column raises
+        #    "no such table: main.photos_old" when the parent table has columns
+        #    added via ALTER TABLE with CHECK constraints.
+        tag_rows = self.conn.execute(
+            "SELECT event_at, destination, tags_before, tags_after, success, error "
+            "FROM tag_events WHERE photo_id = ?",
+            (flickr_rec_id,),
+        ).fetchall()
+        if tag_rows:
+            self.conn.execute("DELETE FROM tag_events WHERE photo_id = ?", (flickr_rec_id,))
+            for t in tag_rows:
+                self.conn.execute(
+                    """INSERT INTO tag_events
+                       (photo_id, event_at, destination, tags_before, tags_after, success, error)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (photos_rec_id, t["event_at"], t["destination"],
+                     t["tags_before"], t["tags_after"], t["success"], t["error"]),
+                )
 
         # 3. Migrate metadata_conflicts (INSERT OR IGNORE to skip field conflicts
         #    that already exist on the Photos record)
