@@ -107,6 +107,8 @@ bp scan                            # Scan recent Photos additions (last 7 days)
 bp thumbs                          # Populate missing thumbnail paths
 bp reconcile                       # Check DB vs actual Flickr state
 bp reconcile --fix                 # Check and repair mismatches
+bp link-orphans                    # Merge split Photos-only/Flickr-only records (see below)
+bp link-orphans --dry-run          # Count linkable pairs without writing
 bp sync-albums                     # Sync Apple Photos albums → Flickr photosets (backfill)
 bp sync-albums --dry-run           # Preview what would be pushed without writing
 bp sync-albums --album "Vacation"  # Sync a single named album only
@@ -226,6 +228,23 @@ END
 WHERE review_decision IS NOT NULL
   AND privacy_state IN ('candidate_public', 'needs_review');
 ```
+
+## Linking split records (Photos-only / Flickr-only pairs)
+
+Each photo ideally lives as a single DB record with both a `uuid` (Apple Photos side) and a `flickr_id` (Flickr side). In practice, records can end up split if a photo is scanned from Apple Photos before its corresponding Flickr upload is polled — at scan time there is no Flickr record to match against, so the photo is stored as a Photos-only record. When the Flickr app later uploads the same photo, the poller creates a separate Flickr-only record. The two records then coexist indefinitely as duplicates unless actively merged.
+
+**`bp scan` now fixes this on the fly** for photos processed during a scan run. If a Photos-only record (uuid set, no flickr_id) matches a Flickr record by capture timestamp, they are merged automatically and the Flickr-only record is deleted. The merged record inherits all Apple metadata from the Photos side plus all Flickr identity fields from the Flickr side.
+
+**For existing split pairs** already in the database, run:
+
+```bash
+bp link-orphans --dry-run   # preview how many pairs would be merged
+bp link-orphans             # merge all linkable pairs
+```
+
+`bp stats` now reports **Linkable orphan pairs** if any exist, as a reminder to run this command. Pairs are matched by capture timestamp (to the second, timezone-normalised). Where a Photos record matches more than one Flickr record at the same second (genuine duplicate uploads), the lowest-id Flickr record is used as the primary.
+
+**`bp stats` also reports Approved + pushable** — the count of `approved_public` photos that have a `flickr_id` and haven't been pushed yet. This is the number the "Push approved" button in the review UI will actually act on. The larger "Approved public" total includes Photos-only records waiting for the Flickr iOS app to upload them; those cannot be pushed until they appear on Flickr and get linked.
 
 ## Album Sync
 
@@ -426,7 +445,7 @@ All scripts are idempotent and safe to re-run.
 python -m pytest tests/ -q
 ```
 
-239 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, and background-thread file-descriptor lifecycle.
+253 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging, and orphan-linking.
 
 ## License
 

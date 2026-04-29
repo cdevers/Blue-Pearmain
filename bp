@@ -8,6 +8,7 @@ Usage:
     bp scan [--all] [--days N]      Scan Apple Photos library
     bp thumbs                       Populate missing thumbnail paths
     bp reconcile [--fix] [--limit N] Check DB state vs actual Flickr state
+    bp link-orphans [--dry-run]     Merge split Photos/Flickr records
     bp ui                           Start the review UI (http://localhost:5173)
 
 Global options:
@@ -56,6 +57,20 @@ def cmd_stats(args):
            WHERE privacy_state = 'approved_public'
              AND perms_pushed_flickr = 1"""
     ).fetchone()["n"]
+    approved_pushable = db.conn.execute(
+        """SELECT COUNT(*) AS n FROM photos
+           WHERE privacy_state = 'approved_public'
+             AND flickr_id IS NOT NULL
+             AND perms_pushed_flickr = 0"""
+    ).fetchone()["n"]
+    orphan_pairs = db.conn.execute(
+        """SELECT COUNT(*) AS n
+           FROM photos p1
+           JOIN photos p2 ON
+             replace(substr(p1.date_taken, 1, 19), 'T', ' ') = substr(p2.date_taken, 1, 19)
+             AND p1.uuid IS NOT NULL AND p1.flickr_id IS NULL
+             AND p2.uuid IS NULL     AND p2.flickr_id IS NOT NULL"""
+    ).fetchone()["n"]
     db.close()
 
     if args.oneliner:
@@ -78,6 +93,9 @@ def cmd_stats(args):
         parts.append(f"flickr={flickr_linked}")
         parts.append(f"local={total - flickr_linked}")
         parts.append(f"pushed={pushed}")
+        parts.append(f"pushable={approved_pushable}")
+        if orphan_pairs:
+            parts.append(f"orphans={orphan_pairs}")
         print("  ".join(parts))
         return
 
@@ -94,6 +112,9 @@ def cmd_stats(args):
     print(f"  Flickr-linked records:  {flickr_linked:>8,}")
     print(f"  Photos-only records:    {total - flickr_linked:>8,}")
     print(f"  Approved + pushed:      {pushed:>8,}")
+    print(f"  Approved + pushable:    {approved_pushable:>8,}  (Flickr-linked, not yet pushed)")
+    if orphan_pairs:
+        print(f"  Linkable orphan pairs:  {orphan_pairs:>8,}  (run: bp link-orphans)")
     print()
 
 
@@ -183,6 +204,16 @@ def cmd_sync_metadata(args):
     ])
 
 
+def cmd_link_orphans(args):
+    from poller.link_orphans import main
+    _run(main, args, [
+        ("--config",  args.config),
+        ("--dry-run", args.dry_run),
+        ("--limit",   str(args.limit) if args.limit else None),
+        ("--verbose", args.verbose),
+    ])
+
+
 def _inject_argv(args, pairs):
     """Rebuild sys.argv from parsed args so subcommand main()s parse correctly."""
     new_argv = [sys.argv[0]]
@@ -255,6 +286,16 @@ def main():
                         help="Detect and record conflicts only; skip Photos writes")
     p_meta.add_argument("--verbose",        action="store_true")
 
+    # link-orphans
+    p_link = sub.add_parser(
+        "link-orphans",
+        help="Merge split Photos-only / Flickr-only records that share a capture timestamp",
+    )
+    p_link.add_argument("--dry-run", action="store_true",
+                        help="Find pairs but do not write to DB")
+    p_link.add_argument("--limit",   type=int, default=None,
+                        help="Max pairs to process (default: all)")
+
     args = parser.parse_args()
 
     # Attach config/verbose to all subcommands
@@ -280,6 +321,7 @@ def main():
         "ui":            cmd_ui,
         "sync-albums":   cmd_sync_albums,
         "sync-metadata": cmd_sync_metadata,
+        "link-orphans":  cmd_link_orphans,
     }
     dispatch[args.command](args)
 

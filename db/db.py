@@ -88,6 +88,132 @@ class Database:
             conn.close()
             self._local.conn = None
 
+    # -----------------------------------------------------------------------
+    # Late-linking: merge a Flickr-only record into a Photos-only record
+    # -----------------------------------------------------------------------
+
+    def merge_flickr_into_photos(self, flickr_rec_id: int, photos_rec_id: int) -> bool:
+        """
+        Late-link a Flickr-only record into an Apple-Photos-only record.
+
+        Copies Flickr identity fields (flickr_id, flickr_secret, etc.) from
+        the Flickr record into the Photos record, migrates album memberships,
+        tag_events, and metadata_conflicts, copies any review decision if the
+        Photos record has none, then deletes the Flickr record.
+
+        Returns True if the merge completed, False if either record is missing
+        or the preconditions aren't met (Photos record already has a flickr_id,
+        or Flickr record already has a uuid).
+        """
+        flickr_row = self.conn.execute(
+            "SELECT * FROM photos WHERE id = ?", (flickr_rec_id,)
+        ).fetchone()
+        photos_row = self.conn.execute(
+            "SELECT * FROM photos WHERE id = ?", (photos_rec_id,)
+        ).fetchone()
+
+        if not flickr_row or not photos_row:
+            return False
+
+        flickr_row  = dict(flickr_row)
+        photos_row  = dict(photos_row)
+
+        # Sanity checks
+        if photos_row.get("flickr_id"):
+            return False  # Photos record already linked
+        if flickr_row.get("uuid"):
+            return False  # Flickr record already linked
+
+        # 1. Migrate album memberships (INSERT OR IGNORE handles the case where
+        #    both records somehow ended up in the same album already)
+        albums = self.conn.execute(
+            "SELECT album_id, flickr_pushed, pushed_at FROM photo_albums WHERE photo_id = ?",
+            (flickr_rec_id,),
+        ).fetchall()
+        for a in albums:
+            self.conn.execute(
+                """INSERT OR IGNORE INTO photo_albums (photo_id, album_id, flickr_pushed, pushed_at)
+                   VALUES (?, ?, ?, ?)""",
+                (photos_rec_id, a["album_id"], a["flickr_pushed"], a["pushed_at"]),
+            )
+
+        # 2. Migrate tag_events
+        self.conn.execute(
+            "UPDATE tag_events SET photo_id = ? WHERE photo_id = ?",
+            (photos_rec_id, flickr_rec_id),
+        )
+
+        # 3. Migrate metadata_conflicts (INSERT OR IGNORE to skip field conflicts
+        #    that already exist on the Photos record)
+        conflicts = self.conn.execute(
+            "SELECT * FROM metadata_conflicts WHERE photo_id = ?",
+            (flickr_rec_id,),
+        ).fetchall()
+        for c in conflicts:
+            self.conn.execute(
+                """INSERT OR IGNORE INTO metadata_conflicts
+                   (photo_id, field, flickr_value, photos_value,
+                    resolved, resolution, resolved_at, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (photos_rec_id, c["field"], c["flickr_value"], c["photos_value"],
+                 c["resolved"], c["resolution"], c["resolved_at"], c["created_at"]),
+            )
+
+        # 4. Build the set of fields to copy into the Photos record
+        update: dict[str, Any] = {}
+
+        # Flickr identity fields — always copy from the Flickr record
+        for field in (
+            "flickr_id", "flickr_secret", "flickr_server", "flickr_farm",
+            "date_uploaded_flickr", "perms_pushed_flickr", "tags_pushed_flickr",
+        ):
+            if flickr_row.get(field) is not None:
+                update[field] = flickr_row[field]
+
+        # Thumbnail: use Flickr thumbnail only if Photos record has none
+        if not photos_row.get("thumbnail_path") and flickr_row.get("thumbnail_path"):
+            update["thumbnail_path"] = flickr_row["thumbnail_path"]
+
+        # Review decision: copy from Flickr record only if Photos record has none
+        if not photos_row.get("review_decision") and flickr_row.get("review_decision"):
+            for field in ("review_decision", "reviewed_at", "review_notes", "privacy_state"):
+                if flickr_row.get(field) is not None:
+                    update[field] = flickr_row[field]
+
+        update["updated_at"] = _now_iso()
+
+        # 5. Release the UNIQUE constraint on flickr_id before copying it.
+        #    SQLite enforces UNIQUE per-row immediately, so we must clear the
+        #    value on the source record before setting it on the target record.
+        if "flickr_id" in update:
+            self.conn.execute(
+                "UPDATE photos SET flickr_id = NULL WHERE id = ?", (flickr_rec_id,)
+            )
+
+        if update:
+            placeholders = ", ".join(f"{k} = ?" for k in update)
+            self.conn.execute(
+                f"UPDATE photos SET {placeholders} WHERE id = ?",
+                list(update.values()) + [photos_rec_id],
+            )
+
+        # 6. Delete the Flickr-only record (ON DELETE CASCADE handles photo_albums)
+        self.conn.execute("DELETE FROM photos WHERE id = ?", (flickr_rec_id,))
+        self.conn.commit()
+        return True
+
+    def count_linkable_orphans(self) -> int:
+        """Count Photos-only records that have a matching Flickr-only record by timestamp."""
+        row = self.conn.execute(
+            """SELECT COUNT(*) AS n
+               FROM photos p1
+               JOIN photos p2 ON
+                 replace(substr(p1.date_taken, 1, 19), 'T', ' ') = substr(p2.date_taken, 1, 19)
+                 AND p1.uuid IS NOT NULL AND p1.flickr_id IS NULL
+                 AND p2.uuid IS NULL     AND p2.flickr_id IS NOT NULL"""
+        ).fetchone()
+        return row["n"] if row else 0
+
     def _ensure_schema(self):
         schema_path = Path(__file__).parent / "schema.sql"
         if schema_path.exists():

@@ -2552,5 +2552,220 @@ class TestReconcileLifecycle(unittest.TestCase):
                            "undo_decision must update updated_at")
 
 
+# ---------------------------------------------------------------------------
+# merge_flickr_into_photos — late-linking of split records
+# ---------------------------------------------------------------------------
+
+class TestMergeFlickrIntoPhotos(unittest.TestCase):
+    """db.merge_flickr_into_photos() must correctly merge a Flickr-only record
+    into a Photos-only record and clean up the Flickr-only record."""
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self.db = Database(Path(self._tmp) / "test.db")
+
+        # Photos-only record (uuid set, no flickr_id)
+        self.photos_id = self.db.upsert_photo({
+            "uuid":              "uuid-heic-001",
+            "original_filename": "IMG_1234.HEIC",
+            "date_taken":        "2026-04-24T15:30:07.775000-04:00",
+            "privacy_state":     "candidate_public",
+            "apple_labels":      ["Travel", "Beach"],
+            "apple_persons":     [],
+            "proposed_tags":     ["travel", "beach"],
+            "apple_ai_caption":  "A sunny beach scene",
+            "latitude":          25.0,
+            "longitude":         -80.0,
+        })
+
+        # Flickr-only record (flickr_id set, no uuid)
+        self.flickr_id_row = self.db.upsert_photo({
+            "flickr_id":          "55228034962",
+            "flickr_secret":      "abc123",
+            "flickr_server":      "65535",
+            "flickr_farm":        66,
+            "original_filename":  "IMG_1234.JPG",
+            "date_taken":         "2026-04-24 15:30:07",
+            "privacy_state":      "candidate_public",
+            "date_uploaded_flickr": "2026-04-24T20:00:00+00:00",
+            "thumbnail_path":     "https://live.staticflickr.com/65535/55228034962_abc123_b.jpg",
+        })
+
+    def tearDown(self):
+        self.db.close()
+        import shutil
+        shutil.rmtree(self._tmp)
+
+    def _row(self, photo_id):
+        return self.db.get_photo(photo_id)
+
+    def test_merge_copies_flickr_id_to_photos_record(self):
+        self.db.merge_flickr_into_photos(self.flickr_id_row, self.photos_id)
+        row = self._row(self.photos_id)
+        self.assertEqual(row["flickr_id"], "55228034962")
+
+    def test_merge_copies_flickr_secret_and_server(self):
+        self.db.merge_flickr_into_photos(self.flickr_id_row, self.photos_id)
+        row = self._row(self.photos_id)
+        self.assertEqual(row["flickr_secret"], "abc123")
+        self.assertEqual(row["flickr_server"], "65535")
+
+    def test_merge_preserves_apple_metadata(self):
+        self.db.merge_flickr_into_photos(self.flickr_id_row, self.photos_id)
+        row = self._row(self.photos_id)
+        self.assertEqual(row["uuid"], "uuid-heic-001")
+        self.assertEqual(row["apple_ai_caption"], "A sunny beach scene")
+        self.assertIn("Beach", row["apple_labels"])
+
+    def test_merge_deletes_flickr_only_record(self):
+        self.db.merge_flickr_into_photos(self.flickr_id_row, self.photos_id)
+        self.assertIsNone(self._row(self.flickr_id_row))
+
+    def test_merge_copies_thumbnail_when_photos_record_has_none(self):
+        self.db.merge_flickr_into_photos(self.flickr_id_row, self.photos_id)
+        row = self._row(self.photos_id)
+        self.assertIn("55228034962", row["thumbnail_path"])
+
+    def test_merge_does_not_overwrite_existing_thumbnail(self):
+        # Give the Photos record its own thumbnail first
+        self.db.conn.execute(
+            "UPDATE photos SET thumbnail_path = '/local/thumb.jpg' WHERE id = ?",
+            (self.photos_id,),
+        )
+        self.db.conn.commit()
+        self.db.merge_flickr_into_photos(self.flickr_id_row, self.photos_id)
+        row = self._row(self.photos_id)
+        self.assertEqual(row["thumbnail_path"], "/local/thumb.jpg")
+
+    def test_merge_copies_review_decision_when_photos_has_none(self):
+        # Put a review decision on the Flickr record only
+        self.db.record_review(self.flickr_id_row, "make_public")
+        self.db.merge_flickr_into_photos(self.flickr_id_row, self.photos_id)
+        row = self._row(self.photos_id)
+        self.assertEqual(row["review_decision"], "make_public")
+
+    def test_merge_does_not_overwrite_existing_review_decision(self):
+        # Both records have review decisions; Photos record wins
+        self.db.record_review(self.photos_id,    "keep_private")
+        self.db.record_review(self.flickr_id_row, "make_public")
+        self.db.merge_flickr_into_photos(self.flickr_id_row, self.photos_id)
+        row = self._row(self.photos_id)
+        self.assertEqual(row["review_decision"], "keep_private")
+
+    def test_merge_migrates_album_memberships(self):
+        album_id = self.db.upsert_album("apple-uuid-trip", "Beach Trip")
+        self.db.upsert_photo_album(self.flickr_id_row, album_id)
+
+        self.db.merge_flickr_into_photos(self.flickr_id_row, self.photos_id)
+
+        albums = self.db.get_photo_albums(self.photos_id)
+        album_names = [a["name"] for a in albums]
+        self.assertIn("Beach Trip", album_names)
+
+    def test_merge_returns_false_when_photos_already_linked(self):
+        # Photos record already has a flickr_id — should refuse to merge
+        self.db.conn.execute(
+            "UPDATE photos SET flickr_id = 'existing-flickr' WHERE id = ?",
+            (self.photos_id,),
+        )
+        self.db.conn.commit()
+        result = self.db.merge_flickr_into_photos(self.flickr_id_row, self.photos_id)
+        self.assertFalse(result)
+
+    def test_merge_returns_false_when_flickr_already_has_uuid(self):
+        self.db.conn.execute(
+            "UPDATE photos SET uuid = 'existing-uuid' WHERE id = ?",
+            (self.flickr_id_row,),
+        )
+        self.db.conn.commit()
+        result = self.db.merge_flickr_into_photos(self.flickr_id_row, self.photos_id)
+        self.assertFalse(result)
+
+
+# ---------------------------------------------------------------------------
+# link_orphans batch tool
+# ---------------------------------------------------------------------------
+
+class TestLinkOrphans(unittest.TestCase):
+    """poller/link_orphans.py must find and merge split record pairs."""
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self.db = Database(Path(self._tmp) / "test.db")
+
+    def tearDown(self):
+        self.db.close()
+        import shutil
+        shutil.rmtree(self._tmp)
+
+    def _seed_pair(self, tag: str, date: str = "2026-01-15 10:00:00"):
+        """Insert a Photos-only and a Flickr-only record with matching timestamp."""
+        photos_id = self.db.upsert_photo({
+            "uuid":              f"uuid-{tag}",
+            "original_filename": f"IMG_{tag}.HEIC",
+            "date_taken":        f"{date.replace(' ', 'T')}+00:00",
+            "privacy_state":     "candidate_public",
+            "apple_labels":      [],
+            "apple_persons":     [],
+        })
+        flickr_id_row = self.db.upsert_photo({
+            "flickr_id":          f"flickr-{tag}",
+            "original_filename":  f"IMG_{tag}.JPG",
+            "date_taken":         date,
+            "privacy_state":      "candidate_public",
+        })
+        return photos_id, flickr_id_row
+
+    def test_dry_run_does_not_modify_db(self):
+        from poller.link_orphans import link_orphans
+        photos_id, flickr_row = self._seed_pair("dry")
+        linked, failed = link_orphans(self.db, dry_run=True, limit=100)
+        self.assertEqual(linked, 1)
+        self.assertEqual(failed, 0)
+        # DB must be unchanged
+        self.assertIsNone(self.db.get_photo(photos_id)["flickr_id"])
+        self.assertIsNotNone(self.db.get_photo(flickr_row))
+
+    def test_links_matching_pair(self):
+        from poller.link_orphans import link_orphans
+        photos_id, flickr_row = self._seed_pair("live")
+        linked, failed = link_orphans(self.db, dry_run=False, limit=100)
+        self.assertEqual(linked, 1)
+        self.assertEqual(failed, 0)
+        row = self.db.get_photo(photos_id)
+        self.assertEqual(row["flickr_id"], "flickr-live")
+        self.assertIsNone(self.db.get_photo(flickr_row))
+
+    def test_links_multiple_pairs(self):
+        from poller.link_orphans import link_orphans
+        self._seed_pair("a", "2026-02-01 09:00:00")
+        self._seed_pair("b", "2026-02-02 10:00:00")
+        self._seed_pair("c", "2026-02-03 11:00:00")
+        linked, failed = link_orphans(self.db, dry_run=False, limit=100)
+        self.assertEqual(linked, 3)
+        self.assertEqual(failed, 0)
+
+    def test_limit_respected(self):
+        from poller.link_orphans import link_orphans
+        self._seed_pair("x", "2026-03-01 08:00:00")
+        self._seed_pair("y", "2026-03-02 09:00:00")
+        linked, failed = link_orphans(self.db, dry_run=False, limit=1)
+        self.assertEqual(linked, 1)
+
+    def test_unmatched_photos_only_record_left_alone(self):
+        from poller.link_orphans import link_orphans
+        photos_id = self.db.upsert_photo({
+            "uuid":              "uuid-nopair",
+            "original_filename": "IMG_nopair.HEIC",
+            "date_taken":        "2026-06-01T12:00:00+00:00",
+            "privacy_state":     "candidate_public",
+            "apple_labels":      [],
+            "apple_persons":     [],
+        })
+        linked, failed = link_orphans(self.db, dry_run=False, limit=100)
+        self.assertEqual(linked, 0)
+        self.assertIsNotNone(self.db.get_photo(photos_id))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -346,6 +346,7 @@ def scan(
     matched   = 0
     enriched  = 0
     inserted  = 0
+    linked    = 0  # Photos-only records late-linked to a Flickr record
 
     # Build a query — osxphotos supports filtering by date
     if since:
@@ -371,6 +372,28 @@ def scan(
         if existing_by_uuid:
             # Always sync album membership — it can change independently of ML analysis
             sync_photo_albums(photo, existing_by_uuid["id"], db, dry_run)
+
+            # If this record has no Flickr link yet, try to find one now.
+            # This handles the common case where the photo was scanned into
+            # Apple Photos before the Flickr iOS app uploaded it — at scan
+            # time there was no Flickr record to match against, so the record
+            # was stored as Photos-only.  On subsequent scans we retry here.
+            if not existing_by_uuid.get("flickr_id"):
+                candidates = find_flickr_match(photo_row, db)
+                if candidates:
+                    primary = candidates[0]
+                    log.debug(
+                        "Late-linking %s (id=%s) → flickr:%s (id=%s)",
+                        photo.original_filename,
+                        existing_by_uuid["id"],
+                        primary["flickr_id"],
+                        primary["id"],
+                    )
+                    if not dry_run:
+                        db.merge_flickr_into_photos(primary["id"], existing_by_uuid["id"])
+                        # Refresh so the re-enrichment step below sees the flickr_id
+                        existing_by_uuid = db.get_photo(existing_by_uuid["id"]) or existing_by_uuid
+                    linked += 1
 
             # Only re-enrich if Apple has updated its analysis
             if existing_by_uuid.get("date_analyzed") == photo_row.get("date_analyzed"):
@@ -439,7 +462,7 @@ def scan(
                 sync_photo_albums(photo, row_id, db, dry_run)
             inserted += 1
 
-    return scanned, matched, enriched, inserted
+    return scanned, matched, enriched, inserted, linked
 
 
 # ---------------------------------------------------------------------------
@@ -543,7 +566,7 @@ def main():
     run_id = None if args.dry_run else db.start_sync_run("photos_scan")
 
     try:
-        scanned, matched, enriched, inserted = scan(
+        scanned, matched, enriched, inserted, linked = scan(
             library_path=library_path,
             db=db,
             since=since,
@@ -553,7 +576,7 @@ def main():
 
         log.info(
             f"Scan complete: {scanned} scanned, {matched} matched to Flickr, "
-            f"{enriched} re-enriched, {inserted} Photos-only inserted"
+            f"{linked} late-linked, {enriched} re-enriched, {inserted} Photos-only inserted"
         )
 
         if run_id:
@@ -562,7 +585,7 @@ def main():
                 status="complete",
                 photos_seen=scanned,
                 photos_new=inserted,
-                photos_updated=matched + enriched,
+                photos_updated=matched + enriched + linked,
             )
 
     except KeyboardInterrupt:
