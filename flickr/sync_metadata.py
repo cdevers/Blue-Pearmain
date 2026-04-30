@@ -63,9 +63,9 @@ def main() -> int:
         log.error("Cannot open database: %s", e)
         return 2
 
-    library_path = config.get("apple_photos", {}).get("library_path", "")
+    library_path = config.get("photos_library", {}).get("path", "")
     if not library_path:
-        log.error("apple_photos.library_path not set in config")
+        log.error("photos_library.path not set in config")
         return 2
 
     try:

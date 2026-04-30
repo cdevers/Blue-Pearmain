@@ -2355,8 +2355,8 @@ class TestSyncMetadataCLI(unittest.TestCase):
         self._config_path = Path(self._tmp.name) / "config.yml"
         self._config_path.write_text(
             f"database:\n  path: {self._db_path}\n"
-            "apple_photos:\n"
-            f"  library_path: {self._tmp.name}/Photos.photoslibrary\n"
+            "photos_library:\n"
+            f"  path: {self._tmp.name}/Photos.photoslibrary\n"
             "flickr:\n"
             "  api_key: test\n"
             "  api_secret: test\n"
