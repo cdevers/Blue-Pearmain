@@ -63,8 +63,8 @@ def main() -> int:
         log.error("Cannot open database: %s", e)
         return 2
 
-    library_path = config.get("photos_library", {}).get("path", "")
-    if not library_path:
+    library_path = str(Path(config.get("photos_library", {}).get("path", "")).expanduser())
+    if not library_path or library_path == ".":
         log.error("photos_library.path not set in config")
         return 2
 
