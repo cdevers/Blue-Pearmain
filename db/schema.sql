@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS photos (
     tags_pushed_flickr      INTEGER DEFAULT 0,      -- boolean
     tags_pushed_photos      INTEGER DEFAULT 0,      -- boolean
     perms_pushed_flickr     INTEGER DEFAULT 0,      -- boolean: have we set Flickr visibility?
+    flickr_deleted          INTEGER DEFAULT 0,      -- boolean: photo was deleted from Flickr; skip future syncs
 
     -- Thumbnail cache
     thumbnail_path          TEXT,                   -- absolute path on NAS to cached url_l JPEG

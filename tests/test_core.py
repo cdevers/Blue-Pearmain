@@ -2328,6 +2328,33 @@ class TestMetadataPuller(unittest.TestCase):
         self.assertEqual(result["status"], "flickr_error")
         self.assertTrue(len(result["errors"]) > 0)
 
+    def test_flickr_not_found_returns_flickr_deleted_status(self):
+        """Flickr error 1 (photo not found) sets flickr_deleted in DB and returns flickr_deleted status."""
+        from flickr.flickr_client import FlickrError
+        self.mock_flickr.get_photo_info.side_effect = FlickrError(1, 'Photo not found')
+        from flickr.metadata_puller import pull_photo_metadata
+        result = pull_photo_metadata(self.db, self.mock_flickr, self.photo_id, self.library)
+        self.assertEqual(result["status"], "flickr_deleted")
+        # DB flag should be set
+        row = self.db.conn.execute(
+            "SELECT flickr_deleted FROM photos WHERE id = ?", (self.photo_id,)
+        ).fetchone()
+        self.assertEqual(row["flickr_deleted"], 1)
+
+    def test_flickr_not_found_dry_run_does_not_write_db(self):
+        """In dry-run mode, flickr_deleted status is returned but the DB flag is NOT set."""
+        from flickr.flickr_client import FlickrError
+        self.mock_flickr.get_photo_info.side_effect = FlickrError(1, 'Photo not found')
+        from flickr.metadata_puller import pull_photo_metadata
+        result = pull_photo_metadata(
+            self.db, self.mock_flickr, self.photo_id, self.library, dry_run=True
+        )
+        self.assertEqual(result["status"], "flickr_deleted")
+        row = self.db.conn.execute(
+            "SELECT flickr_deleted FROM photos WHERE id = ?", (self.photo_id,)
+        ).fetchone()
+        self.assertEqual(row["flickr_deleted"], 0)  # not written in dry-run
+
     def test_write_error_counted_as_write_error_status(self):
         from unittest.mock import patch
         self._set_flickr_meta(title="Flickr Title")
@@ -2419,6 +2446,18 @@ class TestPullBatch(unittest.TestCase):
         self.assertIn("skipped", totals)
         self.assertIn("failed", totals)
         self.assertGreaterEqual(totals["written"] + totals["skipped"] + totals["failed"], 0)
+
+    def test_flickr_deleted_counted_as_skipped_not_failed(self):
+        """A photo deleted from Flickr (error 1) should count as skipped, not failed."""
+        from flickr.flickr_client import FlickrError
+        self.mock_flickr.get_photo_info.side_effect = FlickrError(1, "Photo not found")
+        mock_module, mock_db_instance, patcher = self._mock_osxphotos()
+        with patcher:
+            from flickr.metadata_puller import pull_batch
+            totals = pull_batch(self.db, self.mock_flickr, [self.id1, self.id2],
+                                library_path=self.library, dry_run=False)
+        self.assertEqual(totals["failed"], 0)
+        self.assertGreater(totals["skipped"], 0)
 
 
 # ---------------------------------------------------------------------------

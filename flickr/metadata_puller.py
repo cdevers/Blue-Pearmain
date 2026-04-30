@@ -82,8 +82,18 @@ def pull_photo_metadata(
     try:
         flickr_meta = _fetch_flickr_metadata(flickr, flickr_id)
     except FlickrError as e:
-        result["status"] = "flickr_error"
-        result["errors"].append(str(e))
+        if e.code == 1:
+            # Photo was deleted from Flickr; record it so future runs skip it
+            result["status"] = "flickr_deleted"
+            if not dry_run:
+                db.mark_flickr_deleted(photo_id)
+            log.info(
+                "flickr_deleted photo_id=%s flickr_id=%s — marked, will skip in future",
+                photo_id, flickr_id,
+            )
+        else:
+            result["status"] = "flickr_error"
+            result["errors"].append(str(e))
         return result
 
     # 2. Read from Photos
@@ -190,7 +200,9 @@ def pull_batch(
         totals["conflicts"] += len(result["conflicts"])
         totals["skipped"]   += len(result["skipped"])
 
-        if result["status"] in ("flickr_error", "write_error", "no_uuid"):
+        if result["status"] == "flickr_deleted":
+            totals["skipped"] += 1
+        elif result["status"] in ("flickr_error", "write_error", "no_uuid"):
             totals["failed"] += 1
             if result["status"] != "no_uuid":
                 log.warning(

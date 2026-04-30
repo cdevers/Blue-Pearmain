@@ -337,8 +337,11 @@ When a photoset is created for an album, the first photo being pushed to it is u
 | Both sides have the same value | No-op |
 | Both sides have different non-empty values | Record a **conflict** for manual resolution |
 | Only Photos has a value | Preserve it — no-op |
+| Flickr returns "photo not found" (error 1) | Mark `flickr_deleted = 1` in DB; skip silently on future runs |
 
 Tags are compared as sets (case-insensitive) so capitalisation differences alone do not trigger a conflict.
+
+Photos deleted from Flickr are detected on first encounter, recorded in the database, and automatically excluded from all subsequent sync runs — no repeated warnings.
 
 ### Commands
 
@@ -492,7 +495,7 @@ All scripts are idempotent and safe to re-run.
 python -m pytest tests/ -q
 ```
 
-257 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, and metadata-sync batch behaviour (PhotosDB caching, progress logging).
+260 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, and metadata-sync batch behaviour (PhotosDB caching, progress logging, flickr_deleted detection).
 
 ## License
 

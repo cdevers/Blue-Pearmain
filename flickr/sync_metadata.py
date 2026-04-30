@@ -82,6 +82,7 @@ def main() -> int:
         rows = db.conn.execute(
             """SELECT id FROM photos
                WHERE flickr_id IS NOT NULL AND uuid IS NOT NULL
+                 AND (flickr_deleted IS NULL OR flickr_deleted = 0)
                ORDER BY id
                LIMIT ?""",
             (args.limit,),

@@ -635,6 +635,14 @@ class Database:
     # Metadata conflicts (Flickr vs. Apple Photos)
     # -----------------------------------------------------------------------
 
+    def mark_flickr_deleted(self, photo_id: int) -> None:
+        """Record that a photo's Flickr copy no longer exists (API error 1)."""
+        self.conn.execute(
+            "UPDATE photos SET flickr_deleted = 1, updated_at = ? WHERE id = ?",
+            (_now_iso(), photo_id),
+        )
+        self.conn.commit()
+
     def upsert_metadata_conflict(
         self,
         photo_id: int,
