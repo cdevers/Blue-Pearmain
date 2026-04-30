@@ -40,6 +40,7 @@ def pull_photo_metadata(
     photo_id: int,
     library_path: str,
     dry_run: bool = False,
+    photos_db: object = None,
 ) -> dict:
     """
     Process one photo row. Returns:
@@ -87,7 +88,7 @@ def pull_photo_metadata(
 
     # 2. Read from Photos
     try:
-        photos_meta = _read_photos_metadata(uuid, library_path)
+        photos_meta = _read_photos_metadata(uuid, library_path, photos_db=photos_db)
     except Exception as e:
         result["status"] = "write_error"
         result["errors"].append(f"osxphotos read failed: {e}")
@@ -135,7 +136,7 @@ def pull_photo_metadata(
     # 4. Write to Photos
     if fields_to_write and not dry_run:
         try:
-            _write_photos_metadata(uuid, library_path, fields_to_write)
+            _write_photos_metadata(uuid, library_path, fields_to_write, photos_db=photos_db)
             result["written"].extend(fields_to_write.keys())
             log.debug(
                 "wrote %s to Photos photo_id=%s fields=%s",
@@ -169,9 +170,22 @@ def pull_batch(
     Returns aggregate counts: {"written": N, "conflicts": N, "skipped": N, "failed": N}
     """
     totals = {"written": 0, "conflicts": 0, "skipped": 0, "failed": 0}
+    total = len(photo_ids)
 
-    for photo_id in photo_ids:
-        result = pull_photo_metadata(db, flickr, photo_id, library_path, dry_run=dry_run)
+    try:
+        import osxphotos
+        photos_db = osxphotos.PhotosDB(dbfile=library_path)
+    except ImportError:
+        raise RuntimeError("osxphotos is not installed — cannot read Photos metadata")
+    except Exception as e:
+        raise RuntimeError(f"Cannot open Photos library: {e}")
+
+    log.info("Processing %d photos%s", total, " (dry-run)" if dry_run else "")
+
+    for i, photo_id in enumerate(photo_ids, 1):
+        result = pull_photo_metadata(
+            db, flickr, photo_id, library_path, dry_run=dry_run, photos_db=photos_db
+        )
         totals["written"]   += len(result["written"])
         totals["conflicts"] += len(result["conflicts"])
         totals["skipped"]   += len(result["skipped"])
@@ -187,6 +201,13 @@ def pull_batch(
             log.debug(
                 "pull_batch: photo_id=%s written=%s conflicts=%s skipped=%s",
                 photo_id, result["written"], result["conflicts"], result["skipped"],
+            )
+
+        if i % 50 == 0 or i == total:
+            log.info(
+                "Progress: %d / %d — written=%d  conflicts=%d  skipped=%d  failed=%d",
+                i, total,
+                totals["written"], totals["conflicts"], totals["skipped"], totals["failed"],
             )
 
     return totals
@@ -210,19 +231,20 @@ def _fetch_flickr_metadata(flickr: "FlickrClient", flickr_id: str) -> dict:
     return {"title": title, "description": desc, "tags": tags}
 
 
-def _read_photos_metadata(uuid: str, library_path: str) -> dict:
+def _read_photos_metadata(uuid: str, library_path: str, photos_db: object = None) -> dict:
     """
     Read title, description (caption), and keywords from Apple Photos via osxphotos.
     Returns {"title": str, "description": str, "tags": list[str]}.
     Raises RuntimeError if osxphotos is unavailable or the photo is not found.
     """
-    try:
-        import osxphotos
-    except ImportError:
-        raise RuntimeError("osxphotos is not installed — cannot read Photos metadata")
+    if photos_db is None:
+        try:
+            import osxphotos
+        except ImportError:
+            raise RuntimeError("osxphotos is not installed — cannot read Photos metadata")
+        photos_db = osxphotos.PhotosDB(dbfile=library_path)
 
-    photos_db = osxphotos.PhotosDB(dbfile=library_path)
-    results   = photos_db.photos(uuid=[uuid])
+    results = photos_db.photos(uuid=[uuid])
     if not results:
         return {"title": "", "description": "", "tags": []}
 
@@ -234,7 +256,7 @@ def _read_photos_metadata(uuid: str, library_path: str) -> dict:
     }
 
 
-def _write_photos_metadata(uuid: str, library_path: str, fields: dict) -> None:
+def _write_photos_metadata(uuid: str, library_path: str, fields: dict, photos_db: object = None) -> None:
     """
     Write title/description/keywords to Apple Photos via osxphotos PhotoInfo.update().
     Raises RuntimeError if Photos.app is not running or osxphotos write is unavailable.
@@ -244,13 +266,14 @@ def _write_photos_metadata(uuid: str, library_path: str, fields: dict) -> None:
             "Photos.app is not running — open Photos.app and re-run sync-metadata"
         )
 
-    try:
-        import osxphotos
-    except ImportError:
-        raise RuntimeError("osxphotos is not installed — cannot write Photos metadata")
+    if photos_db is None:
+        try:
+            import osxphotos
+        except ImportError:
+            raise RuntimeError("osxphotos is not installed — cannot write Photos metadata")
+        photos_db = osxphotos.PhotosDB(dbfile=library_path)
 
-    photos_db = osxphotos.PhotosDB(dbfile=library_path)
-    results   = photos_db.photos(uuid=[uuid])
+    results = photos_db.photos(uuid=[uuid])
     if not results:
         raise RuntimeError(f"Photo uuid={uuid} not found in Photos library")
 

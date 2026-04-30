@@ -2342,6 +2342,86 @@ class TestMetadataPuller(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# pull_batch — PhotosDB caching and progress logging
+# ---------------------------------------------------------------------------
+
+class TestPullBatch(unittest.TestCase):
+
+    def setUp(self):
+        from unittest.mock import MagicMock
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        self.library = str(Path(self._tmp.name) / "Photos.photoslibrary")
+        self.mock_flickr = MagicMock()
+
+        # Seed two photos with flickr_id and uuid
+        self.id1 = self.db.upsert_photo({
+            "uuid": "uuid-batch-1", "original_filename": "IMG_001.JPG",
+            "privacy_state": "approved_public", "flickr_id": "flickr-001",
+            "proposed_tags": [], "apple_persons": [], "apple_labels": [],
+        })
+        self.id2 = self.db.upsert_photo({
+            "uuid": "uuid-batch-2", "original_filename": "IMG_002.JPG",
+            "privacy_state": "approved_public", "flickr_id": "flickr-002",
+            "proposed_tags": [], "apple_persons": [], "apple_labels": [],
+        })
+
+        self.mock_flickr.get_photo_info.return_value = {
+            "photo": {
+                "title":       {"_content": "Flickr Title"},
+                "description": {"_content": ""},
+                "tags":        {"tag": []},
+            }
+        }
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _mock_osxphotos(self):
+        """Return (mock_module, mock_db_instance) with sys.modules patching."""
+        from unittest.mock import MagicMock, patch
+        mock_db_instance = MagicMock()
+        mock_db_instance.photos.return_value = []
+        mock_module = MagicMock()
+        mock_module.PhotosDB.return_value = mock_db_instance
+        return mock_module, mock_db_instance, patch.dict(__import__("sys").modules, {"osxphotos": mock_module})
+
+    def test_photosdb_opened_once_not_per_photo(self):
+        """PhotosDB should be opened once for the whole batch, not once per photo."""
+        mock_module, mock_db_instance, patcher = self._mock_osxphotos()
+        with patcher:
+            from flickr.metadata_puller import pull_batch
+            pull_batch(self.db, self.mock_flickr, [self.id1, self.id2],
+                       library_path=self.library, dry_run=True)
+        mock_module.PhotosDB.assert_called_once_with(dbfile=self.library)
+
+    def test_progress_logged_at_intervals(self):
+        """pull_batch should emit at least one INFO progress line."""
+        import logging as _logging
+        mock_module, mock_db_instance, patcher = self._mock_osxphotos()
+        with patcher, self.assertLogs("blue-pearmain.metadata_puller", level=_logging.INFO) as cm:
+            from flickr.metadata_puller import pull_batch
+            pull_batch(self.db, self.mock_flickr, [self.id1, self.id2],
+                       library_path=self.library, dry_run=True)
+        progress_lines = [l for l in cm.output if "Progress:" in l or "Processing" in l]
+        self.assertTrue(len(progress_lines) >= 1, "Expected at least one progress log line")
+
+    def test_batch_totals_aggregated(self):
+        """Totals dict should have the right keys and non-negative counts."""
+        mock_module, mock_db_instance, patcher = self._mock_osxphotos()
+        with patcher:
+            from flickr.metadata_puller import pull_batch
+            totals = pull_batch(self.db, self.mock_flickr, [self.id1, self.id2],
+                                library_path=self.library, dry_run=True)
+        self.assertIn("written", totals)
+        self.assertIn("conflicts", totals)
+        self.assertIn("skipped", totals)
+        self.assertIn("failed", totals)
+        self.assertGreaterEqual(totals["written"] + totals["skipped"] + totals["failed"], 0)
+
+
+# ---------------------------------------------------------------------------
 # sync-metadata CLI
 # ---------------------------------------------------------------------------
 

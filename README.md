@@ -350,9 +350,12 @@ bp sync-metadata --limit 100            # Process at most 100 photos
 bp sync-metadata --photo-id 42          # Process a single photo (useful for debugging)
 ```
 
-Output:
+Output — progress lines are logged every 50 photos, followed by a summary:
 
 ```
+2026-04-29T12:00:00  INFO      blue-pearmain.metadata_puller  Processing 500 photos
+2026-04-29T12:00:10  INFO      blue-pearmain.metadata_puller  Progress: 50 / 500 — written=8  conflicts=2  skipped=190  failed=0
+...
 written=12  conflicts=3  skipped=847  failed=0
 ```
 
@@ -489,7 +492,7 @@ All scripts are idempotent and safe to re-run.
 python -m pytest tests/ -q
 ```
 
-254 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), and orphan-linking.
+257 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, and metadata-sync batch behaviour (PhotosDB caching, progress logging).
 
 ## License
 
