@@ -188,6 +188,7 @@ def cmd_sync_metadata(args):
         ("--limit",          str(args.limit) if args.limit is not None else None),
         ("--photo-id",       str(args.photo_id) if args.photo_id else None),
         ("--conflicts-only", args.conflicts_only),
+        ("--force",          args.force),
         ("--verbose",        args.verbose),
     ])
 
@@ -272,6 +273,8 @@ def main():
                         help="Process only this DB photo_id")
     p_meta.add_argument("--conflicts-only", action="store_true",
                         help="Detect and record conflicts only; skip Photos writes")
+    p_meta.add_argument("--force",          action="store_true",
+                        help="Process all photos, ignoring meta_last_harmonized_at")
     p_meta.add_argument("--verbose",        action="store_true")
 
     # link-orphans

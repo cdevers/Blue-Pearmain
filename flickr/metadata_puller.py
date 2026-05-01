@@ -118,6 +118,27 @@ def run_sync_engine(
         )
         db.conn.commit()
 
+    if not dry_run:
+        # Supersede pending proposals for any photo whose stored hashes now agree.
+        # This cleans up stale proposals that were created before a normalization fix
+        # caused the poller/scanner to recompute equal hashes, causing those photos
+        # to hit the hash_match fast path and skip per-photo supersede logic.
+        cur = db.conn.execute(
+            """UPDATE metadata_proposals
+               SET status='superseded', resolved_at=?
+               WHERE status='pending' AND field='tags'
+                 AND photo_id IN (
+                   SELECT id FROM photos
+                   WHERE flickr_tags_hash IS NOT NULL
+                     AND photos_tags_hash IS NOT NULL
+                     AND flickr_tags_hash = photos_tags_hash
+                 )""",
+            (now,),
+        )
+        if cur.rowcount:
+            log.info("sync_engine: superseded %d stale proposals (hashes now match)", cur.rowcount)
+        db.conn.commit()
+
     return totals
 
 

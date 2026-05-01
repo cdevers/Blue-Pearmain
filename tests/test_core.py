@@ -4022,6 +4022,35 @@ class TestRunSyncEngine(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row["status"], "superseded")
 
+    def test_hash_match_path_supersedes_stale_proposals(self):
+        # When stored hashes are already equal (hash_match fast path), any stale
+        # pending proposals must still be superseded by the end-of-run bulk cleanup.
+        import json as _json
+        from flickr.metadata_puller import run_sync_engine
+        # Both sides have equal hashes → hash_match branch will be taken
+        pid = self._add("HASH_MATCH_STALE", ["closeup"], ["close-up"])
+        # Both sides normalise to the same hash, so _add computes identical hashes
+        # and hash_match will fire. Insert a stale proposal that predates the fix.
+        fhash = self.db.conn.execute(
+            "SELECT flickr_tags_hash FROM photos WHERE id=?", (pid,)
+        ).fetchone()["flickr_tags_hash"]
+        self.db.upsert_proposal({
+            "photo_id": pid, "field": "tags",
+            "proposed_value": _json.dumps(["closeup"]),
+            "source": "flickr", "target": "photos", "conflict_type": "collision",
+            "source_hash_at_creation": fhash, "target_hash_at_creation": fhash,
+            "created_at": "2026-01-01T00:00:00+00:00",
+        })
+        self.db.conn.commit()
+        self.assertEqual(len(self._pending_proposals()), 1)
+        totals = run_sync_engine(self.db, [pid])
+        self.assertEqual(totals["hash_matches"], 1)
+        self.assertEqual(len(self._pending_proposals()), 0)
+        row = self.db.conn.execute(
+            "SELECT status FROM metadata_proposals WHERE photo_id=?", (pid,)
+        ).fetchone()
+        self.assertEqual(row["status"], "superseded")
+
 
 # ---------------------------------------------------------------------------
 # Phase 5 — proposal applier and proposals UI
