@@ -23,8 +23,11 @@ Options:
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import logging
 import sys
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -37,6 +40,15 @@ from analyzer.privacy import classify
 from analyzer.tagger import propose_tags
 
 log = logging.getLogger("blue-pearmain.scanner")
+
+
+def _normalise_tag(tag: str) -> str:
+    return unicodedata.normalize("NFC", tag.strip().casefold())
+
+
+def _compute_tags_hash(tags: list[str]) -> str:
+    normed = sorted({_normalise_tag(t) for t in tags if t.strip()})
+    return hashlib.sha256(" ".join(normed).encode()).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +133,16 @@ def photos_record_to_db(photo) -> dict:
         extra_city = getattr(names, "additional_city_info", None) or []
         if extra_city:
             row["place_neighborhood"] = extra_city[0]
+
+    # Photos metadata cache (title, description, keywords)
+    photos_title       = getattr(photo, "title",       None) or ""
+    photos_description = getattr(photo, "description", None) or ""
+    photos_tags        = list(getattr(photo, "keywords", None) or [])
+    row["photos_title"]          = photos_title
+    row["photos_description"]    = photos_description
+    row["photos_tags"]           = photos_tags  # auto-serialised to JSON by upsert_photo
+    row["photos_tags_hash"]      = _compute_tags_hash(photos_tags)
+    row["meta_synced_photos_at"] = datetime.now(timezone.utc).isoformat()
 
     # Apple ML labels
     labels = list(photo.labels or [])
@@ -274,6 +296,8 @@ def build_enriched_row(
         "apple_ai_caption", "apple_ai_caption_conf",
         "apple_aesthetic_score", "fingerprint",
         "width", "height",
+        "photos_title", "photos_description", "photos_tags",
+        "photos_tags_hash", "meta_synced_photos_at",
     ):
         if photo_row.get(field) is not None:
             merged[field] = photo_row[field]
@@ -395,9 +419,18 @@ def scan(
                         existing_by_uuid = db.get_photo(existing_by_uuid["id"]) or existing_by_uuid
                     linked += 1
 
-            # Only re-enrich if Apple has updated its analysis
-            if existing_by_uuid.get("date_analyzed") == photo_row.get("date_analyzed"):
-                continue  # nothing new from Apple
+            # Skip full re-enrichment only when Apple's ML analysis AND the
+            # Photos metadata cache are both unchanged since last scan.
+            analysis_unchanged = (
+                existing_by_uuid.get("date_analyzed") == photo_row.get("date_analyzed")
+            )
+            photos_cache_fresh = (
+                existing_by_uuid.get("meta_synced_photos_at") is not None
+                and existing_by_uuid.get("photos_tags_hash") == photo_row.get("photos_tags_hash")
+                and existing_by_uuid.get("photos_title") == photo_row.get("photos_title")
+            )
+            if analysis_unchanged and photos_cache_fresh:
+                continue
             enriched_row = build_enriched_row(
                 photo_row, existing_by_uuid, zones, self_name
             )

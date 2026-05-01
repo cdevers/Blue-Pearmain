@@ -2542,6 +2542,241 @@ class TestPullBatch(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Phase 4: scanner writes Photos metadata cache to DB
+# ---------------------------------------------------------------------------
+
+class TestPhotosRecordToDbMetadata(unittest.TestCase):
+    """photos_record_to_db should capture Photos metadata cache columns."""
+
+    def _make_mock_photo(self, title="", description="", keywords=None):
+        from unittest.mock import MagicMock
+        p = MagicMock()
+        p.uuid             = "uuid-meta-001"
+        p.original_filename = "IMG_meta.JPG"
+        p.date             = None
+        p.date_added       = None
+        p.exif_info        = None
+        p.latitude         = None
+        p.place            = None
+        p.media_analysis   = {}
+        p.score            = None
+        p.labels           = []
+        p.persons          = []
+        p.fingerprint      = ""
+        p.width            = None
+        p.height           = None
+        p.screenshot       = False
+        p.selfie           = False
+        p.live_photo       = False
+        p.album_info       = []
+        p.title            = title
+        p.description      = description
+        p.keywords         = keywords or []
+        return p
+
+    def _convert(self, **kwargs):
+        from poller.scanner import photos_record_to_db
+        return photos_record_to_db(self._make_mock_photo(**kwargs))
+
+    def test_photos_title_captured(self):
+        row = self._convert(title="My Holiday Shot")
+        self.assertEqual(row["photos_title"], "My Holiday Shot")
+
+    def test_photos_description_captured(self):
+        row = self._convert(description="A day at the beach")
+        self.assertEqual(row["photos_description"], "A day at the beach")
+
+    def test_photos_tags_captured_as_list(self):
+        row = self._convert(keywords=["beach", "summer"])
+        self.assertIsInstance(row["photos_tags"], list)
+        self.assertEqual(sorted(row["photos_tags"]), ["beach", "summer"])
+
+    def test_photos_tags_hash_set(self):
+        row = self._convert(keywords=["alpha", "beta"])
+        self.assertIsNotNone(row["photos_tags_hash"])
+        self.assertEqual(len(row["photos_tags_hash"]), 64)
+
+    def test_photos_tags_hash_case_insensitive(self):
+        from poller.scanner import _compute_tags_hash
+        h1 = _compute_tags_hash(["Alpha"])
+        h2 = _compute_tags_hash(["alpha"])
+        self.assertEqual(h1, h2)
+
+    def test_meta_synced_photos_at_set(self):
+        row = self._convert()
+        self.assertIsNotNone(row["meta_synced_photos_at"])
+
+    def test_empty_title_stored_as_empty_string(self):
+        row = self._convert(title=None)
+        self.assertEqual(row["photos_title"], "")
+
+    def test_empty_keywords_stored_as_empty_list(self):
+        row = self._convert(keywords=None)
+        self.assertEqual(row["photos_tags"], [])
+
+
+class TestBuildEnrichedRowPhase4(unittest.TestCase):
+    """build_enriched_row should propagate Photos metadata cache fields."""
+
+    EXISTING = {
+        "id": 1, "flickr_id": "12345", "uuid": None,
+        "privacy_state": "candidate_public",
+        "privacy_reason": "no people detected",
+        "proposed_tags": [],
+        "latitude": None, "longitude": None,
+        "place_ishome": 0,
+    }
+
+    def _photo_row(self, **kwargs):
+        base = {
+            "uuid": "ABC-123",
+            "original_filename": "IMG_0001.HEIC",
+            "date_taken": "2026-04-08T16:46:20-04:00",
+            "apple_labels": [], "apple_persons": [],
+            "apple_named_faces": 0, "apple_unknown_faces": 0, "apple_human_count": 0,
+            "_is_screenshot": False, "_is_selfie": False, "_is_live": False,
+            "photos_title": "Test Title",
+            "photos_description": "Test Desc",
+            "photos_tags": ["holiday"],
+            "photos_tags_hash": "abc123",
+            "meta_synced_photos_at": "2026-04-30T00:00:00+00:00",
+        }
+        return {**base, **kwargs}
+
+    def test_photos_title_propagated(self):
+        enriched = build_enriched_row(self._photo_row(), self.EXISTING, [], "Chris")
+        self.assertEqual(enriched["photos_title"], "Test Title")
+
+    def test_photos_tags_propagated(self):
+        enriched = build_enriched_row(self._photo_row(), self.EXISTING, [], "Chris")
+        self.assertEqual(enriched["photos_tags"], ["holiday"])
+
+    def test_photos_tags_hash_propagated(self):
+        enriched = build_enriched_row(self._photo_row(), self.EXISTING, [], "Chris")
+        self.assertEqual(enriched["photos_tags_hash"], "abc123")
+
+    def test_meta_synced_photos_at_propagated(self):
+        enriched = build_enriched_row(self._photo_row(), self.EXISTING, [], "Chris")
+        self.assertIsNotNone(enriched.get("meta_synced_photos_at"))
+
+
+class TestScannerSkipConditionPhase4(unittest.TestCase):
+    """
+    The scan loop should skip re-enrichment only when both ML analysis
+    AND Photos metadata cache are unchanged.
+    """
+
+    def setUp(self):
+        from unittest.mock import MagicMock, patch
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db   = Database(Path(self._tmp.name) / "test.db")
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat()
+        self.photo_id = self.db.upsert_photo({
+            "uuid":                  "uuid-skip-001",
+            "flickr_id":             "flickr-skip-001",
+            "original_filename":     "IMG_skip.JPG",
+            "privacy_state":         "approved_public",
+            "proposed_tags":         [],
+            "apple_persons":         [],
+            "apple_labels":          [],
+            "date_analyzed":         "2026-01-01T00:00:00",
+            "photos_title":          "Old Title",
+            "photos_tags_hash":      "oldhash",
+            "meta_synced_photos_at": ts,
+        })
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _make_mock_photo(self, title="Old Title", keywords=None,
+                         date_analyzed="2026-01-01T00:00:00"):
+        from unittest.mock import MagicMock
+        from poller.scanner import _compute_tags_hash
+        p = MagicMock()
+        p.uuid             = "uuid-skip-001"
+        p.original_filename = "IMG_skip.JPG"
+        p.date             = None
+        p.date_added       = None
+        p.exif_info        = None
+        p.latitude         = None
+        p.place            = None
+        p.media_analysis   = {"date_analyzed": date_analyzed}
+        p.score            = None
+        p.labels           = []
+        p.persons          = []
+        p.fingerprint      = ""
+        p.width            = None
+        p.height           = None
+        p.screenshot       = False
+        p.selfie           = False
+        p.live_photo       = False
+        p.album_info       = []
+        p.title            = title
+        p.description      = ""
+        p.keywords         = keywords or []
+        return p
+
+    def _run_scan_one(self, mock_photo):
+        from unittest.mock import MagicMock, patch
+        from poller.scanner import scan
+        mock_db_instance = MagicMock()
+        mock_db_instance.photos.return_value = [mock_photo]
+        mock_module = MagicMock()
+        mock_module.PhotosDB.return_value = mock_db_instance
+        with patch.dict(__import__("sys").modules, {"osxphotos": mock_module}):
+            scan(
+                library_path=self._tmp.name,
+                db=self.db,
+                since=None,
+                dry_run=False,
+                self_name="",
+            )
+
+    def test_skips_when_analysis_and_cache_both_unchanged(self):
+        """No DB write when nothing has changed."""
+        before = self.db.conn.execute(
+            "SELECT updated_at FROM photos WHERE id=?", (self.photo_id,)
+        ).fetchone()["updated_at"]
+
+        # photo with same date_analyzed AND same photos_tags_hash/title
+        from poller.scanner import _compute_tags_hash
+        p = self._make_mock_photo(title="Old Title", keywords=[])
+        # Force the hash to match the stored "oldhash" by patching _compute_tags_hash
+        from unittest.mock import patch
+        with patch("poller.scanner._compute_tags_hash", return_value="oldhash"):
+            self._run_scan_one(p)
+
+        after = self.db.conn.execute(
+            "SELECT updated_at FROM photos WHERE id=?", (self.photo_id,)
+        ).fetchone()["updated_at"]
+        self.assertEqual(before, after, "Should not write when nothing changed")
+
+    def test_re_enriches_when_title_changes(self):
+        """When photos_title changes, the row must be re-enriched."""
+        p = self._make_mock_photo(title="New Title")
+        self._run_scan_one(p)
+        row = self.db.conn.execute(
+            "SELECT photos_title FROM photos WHERE id=?", (self.photo_id,)
+        ).fetchone()
+        self.assertEqual(row["photos_title"], "New Title")
+
+    def test_re_enriches_when_analysis_changes(self):
+        """When date_analyzed changes, the row must be re-enriched."""
+        from unittest.mock import patch
+        p = self._make_mock_photo(
+            title="Old Title", date_analyzed="2026-06-01T00:00:00"
+        )
+        with patch("poller.scanner._compute_tags_hash", return_value="oldhash"):
+            self._run_scan_one(p)
+        row = self.db.conn.execute(
+            "SELECT date_analyzed FROM photos WHERE id=?", (self.photo_id,)
+        ).fetchone()
+        self.assertEqual(row["date_analyzed"], "2026-06-01T00:00:00")
+
+
+# ---------------------------------------------------------------------------
 # Phase 3: sync-metadata reads from DB cache instead of per-photo Flickr API
 # ---------------------------------------------------------------------------
 
