@@ -1,5 +1,5 @@
 """
-migrate_009_review_queue_index.py
+migrate_008_review_queue_index.py
 
 Adds a composite index on (privacy_state, date_taken DESC, id DESC) so the
 review-grid query can use the index for both filtering and ordering, avoiding
@@ -8,7 +8,7 @@ a full 120k-row temp B-tree sort on every page load.
 Safe to run multiple times (idempotent — uses CREATE INDEX IF NOT EXISTS).
 
 Usage:
-    python db/migrations/migrate_009_review_queue_index.py --config config/config.yml
+    python db/migrations/migrate_008_review_queue_index.py --config config/config.yml
 """
 
 import argparse
@@ -19,7 +19,7 @@ from pathlib import Path
 import yaml
 
 
-MIGRATION_NAME = "migrate_009_review_queue_index"
+MIGRATION_NAME = "migrate_008_review_queue_index"
 
 
 def run(db_path: str, dry_run: bool = False):
@@ -56,7 +56,7 @@ def run(db_path: str, dry_run: bool = False):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Blue Pearmain DB migration 009")
+    parser = argparse.ArgumentParser(description="Blue Pearmain DB migration 008")
     parser.add_argument("--config",  default="config/config.yml")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

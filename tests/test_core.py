@@ -1471,7 +1471,7 @@ class TestSchemaMigrations(unittest.TestCase):
     def test_migration_008_adds_metadata_cache_columns(self):
         import sys as _sys, io, contextlib
         _sys.path.insert(0, str(Path(__file__).parent.parent / "db" / "migrations"))
-        from migrate_008_metadata_cache import run
+        from migrate_007_metadata_cache import run
         with contextlib.redirect_stdout(io.StringIO()):
             run(self.tmp_path, dry_run=False)
         cols = {r[1] for r in self.db.conn.execute("PRAGMA table_info(photos)").fetchall()}
@@ -1485,7 +1485,7 @@ class TestSchemaMigrations(unittest.TestCase):
     def test_migration_008_creates_proposals_table(self):
         import sys as _sys, io, contextlib
         _sys.path.insert(0, str(Path(__file__).parent.parent / "db" / "migrations"))
-        from migrate_008_metadata_cache import run
+        from migrate_007_metadata_cache import run
         with contextlib.redirect_stdout(io.StringIO()):
             run(self.tmp_path, dry_run=False)
         row = self.db.conn.execute(
@@ -1496,7 +1496,7 @@ class TestSchemaMigrations(unittest.TestCase):
     def test_migration_008_sets_baseline_harmonized_at(self):
         import sys as _sys, io, contextlib
         _sys.path.insert(0, str(Path(__file__).parent.parent / "db" / "migrations"))
-        from migrate_008_metadata_cache import run
+        from migrate_007_metadata_cache import run
         # Seed a photo first, then run migration
         self.db.upsert_photo({
             "uuid": "uuid-baseline-test", "original_filename": "test.jpg",
@@ -1514,7 +1514,7 @@ class TestSchemaMigrations(unittest.TestCase):
     def test_migration_008_idempotent(self):
         import sys as _sys, io, contextlib
         _sys.path.insert(0, str(Path(__file__).parent.parent / "db" / "migrations"))
-        from migrate_008_metadata_cache import run
+        from migrate_007_metadata_cache import run
         with contextlib.redirect_stdout(io.StringIO()):
             run(self.tmp_path, dry_run=False)
             run(self.tmp_path, dry_run=False)  # should not raise
@@ -1523,7 +1523,7 @@ class TestSchemaMigrations(unittest.TestCase):
         """The unique index on metadata_proposals prevents duplicate pending proposals."""
         import sys as _sys, io, contextlib
         _sys.path.insert(0, str(Path(__file__).parent.parent / "db" / "migrations"))
-        from migrate_008_metadata_cache import run
+        from migrate_007_metadata_cache import run
         with contextlib.redirect_stdout(io.StringIO()):
             run(self.tmp_path, dry_run=False)
         photo_id = self.db.upsert_photo({

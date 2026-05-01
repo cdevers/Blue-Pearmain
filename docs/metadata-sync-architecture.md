@@ -223,7 +223,7 @@ Add columns to the `photos` table and create the `metadata_proposals` table:
 
 **Files to change:**
 - `db/schema.sql`
-- `db/migrations/migrate_008_metadata_cache.py`
+- `db/migrations/migrate_007_metadata_cache.py`
 
 **Completion criteria:** columns and table exist; no behaviour changes yet.
 
@@ -349,7 +349,7 @@ Extend Phases 2–5 to cover `flickr_title`/`photos_title` and `flickr_descripti
 - `canonical_pushed_to_flickr_at`, `canonical_pushed_to_photos_at` — per-field push confirmation timestamps.
 
 **Files to change:**
-- `db/schema.sql` + `db/migrations/migrate_010_canonical_metadata.py`
+- `db/schema.sql` + `db/migrations/migrate_009_canonical_metadata.py`
 - All files touched in Phases 2–5, extended for title/description
 
 ---
@@ -413,6 +413,6 @@ bp reconcile --fix (after sync-metadata)
 ## Migration numbering
 
 - `migrate_001` through `migrate_007` — pre-existing
-- `migrate_008_metadata_cache.py` — Phase 1 (`flickr_*`/`photos_*` columns, `metadata_proposals` table) ✓
-- `migrate_009_review_queue_index.py` — performance: covering index on `photos(privacy_state, date_taken DESC, id DESC)` ✓
-- `migrate_010_canonical_metadata.py` — Phase 7 (`canonical_*` columns, push-tracking timestamps)
+- `migrate_007_metadata_cache.py` — Phase 1 (`flickr_*`/`photos_*` columns, `metadata_proposals` table) ✓
+- `migrate_008_review_queue_index.py` — performance: covering index on `photos(privacy_state, date_taken DESC, id DESC)` ✓
+- `migrate_009_canonical_metadata.py` — Phase 7 (`canonical_*` columns, push-tracking timestamps)

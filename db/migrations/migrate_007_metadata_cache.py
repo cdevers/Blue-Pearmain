@@ -1,5 +1,5 @@
 """
-migrate_008_metadata_cache.py
+migrate_007_metadata_cache.py
 
 Phase 1 of the metadata harmonization plan (docs/metadata-sync-architecture.md).
 
@@ -21,7 +21,7 @@ rather than generating a noise burst of proposals on first run.
 Safe to run multiple times (idempotent).
 
 Usage:
-    python db/migrations/migrate_008_metadata_cache.py --config config/config.yml
+    python db/migrations/migrate_007_metadata_cache.py --config config/config.yml
 """
 
 import argparse
@@ -32,7 +32,7 @@ from pathlib import Path
 import yaml
 
 
-MIGRATION_NAME = "migrate_008_metadata_cache"
+MIGRATION_NAME = "migrate_007_metadata_cache"
 
 
 def now_iso() -> str:
@@ -212,7 +212,7 @@ def run(db_path: str, dry_run: bool = False) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Blue Pearmain DB migration 008")
+    parser = argparse.ArgumentParser(description="Blue Pearmain DB migration 007")
     parser.add_argument("--config",  default="config/config.yml")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
