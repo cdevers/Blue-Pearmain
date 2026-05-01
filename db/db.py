@@ -952,4 +952,11 @@ class Database:
             result["proposals"] = self.get_proposal_counts()
         except Exception:
             result["proposals"] = {"total": 0, "non_conflict": 0, "divergence": 0, "collision": 0}
+        try:
+            row = self.conn.execute(
+                "SELECT COUNT(*) AS n FROM photos WHERE flickr_id IS NOT NULL AND uuid IS NULL"
+            ).fetchone()
+            result["flickr_only"] = row["n"] if row else 0
+        except Exception:
+            result["flickr_only"] = 0
         return result

@@ -118,6 +118,12 @@
       </a>
     </div>
     {% endif %}
+    {% if stats.flickr_only %}
+    <div class="stat-card">
+      <div class="n" style="color:var(--muted)">{{ stats.flickr_only | int }}</div>
+      <div class="label">Flickr-only (no Photos)</div>
+    </div>
+    {% endif %}
   </div>
 
   {% if recent %}

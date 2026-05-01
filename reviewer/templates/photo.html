@@ -340,6 +340,11 @@
           <span style="color:var(--muted); margin-left:6px; font-size:10px">{{ photo.uuid[:8] }}…</span>
         </span>
       </div>
+      {% elif photo.flickr_id %}
+      <div class="meta-row">
+        <span class="label">Photos</span>
+        <span class="value" style="color:var(--muted)" title="This photo is on Flickr but has no counterpart in the Apple Photos library — likely from an iPhoto library not yet migrated">not in library</span>
+      </div>
       {% endif %}
     </div>
 
