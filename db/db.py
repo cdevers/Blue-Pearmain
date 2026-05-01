@@ -386,22 +386,28 @@ class Database:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict]:
-        """Return photos awaiting review, ordered newest-first."""
+        """Return photos awaiting review, ordered newest-first.
+
+        Fetches only the columns the review grid needs — avoids pulling large
+        JSON metadata columns (flickr_tags, photos_tags, etc.) for every row.
+        The idx_photos_review_queue index covers (privacy_state, date_taken DESC,
+        id DESC), so SQLite can serve this query without a temp B-tree sort.
+        """
         if states is None:
             states = ["needs_review", "candidate_public"]
         placeholders = ",".join("?" * len(states))
         rows = self.conn.execute(
-            f"""SELECT * FROM photos
+            f"""SELECT id, flickr_id, original_filename,
+                       apple_unknown_faces, apple_named_faces, proposed_tags
+                FROM photos
                 WHERE privacy_state IN ({placeholders})
-                ORDER BY COALESCE(date_taken, date_uploaded_flickr, date_added_photos) DESC, id DESC
+                ORDER BY date_taken DESC, id DESC
                 LIMIT ? OFFSET ?""",
             states + [limit, offset],
         ).fetchall()
         result = []
         for row in rows:
-            d = _row_to_dict(row)
-            d["apple_labels"] = _json_loads_safe(d.get("apple_labels"))
-            d["apple_persons"] = _json_loads_safe(d.get("apple_persons"))
+            d = dict(row)
             d["proposed_tags"] = _json_loads_safe(d.get("proposed_tags"))
             result.append(d)
         return result

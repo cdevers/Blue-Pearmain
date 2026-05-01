@@ -182,6 +182,7 @@ CREATE INDEX IF NOT EXISTS idx_photos_uuid          ON photos(uuid);
 CREATE INDEX IF NOT EXISTS idx_photos_flickr_id     ON photos(flickr_id);
 CREATE INDEX IF NOT EXISTS idx_photos_privacy_state ON photos(privacy_state);
 CREATE INDEX IF NOT EXISTS idx_photos_date_taken    ON photos(date_taken);
+CREATE INDEX IF NOT EXISTS idx_photos_review_queue  ON photos(privacy_state, date_taken DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_photos_location      ON photos(latitude, longitude);
 CREATE INDEX IF NOT EXISTS idx_photos_reviewed      ON photos(reviewed_at);
 CREATE INDEX IF NOT EXISTS idx_tag_events_photo     ON tag_events(photo_id);

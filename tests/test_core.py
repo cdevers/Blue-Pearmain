@@ -362,8 +362,8 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(ids[0], "NEW")
         self.assertEqual(ids[1], "OLD")
 
-    def test_review_queue_coalesce_fallback(self):
-        """review_queue falls back to date_uploaded_flickr when date_taken is NULL."""
+    def test_review_queue_null_date_taken_sorts_last(self):
+        """review_queue orders by date_taken DESC; NULL date_taken sorts after non-NULL."""
         self.db.upsert_photo({
             "flickr_id": "NOTAKEN", "privacy_state": "candidate_public",
             "date_uploaded_flickr": "2023-03-01 00:00:00",
@@ -374,8 +374,8 @@ class TestDatabase(unittest.TestCase):
         })
         queue = self.db.review_queue()
         ids = [p["flickr_id"] for p in queue]
-        # NOTAKEN (2023) should sort before WITHTAKEN (2022)
-        self.assertLess(ids.index("NOTAKEN"), ids.index("WITHTAKEN"))
+        # NULL date_taken sorts last (after 2022 WITHTAKEN)
+        self.assertGreater(ids.index("NOTAKEN"), ids.index("WITHTAKEN"))
 
 
 # ---------------------------------------------------------------------------
