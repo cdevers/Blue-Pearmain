@@ -683,14 +683,17 @@ def open_in_photos(photo_id: int):
             ["osascript",
              "-e", 'tell application "Photos"',
              "-e", "activate",
-             "-e", f'spotlight (first media item whose id is "{uuid}")',
+             "-e", f'spotlight media item id "{uuid}"',
              "-e", "end tell"],
             capture_output=True, text=True, timeout=10,
         )
         if result.returncode != 0:
-            return jsonify({"ok": False, "error": result.stderr.strip() or "osascript failed"})
+            err = result.stderr.strip() or "osascript failed"
+            log.warning("open-in-photos failed for %s (uuid=%s): %s", photo_id, uuid, err)
+            return jsonify({"ok": False, "error": err})
         return jsonify({"ok": True})
     except Exception as e:
+        log.warning("open-in-photos exception for %s: %s", photo_id, e)
         return jsonify({"ok": False, "error": str(e)})
 
 
