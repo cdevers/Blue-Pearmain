@@ -178,35 +178,9 @@ def photo_detail(photo_id: int):
     state        = request.args.get("state", photo.get("privacy_state", "candidate_public"))
     person_filter = request.args.get("person", "").strip()
 
-    # Find prev/next scoped to the same state queue — and person if filtered
-    if person_filter:
-        nav = db().conn.execute(
-            """SELECT DISTINCT photos.id,
-                   LAG(photos.id)  OVER (ORDER BY COALESCE(photos.date_taken, photos.date_uploaded_flickr, photos.date_added_photos) DESC, photos.id DESC) AS prev_id,
-                   LEAD(photos.id) OVER (ORDER BY COALESCE(photos.date_taken, photos.date_uploaded_flickr, photos.date_added_photos) DESC, photos.id DESC) AS next_id
-               FROM photos, json_each(photos.apple_persons) AS p
-               WHERE p.value = ?
-                 AND photos.privacy_state = ?
-            """,
-            (person_filter, state),
-        ).fetchall()
-    else:
-        nav = db().conn.execute(
-            """SELECT id,
-                   LAG(id)  OVER (ORDER BY COALESCE(date_taken, date_uploaded_flickr, date_added_photos) DESC, id DESC) AS prev_id,
-                   LEAD(id) OVER (ORDER BY COALESCE(date_taken, date_uploaded_flickr, date_added_photos) DESC, id DESC) AS next_id
-               FROM photos
-               WHERE privacy_state = ?
-            """,
-            (state,),
-        ).fetchall()
-
-    prev_id = next_id = None
-    for row in nav:
-        if row["id"] == photo_id:
-            prev_id = row["prev_id"]
-            next_id = row["next_id"]
-            break
+    prev_id, next_id = db().get_photo_nav(
+        photo_id, state, photo.get("date_taken"), person_filter or None
+    )
 
     flickr_url = None
     if photo.get("flickr_id"):

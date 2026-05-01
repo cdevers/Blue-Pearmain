@@ -412,6 +412,58 @@ class Database:
             result.append(d)
         return result
 
+    def get_photo_nav(
+        self,
+        photo_id: int,
+        state: str,
+        date_taken: str | None,
+        person_filter: str | None = None,
+    ) -> tuple[int | None, int | None]:
+        """Return (prev_id, next_id) for the per-photo detail view.
+
+        Uses two single-row indexed lookups instead of a full window-function
+        scan over the entire queue.  'prev' is the photo that appears earlier
+        in the list (newer date_taken); 'next' appears later (older date_taken).
+        """
+        if not date_taken:
+            return None, None
+
+        if person_filter:
+            prev_row = self.conn.execute(
+                """SELECT DISTINCT photos.id FROM photos, json_each(photos.apple_persons) p
+                   WHERE p.value = ? AND photos.privacy_state = ?
+                     AND (photos.date_taken > ? OR (photos.date_taken = ? AND photos.id > ?))
+                   ORDER BY photos.date_taken ASC, photos.id ASC LIMIT 1""",
+                (person_filter, state, date_taken, date_taken, photo_id),
+            ).fetchone()
+            next_row = self.conn.execute(
+                """SELECT DISTINCT photos.id FROM photos, json_each(photos.apple_persons) p
+                   WHERE p.value = ? AND photos.privacy_state = ?
+                     AND (photos.date_taken < ? OR (photos.date_taken = ? AND photos.id < ?))
+                   ORDER BY photos.date_taken DESC, photos.id DESC LIMIT 1""",
+                (person_filter, state, date_taken, date_taken, photo_id),
+            ).fetchone()
+        else:
+            prev_row = self.conn.execute(
+                """SELECT id FROM photos
+                   WHERE privacy_state = ?
+                     AND (date_taken > ? OR (date_taken = ? AND id > ?))
+                   ORDER BY date_taken ASC, id ASC LIMIT 1""",
+                (state, date_taken, date_taken, photo_id),
+            ).fetchone()
+            next_row = self.conn.execute(
+                """SELECT id FROM photos
+                   WHERE privacy_state = ?
+                     AND (date_taken < ? OR (date_taken = ? AND id < ?))
+                   ORDER BY date_taken DESC, id DESC LIMIT 1""",
+                (state, date_taken, date_taken, photo_id),
+            ).fetchone()
+
+        return (
+            prev_row["id"] if prev_row else None,
+            next_row["id"] if next_row else None,
+        )
+
     def review_queue_count(self, states: list[str] | None = None) -> int:
         if states is None:
             states = ["needs_review", "candidate_public"]

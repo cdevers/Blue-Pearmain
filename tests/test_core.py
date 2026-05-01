@@ -377,6 +377,34 @@ class TestDatabase(unittest.TestCase):
         # NULL date_taken sorts last (after 2022 WITHTAKEN)
         self.assertGreater(ids.index("NOTAKEN"), ids.index("WITHTAKEN"))
 
+    def test_get_photo_nav(self):
+        """get_photo_nav returns correct prev/next IDs using indexed lookups."""
+        self.db.upsert_photo({"flickr_id": "A", "privacy_state": "candidate_public", "date_taken": "2020-01-01"})
+        self.db.upsert_photo({"flickr_id": "B", "privacy_state": "candidate_public", "date_taken": "2021-01-01"})
+        self.db.upsert_photo({"flickr_id": "C", "privacy_state": "candidate_public", "date_taken": "2022-01-01"})
+        a = self.db.get_photo_by_flickr_id("A")
+        b = self.db.get_photo_by_flickr_id("B")
+        c = self.db.get_photo_by_flickr_id("C")
+        # Order is C (newest) → B → A (oldest)
+        prev_id, next_id = self.db.get_photo_nav(b["id"], "candidate_public", b["date_taken"])
+        self.assertEqual(prev_id, c["id"])
+        self.assertEqual(next_id, a["id"])
+        # Boundaries
+        prev_id, next_id = self.db.get_photo_nav(c["id"], "candidate_public", c["date_taken"])
+        self.assertIsNone(prev_id)
+        self.assertEqual(next_id, b["id"])
+        prev_id, next_id = self.db.get_photo_nav(a["id"], "candidate_public", a["date_taken"])
+        self.assertEqual(prev_id, b["id"])
+        self.assertIsNone(next_id)
+
+    def test_get_photo_nav_no_date_taken(self):
+        """get_photo_nav returns (None, None) when date_taken is missing."""
+        self.db.upsert_photo({"flickr_id": "X", "privacy_state": "candidate_public"})
+        x = self.db.get_photo_by_flickr_id("X")
+        prev_id, next_id = self.db.get_photo_nav(x["id"], "candidate_public", None)
+        self.assertIsNone(prev_id)
+        self.assertIsNone(next_id)
+
 
 # ---------------------------------------------------------------------------
 # upsert_photo review protection
