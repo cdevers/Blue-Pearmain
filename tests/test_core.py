@@ -3292,25 +3292,22 @@ class TestSyncMetadataCLI(unittest.TestCase):
         return subprocess.run(cmd, capture_output=True, text=True)
 
     def test_exit_0_when_nothing_to_do(self):
-        # No photos with both flickr_id and uuid → nothing to process
+        # Empty DB → drift filter returns nothing → summary line printed, exit 0
         result = self._run_cli()
-        # Will fail at Flickr auth (no real creds) but gracefully
-        # The key check: exit code is not 2 (operational) when DB is empty
-        # We accept exit 0 or 1 (Flickr auth may fail, returning 2);
-        # what we're validating is the summary line format.
-        self.assertIn("written=", result.stdout)
+        self.assertIn("proposals=", result.stdout)
+        self.assertEqual(result.returncode, 0)
 
     def test_dry_run_flag_accepted(self):
         result = self._run_cli(["--dry-run"])
-        self.assertIn("written=", result.stdout)
+        self.assertIn("proposals=", result.stdout)
 
     def test_limit_flag_accepted(self):
         result = self._run_cli(["--limit", "1"])
-        self.assertIn("written=", result.stdout)
+        self.assertIn("proposals=", result.stdout)
 
-    def test_conflicts_only_flag_accepted(self):
-        result = self._run_cli(["--conflicts-only"])
-        self.assertIn("written=", result.stdout)
+    def test_verbose_flag_accepted(self):
+        result = self._run_cli(["--verbose"])
+        self.assertIn("proposals=", result.stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -3703,6 +3700,237 @@ class TestLinkOrphans(unittest.TestCase):
         linked, failed = link_orphans(self.db, dry_run=False, limit=100)
         self.assertEqual(linked, 0)
         self.assertIsNotNone(self.db.get_photo(photos_id))
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — sync engine: classify + proposals
+# ---------------------------------------------------------------------------
+
+class TestClassifyTags(unittest.TestCase):
+    """_classify_tags returns correct proposals for each divergence case."""
+
+    def _classify(self, ftags, ptags, fhash="fh", phash="ph"):
+        import json
+        from flickr.metadata_puller import _classify_tags
+        fj = json.dumps(ftags) if ftags is not None else None
+        pj = json.dumps(ptags) if ptags is not None else None
+        return _classify_tags(1, fj, pj, fhash, phash, "2026-01-01T00:00:00+00:00")
+
+    def test_both_empty_returns_no_proposals(self):
+        self.assertEqual(self._classify([], []), [])
+
+    def test_equal_tags_returns_no_proposals(self):
+        self.assertEqual(self._classify(["nature", "travel"], ["nature", "travel"]), [])
+
+    def test_equal_after_normalisation_returns_no_proposals(self):
+        # Different casing, same normalised set
+        self.assertEqual(self._classify(["Nature", "Travel"], ["nature", "travel"]), [])
+
+    def test_non_conflict_flickr_has_photos_empty(self):
+        proposals = self._classify(["nature"], [])
+        self.assertEqual(len(proposals), 1)
+        self.assertEqual(proposals[0]["conflict_type"], "non_conflict")
+        self.assertEqual(proposals[0]["source"], "flickr")
+        self.assertEqual(proposals[0]["target"], "photos")
+
+    def test_non_conflict_photos_has_flickr_empty(self):
+        proposals = self._classify([], ["nature"])
+        self.assertEqual(len(proposals), 1)
+        self.assertEqual(proposals[0]["conflict_type"], "non_conflict")
+        self.assertEqual(proposals[0]["source"], "photos")
+        self.assertEqual(proposals[0]["target"], "flickr")
+
+    def test_divergence_flickr_superset(self):
+        proposals = self._classify(["nature", "landscape", "travel"], ["nature"])
+        self.assertEqual(len(proposals), 1)
+        self.assertEqual(proposals[0]["conflict_type"], "divergence")
+        self.assertEqual(proposals[0]["source"], "flickr")
+        self.assertEqual(proposals[0]["target"], "photos")
+
+    def test_divergence_photos_superset(self):
+        proposals = self._classify(["nature"], ["nature", "landscape", "travel"])
+        self.assertEqual(len(proposals), 1)
+        self.assertEqual(proposals[0]["conflict_type"], "divergence")
+        self.assertEqual(proposals[0]["source"], "photos")
+        self.assertEqual(proposals[0]["target"], "flickr")
+
+    def test_collision_generates_two_proposals(self):
+        proposals = self._classify(["nature", "landscape"], ["nature", "travel"])
+        self.assertEqual(len(proposals), 2)
+        types = {p["conflict_type"] for p in proposals}
+        targets = {p["target"] for p in proposals}
+        self.assertEqual(types, {"collision"})
+        self.assertEqual(targets, {"photos", "flickr"})
+
+    def test_source_target_hashes_set_correctly(self):
+        proposals = self._classify(["nature"], [], fhash="FHASH", phash="PHASH")
+        p = proposals[0]
+        self.assertEqual(p["source_hash_at_creation"], "FHASH")
+        self.assertEqual(p["target_hash_at_creation"], "PHASH")
+
+
+class TestUpsertProposal(unittest.TestCase):
+    """db.upsert_proposal idempotency rules."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        self.db.upsert_photo({"flickr_id": "X", "uuid": "U1",
+                               "privacy_state": "candidate_public",
+                               "flickr_tags_hash": "FH1", "photos_tags_hash": "PH1"})
+        self.photo_id = self.db.get_photo_by_flickr_id("X")["id"]
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _proposal(self, **overrides):
+        base = {
+            "photo_id": self.photo_id, "field": "tags",
+            "proposed_value": '["nature"]',
+            "source": "flickr", "target": "photos",
+            "conflict_type": "non_conflict",
+            "source_hash_at_creation": "FH1",
+            "target_hash_at_creation": "PH1",
+            "created_at": "2026-01-01T00:00:00+00:00",
+        }
+        base.update(overrides)
+        return base
+
+    def _count_pending(self):
+        return self.db.conn.execute(
+            "SELECT COUNT(*) FROM metadata_proposals WHERE status='pending'"
+        ).fetchone()[0]
+
+    def test_insert_new_proposal(self):
+        self.db.upsert_proposal(self._proposal())
+        self.db.conn.commit()
+        self.assertEqual(self._count_pending(), 1)
+
+    def test_duplicate_skipped(self):
+        self.db.upsert_proposal(self._proposal())
+        self.db.upsert_proposal(self._proposal())
+        self.db.conn.commit()
+        self.assertEqual(self._count_pending(), 1)
+
+    def test_changed_hash_supersedes_and_inserts(self):
+        self.db.upsert_proposal(self._proposal())
+        self.db.conn.commit()
+        self.db.upsert_proposal(self._proposal(source_hash_at_creation="FH2"))
+        self.db.conn.commit()
+        pending = self.db.conn.execute(
+            "SELECT COUNT(*) FROM metadata_proposals WHERE status='pending'"
+        ).fetchone()[0]
+        superseded = self.db.conn.execute(
+            "SELECT COUNT(*) FROM metadata_proposals WHERE status='superseded'"
+        ).fetchone()[0]
+        self.assertEqual(pending, 1)
+        self.assertEqual(superseded, 1)
+
+    def test_rejected_same_hash_not_regenerated(self):
+        self.db.upsert_proposal(self._proposal())
+        self.db.conn.commit()
+        self.db.conn.execute(
+            "UPDATE metadata_proposals SET status='rejected' WHERE photo_id=?",
+            (self.photo_id,)
+        )
+        self.db.conn.commit()
+        self.db.upsert_proposal(self._proposal())
+        self.db.conn.commit()
+        self.assertEqual(self._count_pending(), 0)
+
+    def test_rejected_changed_hash_generates_new(self):
+        self.db.upsert_proposal(self._proposal())
+        self.db.conn.commit()
+        self.db.conn.execute(
+            "UPDATE metadata_proposals SET status='rejected' WHERE photo_id=?",
+            (self.photo_id,)
+        )
+        self.db.conn.commit()
+        self.db.upsert_proposal(self._proposal(source_hash_at_creation="FH2"))
+        self.db.conn.commit()
+        self.assertEqual(self._count_pending(), 1)
+
+
+class TestRunSyncEngine(unittest.TestCase):
+    """run_sync_engine end-to-end with in-memory DB."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+        self.db = Database(Path(self._tmp.name) / "test.db")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _add(self, flickr_id, ftags, ptags, fhash=None, phash=None):
+        import hashlib, json as _json, unicodedata as _ud
+        def _hash(tags):
+            normed = sorted({_ud.normalize("NFC", t.strip().casefold()) for t in tags if t.strip()})
+            return hashlib.sha256(" ".join(normed).encode()).hexdigest()
+        self.db.upsert_photo({
+            "flickr_id": flickr_id, "uuid": f"uuid-{flickr_id}",
+            "privacy_state": "candidate_public",
+            "meta_synced_flickr_at": "2026-01-01T00:00:00+00:00",
+            "meta_synced_photos_at": "2026-01-01T00:00:00+00:00",
+            "flickr_tags": _json.dumps(ftags),
+            "photos_tags": _json.dumps(ptags),
+            "flickr_tags_hash": fhash or _hash(ftags),
+            "photos_tags_hash": phash or _hash(ptags),
+        })
+        return self.db.get_photo_by_flickr_id(flickr_id)["id"]
+
+    def _pending_proposals(self):
+        return self.db.conn.execute(
+            "SELECT * FROM metadata_proposals WHERE status='pending'"
+        ).fetchall()
+
+    def test_hash_match_generates_no_proposal(self):
+        from flickr.metadata_puller import run_sync_engine
+        pid = self._add("A", ["nature"], ["nature"])
+        totals = run_sync_engine(self.db, [pid])
+        self.assertEqual(totals["hash_matches"], 1)
+        self.assertEqual(totals["proposals"], 0)
+        self.assertEqual(len(self._pending_proposals()), 0)
+
+    def test_non_conflict_generates_proposal(self):
+        from flickr.metadata_puller import run_sync_engine
+        pid = self._add("B", ["nature", "travel"], [])
+        totals = run_sync_engine(self.db, [pid])
+        self.assertEqual(totals["proposals"], 1)
+        p = self._pending_proposals()[0]
+        self.assertEqual(p["conflict_type"], "non_conflict")
+
+    def test_sets_meta_last_harmonized_at(self):
+        from flickr.metadata_puller import run_sync_engine
+        pid = self._add("C", ["nature"], ["nature"])
+        run_sync_engine(self.db, [pid])
+        row = self.db.conn.execute(
+            "SELECT meta_last_harmonized_at FROM photos WHERE id=?", (pid,)
+        ).fetchone()
+        self.assertIsNotNone(row["meta_last_harmonized_at"])
+
+    def test_dry_run_writes_no_proposals(self):
+        from flickr.metadata_puller import run_sync_engine
+        pid = self._add("D", ["nature"], [])
+        totals = run_sync_engine(self.db, [pid], dry_run=True)
+        self.assertEqual(totals["proposals"], 1)
+        self.assertEqual(len(self._pending_proposals()), 0)
+        row = self.db.conn.execute(
+            "SELECT meta_last_harmonized_at FROM photos WHERE id=?", (pid,)
+        ).fetchone()
+        self.assertIsNone(row["meta_last_harmonized_at"])
+
+    def test_collision_generates_two_proposals(self):
+        from flickr.metadata_puller import run_sync_engine
+        pid = self._add("E", ["nature", "landscape"], ["nature", "travel"])
+        totals = run_sync_engine(self.db, [pid])
+        self.assertEqual(totals["proposals"], 2)
+        props = self._pending_proposals()
+        self.assertEqual(len(props), 2)
+        self.assertTrue(all(p["conflict_type"] == "collision" for p in props))
 
 
 # ---------------------------------------------------------------------------

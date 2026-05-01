@@ -1,15 +1,23 @@
 """
-flickr/sync_metadata.py — batch sync Flickr metadata → Apple Photos
+flickr/sync_metadata.py — Phase 4 metadata sync engine
 
-Compares Flickr title/description/tags against Apple Photos, writes
-non-conflicting Flickr values into Photos, and records conflicts for
-review in the UI.
+Reads flickr_tags / photos_tags from the DB cache (populated by `bp poll`
+and `bp scan`), diffs them, classifies divergences, and writes proposals to
+metadata_proposals. No Flickr API calls. No writes to Photos or Flickr.
+
+Proposals are reviewed and applied in Phase 5 (`bp reconcile --fix`).
 
 Usage:
+    bp sync-metadata [OPTIONS]
     python flickr/sync_metadata.py --config config/config.yml [OPTIONS]
 
-Or via bp CLI:
-    bp sync-metadata [OPTIONS]
+Options:
+    --limit N          Process at most N photos from the drift filter (0 = all, default 0)
+    --photo-id ID      Process only this DB photo_id
+    --dry-run          Classify and log; do not write proposals or update harmonized_at
+    --refresh-flickr   Refresh Flickr cache via API before running sync engine
+                       (use when poller hasn't run recently)
+    --verbose          Log every photo processed
 """
 
 from __future__ import annotations
@@ -28,18 +36,18 @@ log = logging.getLogger("blue-pearmain.sync_metadata")
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Sync Flickr metadata → Apple Photos"
+        description="Diff DB metadata caches and generate proposals"
     )
-    parser.add_argument("--config",         default="config/config.yml")
-    parser.add_argument("--dry-run",        action="store_true",
-                        help="Compare and log; do not write to Photos or DB")
-    parser.add_argument("--limit",          type=int, default=500,
-                        help="Process at most N photos (default 500; 0 = all)")
-    parser.add_argument("--photo-id",       type=int, default=None,
+    parser.add_argument("--config",          default="config/config.yml")
+    parser.add_argument("--dry-run",         action="store_true",
+                        help="Classify and log; do not write proposals")
+    parser.add_argument("--limit",           type=int, default=0,
+                        help="Process at most N photos (0 = all drift-filtered)")
+    parser.add_argument("--photo-id",        type=int, default=None,
                         help="Process only this DB photo_id")
-    parser.add_argument("--conflicts-only", action="store_true",
-                        help="Detect and record conflicts only; skip Photos writes")
-    parser.add_argument("--verbose",        action="store_true")
+    parser.add_argument("--refresh-flickr",  action="store_true",
+                        help="Re-fetch Flickr metadata via API before syncing")
+    parser.add_argument("--verbose",         action="store_true")
     args = parser.parse_args()
 
     level = logging.DEBUG if args.verbose else logging.INFO
@@ -63,11 +71,77 @@ def main() -> int:
         log.error("Cannot open database: %s", e)
         return 2
 
-    library_path = str(Path(config.get("photos_library", {}).get("path", "")).expanduser())
-    if not library_path or library_path == ".":
-        log.error("photos_library.path not set in config")
-        return 2
+    # --refresh-flickr: update the Flickr cache via live API before diffing
+    if args.refresh_flickr:
+        rc = _refresh_flickr_cache(db, config, args)
+        if rc != 0:
+            return rc
 
+    # Build photo_id list via drift filter
+    if args.photo_id:
+        photo_ids = [args.photo_id]
+    else:
+        photo_ids = _select_drift_filtered(db, limit=args.limit)
+
+    if not photo_ids:
+        print("proposals=0  hash_matches=0  skipped=0  failed=0  (nothing in drift filter)")
+        db.close()
+        return 0
+
+    log.info(
+        "Running sync engine on %d photo%s%s",
+        len(photo_ids),
+        "s" if len(photo_ids) != 1 else "",
+        " (dry-run)" if args.dry_run else "",
+    )
+
+    from flickr.metadata_puller import run_sync_engine
+    totals = run_sync_engine(db, photo_ids, dry_run=args.dry_run, verbose=args.verbose)
+
+    suffix = "  (dry-run)" if args.dry_run else ""
+    print(
+        f"proposals={totals['proposals']}  "
+        f"hash_matches={totals['hash_matches']}  "
+        f"skipped={totals['skipped']}  "
+        f"failed={totals['failed']}"
+        f"{suffix}"
+    )
+
+    db.close()
+    return 1 if totals["failed"] else 0
+
+
+def _select_drift_filtered(db, limit: int) -> list[int]:
+    """
+    Return photo IDs where both caches are populated and harmonization is
+    either never done or stale relative to the most recent cache update.
+    """
+    query = """
+        SELECT id FROM photos
+        WHERE flickr_id IS NOT NULL
+          AND uuid IS NOT NULL
+          AND meta_synced_flickr_at IS NOT NULL
+          AND meta_synced_photos_at IS NOT NULL
+          AND (flickr_deleted IS NULL OR flickr_deleted = 0)
+          AND (
+            meta_last_harmonized_at IS NULL
+            OR meta_last_harmonized_at < MAX(
+                COALESCE(flickr_last_updated, meta_synced_flickr_at),
+                meta_synced_photos_at
+            )
+          )
+        ORDER BY id
+    """
+    if limit and limit > 0:
+        rows = db.conn.execute(query + " LIMIT ?", (limit,)).fetchall()
+    else:
+        rows = db.conn.execute(query).fetchall()
+    return [r["id"] for r in rows]
+
+
+def _refresh_flickr_cache(db, config: dict, args) -> int:
+    """Re-fetch Flickr metadata for drift-filtered photos and update cache columns."""
+    log.info("--refresh-flickr: fetching live Flickr metadata before sync engine")
     try:
         from flickr.flickr_client import FlickrClient
         flickr = FlickrClient.from_config(config)
@@ -75,58 +149,18 @@ def main() -> int:
         log.error("Cannot initialise Flickr client: %s", e)
         return 2
 
-    # Build photo_id list
-    if args.photo_id:
-        photo_ids = [args.photo_id]
-    else:
-        if args.limit == 0:
-            rows = db.conn.execute(
-                """SELECT id FROM photos
-                   WHERE flickr_id IS NOT NULL AND uuid IS NOT NULL
-                     AND (flickr_deleted IS NULL OR flickr_deleted = 0)
-                   ORDER BY id""",
-            ).fetchall()
-        else:
-            rows = db.conn.execute(
-                """SELECT id FROM photos
-                   WHERE flickr_id IS NOT NULL AND uuid IS NOT NULL
-                     AND (flickr_deleted IS NULL OR flickr_deleted = 0)
-                   ORDER BY id
-                   LIMIT ?""",
-                (args.limit,),
-            ).fetchall()
-        photo_ids = [r["id"] for r in rows]
-
+    photo_ids = _select_drift_filtered(db, limit=args.limit) if not args.photo_id else [args.photo_id]
     if not photo_ids:
-        print("written=0  conflicts=0  skipped=0  failed=0")
-        db.close()
         return 0
 
-    # --conflicts-only: treat as dry_run for the write step but still record conflicts
-    effective_dry_run = args.dry_run or args.conflicts_only
-
     from flickr.metadata_puller import pull_batch
-    totals = pull_batch(
-        db, flickr, photo_ids,
-        library_path=library_path,
-        dry_run=effective_dry_run,
-        verbose=args.verbose,
+    library_path = str(Path(config.get("photos_library", {}).get("path", "")).expanduser())
+    totals = pull_batch(db, flickr, photo_ids, library_path=library_path, dry_run=True)
+    log.info(
+        "--refresh-flickr done: cache_hits=%d/%d",
+        totals.get("cache_hits", 0), len(photo_ids),
     )
-
-    total = len(photo_ids)
-    cache_pct = (
-        int(100 * totals["cache_hits"] / total) if total else 0
-    )
-    print(
-        f"written={totals['written']}  "
-        f"conflicts={totals['conflicts']}  "
-        f"skipped={totals['skipped']}  "
-        f"failed={totals['failed']}  "
-        f"cache={totals['cache_hits']}/{total} ({cache_pct}%)"
-    )
-
-    db.close()
-    return 1 if totals["failed"] else 0
+    return 0
 
 
 if __name__ == "__main__":

@@ -778,6 +778,77 @@ class Database:
         }
 
     # -----------------------------------------------------------------------
+    # Metadata proposals (Phase 4 sync engine)
+    # -----------------------------------------------------------------------
+
+    def upsert_proposal(self, proposal: dict) -> None:
+        """
+        Insert a proposal into metadata_proposals following idempotency rules:
+        - pending, same source hash  → skip (duplicate)
+        - pending, changed hash      → supersede old, insert new
+        - rejected, same source hash → skip (user previously rejected this state)
+        - rejected, changed hash     → insert new
+        - otherwise                  → insert new
+        Does NOT commit; caller is responsible for committing.
+        """
+        photo_id  = proposal["photo_id"]
+        field     = proposal["field"]
+        source    = proposal["source"]
+        target    = proposal["target"]
+        new_hash  = proposal["source_hash_at_creation"]
+
+        existing = self.conn.execute(
+            """SELECT id, status, source_hash_at_creation
+               FROM metadata_proposals
+               WHERE photo_id = ? AND field = ? AND source = ? AND target = ?
+                 AND status IN ('pending', 'rejected')
+               ORDER BY created_at DESC LIMIT 1""",
+            (photo_id, field, source, target),
+        ).fetchone()
+
+        if existing:
+            if existing["status"] == "pending":
+                if existing["source_hash_at_creation"] == new_hash:
+                    return  # exact duplicate, nothing changed
+                # Source state changed → supersede
+                self.conn.execute(
+                    "UPDATE metadata_proposals SET status='superseded', resolved_at=? WHERE id=?",
+                    (_now_iso(), existing["id"]),
+                )
+            elif existing["status"] == "rejected":
+                if existing["source_hash_at_creation"] == new_hash:
+                    return  # user rejected this state; don't re-generate
+
+        self.conn.execute(
+            """INSERT INTO metadata_proposals
+               (photo_id, field, proposed_value, source, target, conflict_type,
+                source_hash_at_creation, target_hash_at_creation, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+            (
+                photo_id, field, proposal.get("proposed_value"),
+                source, target, proposal["conflict_type"],
+                new_hash, proposal.get("target_hash_at_creation"),
+                proposal["created_at"],
+            ),
+        )
+
+    def get_proposal_counts(self) -> dict:
+        """Return pending proposal counts by conflict_type."""
+        rows = self.conn.execute(
+            """SELECT conflict_type, COUNT(*) AS n
+               FROM metadata_proposals
+               WHERE status = 'pending'
+               GROUP BY conflict_type"""
+        ).fetchall()
+        counts = {r["conflict_type"]: r["n"] for r in rows}
+        return {
+            "total":        sum(counts.values()),
+            "non_conflict": counts.get("non_conflict", 0),
+            "divergence":   counts.get("divergence",   0),
+            "collision":    counts.get("collision",    0),
+        }
+
+    # -----------------------------------------------------------------------
     # Stats (for dashboard)
     # -----------------------------------------------------------------------
 

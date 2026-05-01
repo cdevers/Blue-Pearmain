@@ -20,6 +20,8 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,8 +32,179 @@ if TYPE_CHECKING:
 log = logging.getLogger("blue-pearmain.metadata_puller")
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 # ---------------------------------------------------------------------------
-# Public API
+# Phase 4: sync engine (DB cache → proposals, no API calls)
+# ---------------------------------------------------------------------------
+
+def run_sync_engine(
+    db: "Database",
+    photo_ids: list[int],
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> dict:
+    """
+    Diff flickr_tags vs photos_tags for each photo, classify the divergence,
+    and write proposals to metadata_proposals. Sets meta_last_harmonized_at.
+    No Flickr API calls. No writes to Photos or Flickr.
+    Returns aggregate counts.
+    """
+    COMMIT_EVERY = 500
+    totals = {"proposals": 0, "hash_matches": 0, "skipped": 0, "failed": 0}
+    total = len(photo_ids)
+    now = _now_iso()
+
+    harmonize_batch: list[tuple[str, int]] = []  # (now, photo_id) for bulk UPDATE
+
+    for i, photo_id in enumerate(photo_ids, 1):
+        try:
+            proposals = _harmonise_one(db, photo_id, now)
+        except Exception as e:
+            log.warning("sync_engine: photo_id=%s error: %s", photo_id, e)
+            totals["failed"] += 1
+            continue
+
+        if proposals is None:
+            totals["failed"] += 1
+            continue
+
+        if proposals == "hash_match":
+            totals["hash_matches"] += 1
+        elif proposals == "skipped":
+            totals["skipped"] += 1
+        else:
+            if not dry_run:
+                for p in proposals:
+                    db.upsert_proposal(p)
+            totals["proposals"] += len(proposals)
+            if not proposals:
+                totals["skipped"] += 1
+
+        if not dry_run:
+            harmonize_batch.append((now, photo_id))
+
+        if len(harmonize_batch) >= COMMIT_EVERY:
+            db.conn.executemany(
+                "UPDATE photos SET meta_last_harmonized_at = ? WHERE id = ?",
+                harmonize_batch,
+            )
+            db.conn.commit()
+            harmonize_batch = []
+
+        if verbose or i % 1000 == 0 or i == total:
+            log.info(
+                "Progress %d/%d — proposals=%d  hash_matches=%d  skipped=%d  failed=%d",
+                i, total,
+                totals["proposals"], totals["hash_matches"],
+                totals["skipped"], totals["failed"],
+            )
+
+    if not dry_run and harmonize_batch:
+        db.conn.executemany(
+            "UPDATE photos SET meta_last_harmonized_at = ? WHERE id = ?",
+            harmonize_batch,
+        )
+        db.conn.commit()
+
+    return totals
+
+
+def _harmonise_one(db: "Database", photo_id: int, now: str):
+    """
+    Return one of:
+      "hash_match"  — tags already in sync, nothing to do
+      "skipped"     — both sides empty, nothing to do
+      list[dict]    — proposals to upsert (may be empty list if both equal after normalisation)
+      None          — photo row not found (error)
+    """
+    row = db.conn.execute(
+        """SELECT flickr_tags, flickr_tags_hash, photos_tags, photos_tags_hash
+           FROM photos WHERE id = ?""",
+        (photo_id,),
+    ).fetchone()
+    if not row:
+        return None
+
+    flickr_hash = row["flickr_tags_hash"]
+    photos_hash = row["photos_tags_hash"]
+
+    # Fast path: hashes match → already in sync
+    if flickr_hash and photos_hash and flickr_hash == photos_hash:
+        return "hash_match"
+
+    return _classify_tags(
+        photo_id,
+        row["flickr_tags"],
+        row["photos_tags"],
+        flickr_hash,
+        photos_hash,
+        now,
+    )
+
+
+def _classify_tags(
+    photo_id: int,
+    flickr_tags_json: str | None,
+    photos_tags_json: str | None,
+    flickr_hash: str | None,
+    photos_hash: str | None,
+    now: str,
+) -> list[dict]:
+    """
+    Classify the tag divergence and return proposal dicts.
+    Proposals are returned but NOT written to DB here.
+    """
+    ftags_raw = json.loads(flickr_tags_json) if flickr_tags_json else []
+    ptags_raw = json.loads(photos_tags_json) if photos_tags_json else []
+
+    def norm(tag: str) -> str:
+        return unicodedata.normalize("NFC", tag.strip().casefold())
+
+    ftags_norm = {norm(t) for t in ftags_raw if t.strip()}
+    ptags_norm = {norm(t) for t in ptags_raw if t.strip()}
+
+    if not ftags_norm and not ptags_norm:
+        return []
+    if ftags_norm == ptags_norm:
+        return []
+
+    def make(source, target, proposed_value, conflict_type):
+        return {
+            "photo_id":                photo_id,
+            "field":                   "tags",
+            "proposed_value":          proposed_value,
+            "source":                  source,
+            "target":                  target,
+            "conflict_type":           conflict_type,
+            "source_hash_at_creation": flickr_hash if source == "flickr" else photos_hash,
+            "target_hash_at_creation": photos_hash if target == "photos" else flickr_hash,
+            "created_at":              now,
+        }
+
+    if not ftags_norm:
+        return [make("photos", "flickr", photos_tags_json, "non_conflict")]
+
+    if not ptags_norm:
+        return [make("flickr", "photos", flickr_tags_json, "non_conflict")]
+
+    if ftags_norm > ptags_norm:
+        return [make("flickr", "photos", flickr_tags_json, "divergence")]
+
+    if ptags_norm > ftags_norm:
+        return [make("photos", "flickr", photos_tags_json, "divergence")]
+
+    # Collision: neither is a superset
+    return [
+        make("flickr", "photos", flickr_tags_json, "collision"),
+        make("photos", "flickr", photos_tags_json, "collision"),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Public API (legacy: Phase 2/3 pull-and-write behaviour)
 # ---------------------------------------------------------------------------
 
 def pull_photo_metadata(
