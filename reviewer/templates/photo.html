@@ -144,6 +144,20 @@
   backdrop-filter: blur(4px);
 }
 .flickr-link:hover { text-decoration: none; opacity: 0.85; }
+.photos-link {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  background: rgba(0,0,0,0.6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: #a0d8a0;
+  font-size: 12px;
+  padding: 5px 10px;
+  text-decoration: none;
+  backdrop-filter: blur(4px);
+}
+.photos-link:hover { text-decoration: none; opacity: 0.85; }
 .key-hint {
   display: inline-block;
   background: rgba(255,255,255,0.12);
@@ -188,6 +202,9 @@
     {% endif %}
     {% if flickr_url %}
     <a href="{{ flickr_url }}" target="_blank" rel="noopener" class="flickr-link" title="View on Flickr ↗">Flickr ↗</a>
+    {% endif %}
+    {% if photo.uuid %}
+    <a href="x-apple-photos://{{ photo.uuid }}" class="photos-link" title="Open in Photos.app">Photos ↗</a>
     {% endif %}
     <img src="{{ url_for('thumb', photo_id=photo.id) }}"
          alt="{{ photo.original_filename or '' }}"
@@ -312,6 +329,15 @@
           {% else %}
           {{ photo.flickr_id }}
           {% endif %}
+        </span>
+      </div>
+      {% endif %}
+      {% if photo.uuid %}
+      <div class="meta-row">
+        <span class="label">Photos</span>
+        <span class="value">
+          <a href="x-apple-photos://{{ photo.uuid }}" title="Open in Photos.app">open ↗</a>
+          <span style="color:var(--muted); margin-left:6px; font-size:10px">{{ photo.uuid[:8] }}…</span>
         </span>
       </div>
       {% endif %}

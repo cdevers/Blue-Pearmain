@@ -21,7 +21,7 @@ or just let natural re-polls repopulate them over time.
 
 ---
 
-## 2. "Open in Photos" link in the per-photo review UI
+## 2. ~~"Open in Photos" link in the per-photo review UI~~ ✓ done
 
 **Problem:** The review UI runs on `localhost`, so the Mac's URL-scheme handler is
 available. Currently there's no way to jump from a photo's detail screen into
