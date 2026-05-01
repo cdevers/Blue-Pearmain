@@ -77,17 +77,17 @@ def run_sync_engine(
             totals["skipped"] += 1
         else:
             if not dry_run:
+                # Always supersede stale proposals before inserting fresh ones.
+                # Catches reclassifications (e.g. collision → divergence after a
+                # normalization fix) that upsert_proposal would otherwise silently
+                # drop because the source hash hasn't changed.
+                db.conn.execute(
+                    "UPDATE metadata_proposals SET status='superseded', resolved_at=?"
+                    " WHERE photo_id=? AND field='tags' AND status='pending'",
+                    (now, photo_id),
+                )
                 for p in proposals:
                     db.upsert_proposal(p)
-                if not proposals:
-                    # Tags equal after normalization but hashes didn't match.
-                    # Supersede any stale pending proposals (e.g. from before the
-                    # space-normalization fix).
-                    db.conn.execute(
-                        "UPDATE metadata_proposals SET status='superseded', resolved_at=?"
-                        " WHERE photo_id=? AND field='tags' AND status='pending'",
-                        (now, photo_id),
-                    )
             totals["proposals"] += len(proposals)
             if not proposals:
                 totals["skipped"] += 1
