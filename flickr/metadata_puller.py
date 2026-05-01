@@ -319,7 +319,10 @@ def _write_photos_metadata(uuid: str, library_path: str, fields: dict, photos_db
     except ImportError:
         raise RuntimeError("photoscript is not installed — pip install photoscript")
 
-    photo = photoscript.Photo(uuid)
+    try:
+        photo = photoscript.Photo(uuid)
+    except Exception as e:
+        raise RuntimeError(f"photoscript could not find photo {uuid}: {e}") from e
 
     if "title" in fields:
         photo.title = fields["title"]

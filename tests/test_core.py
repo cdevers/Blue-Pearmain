@@ -2448,6 +2448,20 @@ class TestMetadataPuller(unittest.TestCase):
         rows = self.db.get_unresolved_conflicts(photo_id=self.photo_id)
         self.assertEqual(len(rows), 0)
 
+    def test_photoscript_invalid_uuid_does_not_crash_batch(self):
+        """photoscript.Photo() raising a non-RuntimeError must not escape as an unhandled exception."""
+        from unittest.mock import patch, MagicMock
+        self._set_flickr_meta(title="Flickr Title")
+        # Simulate photoscript raising ValueError("Invalid photo id: <uuid>")
+        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "", "tags": []}), \
+             patch("flickr.metadata_puller._photos_is_running", return_value=True), \
+             patch.dict(__import__("sys").modules, {"photoscript": MagicMock(
+                 Photo=MagicMock(side_effect=ValueError("Invalid photo id: uuid-mp-001"))
+             )}):
+            result = self._pull()
+        self.assertEqual(result["status"], "write_error")
+        self.assertTrue(any("Invalid photo id" in e for e in result["errors"]))
+
 
 # ---------------------------------------------------------------------------
 # pull_batch — PhotosDB caching and progress logging
