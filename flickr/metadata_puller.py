@@ -270,40 +270,27 @@ def _read_photos_metadata(uuid: str, library_path: str, photos_db: object = None
 
 def _write_photos_metadata(uuid: str, library_path: str, fields: dict, photos_db: object = None) -> None:
     """
-    Write title/description/keywords to Apple Photos via osxphotos PhotoInfo.update().
-    Raises RuntimeError if Photos.app is not running or osxphotos write is unavailable.
+    Write title/description/keywords to Apple Photos via photoscript (AppleScript bridge).
+    Raises RuntimeError if Photos.app is not running or photoscript is unavailable.
     """
     if not _photos_is_running():
         raise RuntimeError(
             "Photos.app is not running — open Photos.app and re-run sync-metadata"
         )
 
-    if photos_db is None:
-        try:
-            import osxphotos
-        except ImportError:
-            raise RuntimeError("osxphotos is not installed — cannot write Photos metadata")
-        photos_db = osxphotos.PhotosDB(dbfile=library_path)
+    try:
+        import photoscript
+    except ImportError:
+        raise RuntimeError("photoscript is not installed — pip install photoscript")
 
-    results = photos_db.photos(uuid=[uuid])
-    if not results:
-        raise RuntimeError(f"Photo uuid={uuid} not found in Photos library")
+    photo = photoscript.Photo(uuid)
 
-    photo = results[0]
-    if not hasattr(photo, "update"):
-        raise RuntimeError(
-            "osxphotos PhotoInfo.update() is not available — upgrade osxphotos (>=0.67)"
-        )
-
-    kwargs: dict = {}
     if "title" in fields:
-        kwargs["title"] = fields["title"]
+        photo.title = fields["title"]
     if "description" in fields:
-        kwargs["description"] = fields["description"]
+        photo.description = fields["description"]
     if "tags" in fields:
-        kwargs["keywords"] = json.loads(fields["tags"])
-
-    photo.update(**kwargs)
+        photo.keywords = json.loads(fields["tags"])
 
 
 def _photos_is_running() -> bool:

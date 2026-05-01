@@ -375,11 +375,11 @@ The conflict count appears as a badge on the Conflicts nav link and as a stat ca
 
 ### Requirements
 
-`bp sync-metadata` writes to Apple Photos via the `osxphotos` library's `PhotoInfo.update()` API. This requires:
+`bp sync-metadata` reads metadata via `osxphotos` and writes back to Apple Photos via `photoscript` (an AppleScript bridge). This requires:
 
 1. **Photos.app must be running** when the write step executes. The command checks for this and exits with a clear error message if Photos is not open.
 2. **Automation permission**: on macOS 14+, the first run may prompt for permission to allow the terminal to control Photos. Grant it once and it persists.
-3. `osxphotos` version 0.67 or later (for `update()` support).
+3. `photoscript` installed (`pip install photoscript`).
 
 `--dry-run` and `--conflicts-only` do not require Photos to be running.
 
