@@ -52,7 +52,9 @@ def _now_iso() -> str:
 
 
 def _normalise_tag(tag: str) -> str:
-    return unicodedata.normalize("NFC", tag.strip().casefold())
+    # Flickr silently strips spaces ("harvard square" → "harvardsquare").
+    # Strip internal spaces so hashes align across sides.
+    return unicodedata.normalize("NFC", tag.strip().casefold()).replace(" ", "")
 
 
 def _compute_tags_hash(tags: list[str]) -> str:

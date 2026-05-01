@@ -34,7 +34,8 @@ def _now_iso() -> str:
 
 def _compute_hash(tags: list[str]) -> str:
     normed = sorted(
-        {unicodedata.normalize("NFC", t.strip().casefold()) for t in tags if t.strip()}
+        {unicodedata.normalize("NFC", t.strip().casefold()).replace(" ", "")
+         for t in tags if t.strip()}
     )
     return hashlib.sha256(" ".join(normed).encode()).hexdigest()
 

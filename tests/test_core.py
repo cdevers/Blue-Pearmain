@@ -3750,6 +3750,23 @@ class TestClassifyTags(unittest.TestCase):
         # Different casing, same normalised set
         self.assertEqual(self._classify(["Nature", "Travel"], ["nature", "travel"]), [])
 
+    def test_flickr_space_stripping_returns_no_proposals(self):
+        # Flickr silently removes spaces from tags on ingest ("harvard square" →
+        # "harvardsquare"). Tags that differ only by internal spaces are equal.
+        self.assertEqual(
+            self._classify(
+                ["cambridge", "harvardsquare", "unitedstates"],
+                ["cambridge", "harvard square", "united states"],
+            ),
+            [],
+        )
+
+    def test_space_stripping_does_not_hide_real_collision(self):
+        # Stripping spaces should not cause unrelated tags to be treated as equal
+        proposals = self._classify(["newyork"], ["losangeles"])
+        self.assertEqual(len(proposals), 2)
+        self.assertEqual(proposals[0]["conflict_type"], "collision")
+
     def test_non_conflict_flickr_has_photos_empty(self):
         proposals = self._classify(["nature"], [])
         self.assertEqual(len(proposals), 1)
@@ -3892,7 +3909,8 @@ class TestRunSyncEngine(unittest.TestCase):
     def _add(self, flickr_id, ftags, ptags, fhash=None, phash=None):
         import hashlib, json as _json, unicodedata as _ud
         def _hash(tags):
-            normed = sorted({_ud.normalize("NFC", t.strip().casefold()) for t in tags if t.strip()})
+            normed = sorted({_ud.normalize("NFC", t.strip().casefold()).replace(" ", "")
+                             for t in tags if t.strip()})
             return hashlib.sha256(" ".join(normed).encode()).hexdigest()
         self.db.upsert_photo({
             "flickr_id": flickr_id, "uuid": f"uuid-{flickr_id}",
@@ -3955,6 +3973,53 @@ class TestRunSyncEngine(unittest.TestCase):
         props = self._pending_proposals()
         self.assertEqual(len(props), 2)
         self.assertTrue(all(p["conflict_type"] == "collision" for p in props))
+
+    def test_space_only_difference_generates_no_proposal(self):
+        # "harvardsquare" (Flickr) vs "harvard square" (Photos) — same tag
+        from flickr.metadata_puller import run_sync_engine
+        import hashlib as _hl, unicodedata as _ud
+        # Use old-style hashes (without space stripping) so the fast-path hash
+        # check doesn't short-circuit and _classify_tags actually runs.
+        def old_hash(tags):
+            normed = sorted({_ud.normalize("NFC", t.strip().casefold()) for t in tags if t.strip()})
+            return _hl.sha256(" ".join(normed).encode()).hexdigest()
+        pid = self._add("SPACE1",
+                        ["cambridge", "harvardsquare"],
+                        ["cambridge", "harvard square"],
+                        fhash=old_hash(["cambridge", "harvardsquare"]),
+                        phash=old_hash(["cambridge", "harvard square"]))
+        totals = run_sync_engine(self.db, [pid])
+        self.assertEqual(totals["proposals"], 0)
+        self.assertEqual(totals["skipped"], 1)
+        self.assertEqual(len(self._pending_proposals()), 0)
+
+    def test_space_mismatch_supersedes_stale_proposals(self):
+        # Stale collision proposals created before the space-normalisation fix
+        # should be superseded when the sync engine finds no real difference.
+        import json as _json, hashlib as _hl, unicodedata as _ud
+        from flickr.metadata_puller import run_sync_engine
+        def old_hash(tags):
+            normed = sorted({_ud.normalize("NFC", t.strip().casefold()) for t in tags if t.strip()})
+            return _hl.sha256(" ".join(normed).encode()).hexdigest()
+        fhash = old_hash(["harvardsquare"])
+        phash = old_hash(["harvard square"])
+        pid = self._add("SPACE2", ["harvardsquare"], ["harvard square"],
+                        fhash=fhash, phash=phash)
+        self.db.upsert_proposal({
+            "photo_id": pid, "field": "tags",
+            "proposed_value": _json.dumps(["harvardsquare"]),
+            "source": "flickr", "target": "photos", "conflict_type": "collision",
+            "source_hash_at_creation": fhash, "target_hash_at_creation": phash,
+            "created_at": "2026-01-01T00:00:00+00:00",
+        })
+        self.db.conn.commit()
+        self.assertEqual(len(self._pending_proposals()), 1)
+        run_sync_engine(self.db, [pid])
+        self.assertEqual(len(self._pending_proposals()), 0)
+        row = self.db.conn.execute(
+            "SELECT status FROM metadata_proposals WHERE photo_id=?", (pid,)
+        ).fetchone()
+        self.assertEqual(row["status"], "superseded")
 
 
 # ---------------------------------------------------------------------------

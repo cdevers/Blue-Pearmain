@@ -79,6 +79,15 @@ def run_sync_engine(
             if not dry_run:
                 for p in proposals:
                     db.upsert_proposal(p)
+                if not proposals:
+                    # Tags equal after normalization but hashes didn't match.
+                    # Supersede any stale pending proposals (e.g. from before the
+                    # space-normalization fix).
+                    db.conn.execute(
+                        "UPDATE metadata_proposals SET status='superseded', resolved_at=?"
+                        " WHERE photo_id=? AND field='tags' AND status='pending'",
+                        (now, photo_id),
+                    )
             totals["proposals"] += len(proposals)
             if not proposals:
                 totals["skipped"] += 1
@@ -161,7 +170,9 @@ def _classify_tags(
     ptags_raw = json.loads(photos_tags_json) if photos_tags_json else []
 
     def norm(tag: str) -> str:
-        return unicodedata.normalize("NFC", tag.strip().casefold())
+        # Flickr silently strips spaces from tags ("harvard square" → "harvardsquare"),
+        # so ignore internal spaces when comparing across sides.
+        return unicodedata.normalize("NFC", tag.strip().casefold()).replace(" ", "")
 
     ftags_norm = {norm(t) for t in ftags_raw if t.strip()}
     ptags_norm = {norm(t) for t in ptags_raw if t.strip()}
