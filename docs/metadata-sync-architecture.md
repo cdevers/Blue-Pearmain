@@ -106,7 +106,8 @@ CREATE TABLE IF NOT EXISTS metadata_proposals (
     source                  TEXT NOT NULL,   -- 'flickr' | 'photos' | 'manual'
     target                  TEXT NOT NULL,   -- 'flickr' | 'photos'
     conflict_type           TEXT NOT NULL,   -- 'non_conflict' | 'divergence' | 'collision'
-    source_hash_at_creation TEXT,            -- hash of source field at proposal creation time
+    source_hash_at_creation TEXT,            -- hash of source field when proposal was created
+    target_hash_at_creation TEXT,            -- hash of target field when proposal was created
     status                  TEXT NOT NULL DEFAULT 'pending',
                                              -- 'pending' | 'applied' | 'rejected' | 'superseded'
     created_at              TEXT NOT NULL,   -- ISO8601
@@ -115,7 +116,7 @@ CREATE TABLE IF NOT EXISTS metadata_proposals (
 );
 ```
 
-**Proposal identity key:** `(photo_id, field, proposed_value, target)`. Two proposals are duplicates if all four match. This is the deduplication check before every insert.
+**Proposal identity key:** `(photo_id, field, proposed_value, target, source)`. All five must match for two proposals to be considered duplicates. Including `source` prevents ambiguity if the same value is independently proposed from both sides.
 
 **Idempotency and lifecycle rules:**
 
@@ -125,7 +126,13 @@ CREATE TABLE IF NOT EXISTS metadata_proposals (
 
 3. **Rejection persistence:** A `rejected` proposal is not regenerated unless the source hash changes. The sync engine checks: if a `rejected` proposal exists for `(photo_id, field)` and `source_hash_at_creation == current_source_hash`, skip proposal generation entirely.
 
-4. **No retroactive proposals on first migration:** When the schema migration runs and both `flickr_tags` and `photos_tags` are populated for the first time, the sync engine's first pass records the current state as baseline without generating proposals. This prevents a noise burst of thousands of proposals on initial rollout. Implemented by setting `meta_last_harmonized_at` to `NOW()` for all existing rows as part of the migration, then letting future changes generate proposals organically.
+4. **Apply-time staleness re-check (required):** At the moment of applying a proposal, re-check `current_source_hash == proposal.source_hash_at_creation`. If they differ, refuse to apply and mark the proposal `superseded`. Do not rely solely on the proposal-generation check — the source may have changed between generation and apply.
+
+5. **Apply-time target drift check (required):** Also at apply time, re-check `current_target_hash == proposal.target_hash_at_creation`. If they differ, the target has been independently edited since the proposal was created. Mark the proposal `superseded` and re-run the sync engine for that photo (it will reclassify, likely as a collision). This prevents silently overwriting newer user edits on the target side.
+
+6. **No retroactive proposals on first migration:** When the schema migration runs, set `meta_last_harmonized_at = NOW()` for all existing rows. The sync engine treats this as "assumed in sync at migration time" — it is not a verified sync state, but it suppresses the initial noise burst. Future changes will generate proposals organically. Document this clearly in the migration script.
+
+7. **Proposal table pruning:** Applied, rejected, and superseded proposals accumulate indefinitely. A periodic `bp db prune-proposals --older-than 90d` command (or equivalent) will eventually be needed. Not required now.
 
 **UX / workflow:**
 - The reviewer UI `/proposals` page (new) lists pending proposals grouped by conflict type.
