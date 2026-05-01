@@ -2542,6 +2542,183 @@ class TestPullBatch(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Phase 3: sync-metadata reads from DB cache instead of per-photo Flickr API
+# ---------------------------------------------------------------------------
+
+class TestFlickrCacheRead(unittest.TestCase):
+    """Unit tests for _read_flickr_cache."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db   = Database(Path(self._tmp.name) / "test.db")
+        self.photo_id = self.db.upsert_photo({
+            "flickr_id":  "flickr-cache-001",
+            "uuid":       "uuid-cache-001",
+            "privacy_state": "approved_public",
+            "proposed_tags": [], "apple_persons": [], "apple_labels": [],
+        })
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _read_cache(self):
+        from flickr.metadata_puller import _read_flickr_cache
+        return _read_flickr_cache(self.db, self.photo_id)
+
+    def test_returns_none_when_not_synced(self):
+        """Cache is empty until the poller has run (meta_synced_flickr_at NULL)."""
+        self.assertIsNone(self._read_cache())
+
+    def test_returns_dict_when_synced(self):
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat()
+        self.db.conn.execute(
+            """UPDATE photos
+               SET flickr_title='T', flickr_description='D',
+                   flickr_tags='["alpha"]', meta_synced_flickr_at=?
+               WHERE id=?""",
+            (ts, self.photo_id),
+        )
+        self.db.conn.commit()
+        result = self._read_cache()
+        self.assertIsNotNone(result)
+        self.assertEqual(result["title"], "T")
+        self.assertEqual(result["description"], "D")
+        self.assertEqual(result["tags"], ["alpha"])
+
+    def test_returns_empty_strings_for_null_fields(self):
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat()
+        self.db.conn.execute(
+            "UPDATE photos SET meta_synced_flickr_at=? WHERE id=?",
+            (ts, self.photo_id),
+        )
+        self.db.conn.commit()
+        result = self._read_cache()
+        self.assertIsNotNone(result)
+        self.assertEqual(result["title"], "")
+        self.assertEqual(result["tags"], [])
+
+    def test_tags_parsed_from_json(self):
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat()
+        self.db.conn.execute(
+            """UPDATE photos SET flickr_tags='["foo","bar"]', meta_synced_flickr_at=?
+               WHERE id=?""",
+            (ts, self.photo_id),
+        )
+        self.db.conn.commit()
+        result = self._read_cache()
+        self.assertEqual(sorted(result["tags"]), ["bar", "foo"])
+
+
+class TestPullPhotoMetadataPhase3(unittest.TestCase):
+    """
+    pull_photo_metadata should use DB cache when available,
+    and only call the Flickr API on cache miss.
+    """
+
+    def setUp(self):
+        from unittest.mock import MagicMock
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db   = Database(Path(self._tmp.name) / "test.db")
+        self.photo_id = self.db.upsert_photo({
+            "flickr_id":  "flickr-p3-001",
+            "uuid":       "uuid-p3-001",
+            "privacy_state": "approved_public",
+            "proposed_tags": [], "apple_persons": [], "apple_labels": [],
+        })
+        self.mock_flickr = MagicMock()
+        self.library     = "/fake/Photos.photoslibrary"
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _seed_cache(self, title="Cached Title", description="", tags=None):
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat()
+        self.db.conn.execute(
+            """UPDATE photos
+               SET flickr_title=?, flickr_description=?,
+                   flickr_tags=?, meta_synced_flickr_at=?
+               WHERE id=?""",
+            (title, description, json.dumps(tags or []), ts, self.photo_id),
+        )
+        self.db.conn.commit()
+
+    def _pull(self, dry_run=False):
+        from unittest.mock import patch
+        from flickr.metadata_puller import pull_photo_metadata
+        with patch("flickr.metadata_puller._read_photos_metadata",
+                   return_value={"title": "", "description": "", "tags": []}), \
+             patch("flickr.metadata_puller._write_photos_metadata"):
+            return pull_photo_metadata(
+                self.db, self.mock_flickr, self.photo_id,
+                library_path=self.library, dry_run=dry_run,
+            )
+
+    def test_cache_hit_skips_flickr_api(self):
+        """When meta_synced_flickr_at is set, get_photo_info must not be called."""
+        self._seed_cache(title="From Cache")
+        result = self._pull()
+        self.mock_flickr.get_photo_info.assert_not_called()
+        self.assertTrue(result["cache_hit"])
+
+    def test_cache_miss_calls_flickr_api(self):
+        """When meta_synced_flickr_at is NULL, the live Flickr API is called."""
+        self.mock_flickr.get_photo_info.return_value = {
+            "photo": {
+                "title":       {"_content": "Live Title"},
+                "description": {"_content": ""},
+                "tags":        {"tag": []},
+            }
+        }
+        result = self._pull()
+        self.mock_flickr.get_photo_info.assert_called_once()
+        self.assertFalse(result["cache_hit"])
+
+    def test_cache_hit_uses_cached_title(self):
+        """A cache hit should use flickr_title from DB, not live API."""
+        self._seed_cache(title="DB Title")
+        result = self._pull()
+        self.assertIn("title", result["written"])
+
+    def test_batch_counts_cache_hits_and_misses(self):
+        """pull_batch totals should include cache_hits and cache_misses keys."""
+        # Seed cache for this photo so it's a hit
+        self._seed_cache()
+        self.mock_flickr.get_photo_info.return_value = {
+            "photo": {
+                "title":       {"_content": ""},
+                "description": {"_content": ""},
+                "tags":        {"tag": []},
+            }
+        }
+        mock_module, mock_db_instance, patcher = self._mock_osxphotos()
+        with patcher:
+            from flickr.metadata_puller import pull_batch
+            totals = pull_batch(
+                self.db, self.mock_flickr, [self.photo_id],
+                library_path=self.library, dry_run=True,
+            )
+        self.assertIn("cache_hits",   totals)
+        self.assertIn("cache_misses", totals)
+        self.assertEqual(totals["cache_hits"] + totals["cache_misses"], 1)
+
+    def _mock_osxphotos(self):
+        from unittest.mock import MagicMock, patch
+        mock_db_instance = MagicMock()
+        mock_db_instance.photos.return_value = []
+        mock_module = MagicMock()
+        mock_module.PhotosDB.return_value = mock_db_instance
+        return mock_module, mock_db_instance, patch.dict(
+            __import__("sys").modules, {"osxphotos": mock_module}
+        )
+
+
+# ---------------------------------------------------------------------------
 # Phase 2: poller Flickr metadata cache helpers and poll-loop behaviour
 # ---------------------------------------------------------------------------
 

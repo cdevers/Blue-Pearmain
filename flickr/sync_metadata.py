@@ -113,11 +113,16 @@ def main() -> int:
         verbose=args.verbose,
     )
 
+    total = len(photo_ids)
+    cache_pct = (
+        int(100 * totals["cache_hits"] / total) if total else 0
+    )
     print(
         f"written={totals['written']}  "
         f"conflicts={totals['conflicts']}  "
         f"skipped={totals['skipped']}  "
-        f"failed={totals['failed']}"
+        f"failed={totals['failed']}  "
+        f"cache={totals['cache_hits']}/{total} ({cache_pct}%)"
     )
 
     db.close()

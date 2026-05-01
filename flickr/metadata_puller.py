@@ -52,6 +52,7 @@ def pull_photo_metadata(
             "conflicts": list[str],   # fields recorded as conflicts
             "skipped":   list[str],   # fields needing no action
             "errors":    list[str],
+            "cache_hit": bool,        # True if Flickr metadata read from DB cache
         }
     """
     from flickr.flickr_client import FlickrError
@@ -69,6 +70,7 @@ def pull_photo_metadata(
         "conflicts": [],
         "skipped":   [],
         "errors":    [],
+        "cache_hit": False,
     }
 
     if not row or not row["uuid"]:
@@ -78,23 +80,27 @@ def pull_photo_metadata(
     flickr_id = row["flickr_id"]
     uuid      = row["uuid"]
 
-    # 1. Fetch from Flickr
-    try:
-        flickr_meta = _fetch_flickr_metadata(flickr, flickr_id)
-    except FlickrError as e:
-        if e.code == 1:
-            # Photo was deleted from Flickr; record it so future runs skip it
-            result["status"] = "flickr_deleted"
-            if not dry_run:
-                db.mark_flickr_deleted(photo_id)
-            log.info(
-                "flickr_deleted photo_id=%s flickr_id=%s — marked, will skip in future",
-                photo_id, flickr_id,
-            )
-        else:
-            result["status"] = "flickr_error"
-            result["errors"].append(str(e))
-        return result
+    # 1. Fetch from DB cache; fall back to live Flickr API on cache miss
+    flickr_meta = _read_flickr_cache(db, photo_id)
+    if flickr_meta is not None:
+        result["cache_hit"] = True
+    else:
+        try:
+            flickr_meta = _fetch_flickr_metadata(flickr, flickr_id)
+        except FlickrError as e:
+            if e.code == 1:
+                # Photo was deleted from Flickr; record it so future runs skip it
+                result["status"] = "flickr_deleted"
+                if not dry_run:
+                    db.mark_flickr_deleted(photo_id)
+                log.info(
+                    "flickr_deleted photo_id=%s flickr_id=%s — marked, will skip in future",
+                    photo_id, flickr_id,
+                )
+            else:
+                result["status"] = "flickr_error"
+                result["errors"].append(str(e))
+            return result
 
     # 2. Read from Photos
     try:
@@ -179,7 +185,8 @@ def pull_batch(
     Run pull_photo_metadata for a list of photo_ids.
     Returns aggregate counts: {"written": N, "conflicts": N, "skipped": N, "failed": N}
     """
-    totals = {"written": 0, "conflicts": 0, "skipped": 0, "failed": 0}
+    totals = {"written": 0, "conflicts": 0, "skipped": 0, "failed": 0,
+              "cache_hits": 0, "cache_misses": 0}
     total = len(photo_ids)
 
     try:
@@ -200,6 +207,11 @@ def pull_batch(
         totals["conflicts"] += len(result["conflicts"])
         totals["skipped"]   += len(result["skipped"])
 
+        if result.get("cache_hit"):
+            totals["cache_hits"] += 1
+        else:
+            totals["cache_misses"] += 1
+
         if result["status"] == "flickr_deleted":
             totals["skipped"] += 1
         elif result["status"] in ("flickr_error", "write_error", "no_uuid"):
@@ -211,15 +223,18 @@ def pull_batch(
                 )
         elif verbose:
             log.debug(
-                "pull_batch: photo_id=%s written=%s conflicts=%s skipped=%s",
+                "pull_batch: photo_id=%s written=%s conflicts=%s skipped=%s cache_hit=%s",
                 photo_id, result["written"], result["conflicts"], result["skipped"],
+                result.get("cache_hit"),
             )
 
         if i % 50 == 0 or i == total:
             log.info(
-                "Progress: %d / %d — written=%d  conflicts=%d  skipped=%d  failed=%d",
+                "Progress: %d / %d — written=%d  conflicts=%d  skipped=%d  failed=%d  "
+                "cache=%d/%d",
                 i, total,
                 totals["written"], totals["conflicts"], totals["skipped"], totals["failed"],
+                totals["cache_hits"], total,
             )
 
     return totals
@@ -228,6 +243,27 @@ def pull_batch(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _read_flickr_cache(db: "Database", photo_id: int) -> dict | None:
+    """
+    Read Flickr metadata from the DB cache columns written by the poller.
+    Returns None if the cache is unpopulated (meta_synced_flickr_at is NULL),
+    meaning this photo predates the Phase 2 poller run and needs a live API call.
+    """
+    row = db.conn.execute(
+        """SELECT flickr_title, flickr_description, flickr_tags, meta_synced_flickr_at
+           FROM photos WHERE id = ?""",
+        (photo_id,),
+    ).fetchone()
+    if not row or not row["meta_synced_flickr_at"]:
+        return None
+    tags = json.loads(row["flickr_tags"]) if row["flickr_tags"] else []
+    return {
+        "title":       row["flickr_title"]       or "",
+        "description": row["flickr_description"] or "",
+        "tags":        tags,
+    }
+
 
 def _fetch_flickr_metadata(flickr: "FlickrClient", flickr_id: str) -> dict:
     """Fetch title, description, tags from Flickr. Raises FlickrError on failure."""
