@@ -339,18 +339,33 @@ wholesale; merged result is applied to both Flickr and Photos in a single action
 
 ---
 
-### Phase 7 — Expand to title and description
+### Phase 7 — Expand to title and description ✓ done
 *Depends on Phase 5. Same pipeline, new fields.*
 
-Extend Phases 2–5 to cover `flickr_title`/`photos_title` and `flickr_description`/`photos_description`. These fields have no hash optimization needed (short strings). Collision handling in the UI becomes the main addition.
+Extended the sync engine, apply step, and proposals UI to cover
+`flickr_title`/`photos_title` and `flickr_description`/`photos_description`.
+Title/description use string equality (no hash fast-path needed); text fields
+produce only `non_conflict` or `collision` proposals (no divergence — there is
+no superset relationship for plain text). After first `--force` run: 31 title
+non-conflicts, 163 description non-conflicts, 1,295 Photos→Flickr description
+non-conflicts, 28 description collision pairs.
 
-**Add `canonical_*` columns here** (not before):
-- `canonical_title`, `canonical_description`, `canonical_tags` — the resolved value after a collision is manually resolved.
-- `canonical_pushed_to_flickr_at`, `canonical_pushed_to_photos_at` — per-field push confirmation timestamps.
+- `_classify_text_field` parallels `_classify_tags` for string values.
+- `_harmonise_one` now fetches and diffs all four text columns on every run.
+- Bulk end-of-run supersede extended with string-equality checks for title/description.
+- `apply_proposal` dispatch extended; `_apply_text_to_photos` (photoscript
+  `photo.title`/`photo.description`) and `_apply_text_to_flickr` (`set_meta`)
+  added to `proposal_applier.py`.
+- `/proposals` UI: text-diff card layout for title/description, field badge
+  (TITLE/DESCRIPTION) in card header, sub-sorted within conflict-type groups.
 
-**Files to change:**
-- `db/schema.sql` + `db/migrations/migrate_009_canonical_metadata.py`
-- All files touched in Phases 2–5, extended for title/description
+**`canonical_*` columns deferred** — not needed until Phase 6 (manual merge
+editor). Will be added in `migrate_009_canonical_metadata.py` when Phase 6 ships.
+
+**Files changed:**
+- `flickr/metadata_puller.py`, `flickr/proposal_applier.py`
+- `db/db.py`
+- `reviewer/templates/proposals.html`
 
 ---
 
@@ -375,10 +390,12 @@ Reviewer dashboard: show "Flickr cache: N hours old" and "Photos cache: N hours 
 
 ```
 bp poll (daily)
-  └─► flickr_tags, flickr_tags_hash, flickr_last_updated, meta_synced_flickr_at
+  └─► flickr_title, flickr_description, flickr_tags, flickr_tags_hash,
+      flickr_last_updated, meta_synced_flickr_at
 
 bp scan (weekly)
-  └─► photos_tags, photos_tags_hash, meta_synced_photos_at
+  └─► photos_title, photos_description, photos_tags, photos_tags_hash,
+      meta_synced_photos_at
 
 bp sync-metadata (after poll — reads DB only, no API calls)
   ├─► drift filter: photos where harmonized < max(flickr_last_updated, photos_synced)
