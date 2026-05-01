@@ -27,17 +27,10 @@ or just let natural re-polls repopulate them over time.
 available. Currently there's no way to jump from a photo's detail screen into
 Photos.app.
 
-**Change:** macOS supports `x-apple-photos://<uuid>` to open a specific photo. Add an
-anchor to the per-photo template wherever `uuid` is non-NULL:
-
-```html
-<a href="x-apple-photos://{{ photo.uuid }}">Open in Photos</a>
-```
-
-Only show it when `uuid` is set (some records are Flickr-only). The link does nothing
-on non-localhost connections (iPad/iPhone), so it can be conditionally hidden via a
-`?localhost=1` query param or a config flag if the LAN review UI ever gets a separate
-template.
+**Implemented:** `POST /api/open-in-photos/<photo_id>` runs AppleScript via `osascript`
+to activate Photos.app and spotlight the photo by UUID. The template renders a
+**Photos ↗** overlay and a Details row link (both `onclick="openInPhotos(...)"`) only
+when `uuid` is non-NULL. `x-apple-photos://` is not a valid macOS URL scheme.
 
 ---
 

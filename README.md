@@ -67,7 +67,7 @@ Apple Photos Library          Flickr (cloud)
 | `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at, indexes on push state and tags, schema_migrations table |
 | `db/migrate_003_dimensions_and_dedup.py` | DB migration: adds width/height columns and duplicate_groups table |
 | `bp` | Unified command-line entry point |
-| `tests/` | Unit tests (261 tests) |
+| `tests/` | Unit tests (263 tests) |
 
 ## Requirements
 
@@ -243,7 +243,7 @@ The grid view shows photos with proposed tags and action buttons. Keyboard short
 
 In the detail view the action buttons are pinned to the top of the sidebar, so their position stays consistent regardless of how much metadata or how many tags a photo has. Any decision automatically advances to the next photo.
 
-For photos matched to Apple Photos (uuid present), a **Photos ↗** overlay appears at the bottom-left of the image and an **open ↗** link appears in the Details section — both use the `x-apple-photos://<uuid>` URL scheme to open the photo directly in Photos.app. These links are only meaningful when accessing the UI from the same Mac (localhost).
+For photos matched to Apple Photos (uuid present), a **Photos ↗** overlay appears at the bottom-left of the image and an **open ↗** link appears in the Details section. Clicking either sends a POST to `/api/open-in-photos/<id>`, which runs an AppleScript (`osascript`) to activate Photos.app and spotlight the photo by UUID. These links are only meaningful when accessing the UI from the same Mac (localhost).
 
 **Mobile (iPhone/iPad):** The review grid works on iOS Safari. After reviewing a batch, tap **Reload ↺** at the bottom to refresh the queue in place — this avoids a pagination issue where "Next" would skip photos that had just been decided. The single-photo detail view is currently desktop-optimised; the sidebar overlaps the image on narrow screens, so the grid view is recommended on mobile.
 
@@ -497,7 +497,7 @@ All scripts are idempotent and safe to re-run.
 python -m pytest tests/ -q
 ```
 
-261 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, metadata-sync batch behaviour (PhotosDB caching, progress logging, flickr_deleted detection), Phase 2 Flickr metadata cache writes (flickr_title, flickr_tags JSON/hash, flickr_last_updated, meta_synced_flickr_at), and Phase 3 DB-cache-first reads in sync-metadata (cache hit/miss logic, API call avoidance), and Phase 4 scanner Photos metadata cache writes (photos_title/description/tags/hash, meta_synced_photos_at, skip-condition update).
+263 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, metadata-sync batch behaviour (PhotosDB caching, progress logging, flickr_deleted detection), Phase 2 Flickr metadata cache writes (flickr_title, flickr_tags JSON/hash, flickr_last_updated, meta_synced_flickr_at), and Phase 3 DB-cache-first reads in sync-metadata (cache hit/miss logic, API call avoidance), Phase 4 scanner Photos metadata cache writes (photos_title/description/tags/hash, meta_synced_photos_at, skip-condition update), and the reviewer "Open in Photos" API endpoint (AppleScript via osascript, template rendering, absent-when-no-uuid).
 
 ## License
 

@@ -3729,13 +3729,15 @@ class TestPhotoDetailTemplate(unittest.TestCase):
         resp = self._get(self.matched_id)
         self.assertEqual(resp.status_code, 200)
         body = resp.data.decode()
-        self.assertIn("x-apple-photos://AAAA-1111", body)
+        # onclick="openInPhotos(...)" only rendered inside {% if photo.uuid %} blocks
+        self.assertIn('onclick="openInPhotos(', body)
 
     def test_photos_link_absent_when_uuid_null(self):
         resp = self._get(self.flickr_only_id)
         self.assertEqual(resp.status_code, 200)
         body = resp.data.decode()
-        self.assertNotIn("x-apple-photos://", body)
+        # no uuid → no rendered link elements, only the JS function definition
+        self.assertNotIn('onclick="openInPhotos(', body)
 
     def test_photos_link_text_present(self):
         resp = self._get(self.matched_id)
@@ -3746,6 +3748,26 @@ class TestPhotoDetailTemplate(unittest.TestCase):
         resp = self._get(self.matched_id)
         body = resp.data.decode()
         self.assertIn("AAAA-111", body)  # truncated prefix visible in details row
+
+    def test_open_in_photos_api_no_uuid_returns_404(self):
+        with self._app.test_request_context():
+            resp = self._client.post(f"/api/open-in-photos/{self.flickr_only_id}")
+        self.assertEqual(resp.status_code, 404)
+        self.assertFalse(resp.get_json()["ok"])
+
+    def test_open_in_photos_api_osascript_error_returns_ok_false(self):
+        from unittest.mock import patch
+        with patch("reviewer.app.subprocess.run") as mock_run:
+            mock_run.return_value.__class__ = type("R", (), {
+                "returncode": 1, "stderr": "Photos not running"
+            })
+            import types
+            r = types.SimpleNamespace(returncode=1, stderr="Photos not running")
+            mock_run.return_value = r
+            with self._app.test_request_context():
+                resp = self._client.post(f"/api/open-in-photos/{self.matched_id}")
+        data = resp.get_json()
+        self.assertFalse(data["ok"])
 
 
 if __name__ == "__main__":

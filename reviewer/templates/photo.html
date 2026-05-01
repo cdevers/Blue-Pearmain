@@ -204,7 +204,7 @@
     <a href="{{ flickr_url }}" target="_blank" rel="noopener" class="flickr-link" title="View on Flickr ↗">Flickr ↗</a>
     {% endif %}
     {% if photo.uuid %}
-    <a href="x-apple-photos://{{ photo.uuid }}" class="photos-link" title="Open in Photos.app">Photos ↗</a>
+    <a href="#" onclick="openInPhotos({{ photo.id }}); return false;" class="photos-link" title="Open in Photos.app">Photos ↗</a>
     {% endif %}
     <img src="{{ url_for('thumb', photo_id=photo.id) }}"
          alt="{{ photo.original_filename or '' }}"
@@ -336,7 +336,7 @@
       <div class="meta-row">
         <span class="label">Photos</span>
         <span class="value">
-          <a href="x-apple-photos://{{ photo.uuid }}" title="Open in Photos.app">open ↗</a>
+          <a href="#" onclick="openInPhotos({{ photo.id }}); return false;" title="Open in Photos.app">open ↗</a>
           <span style="color:var(--muted); margin-left:6px; font-size:10px">{{ photo.uuid[:8] }}…</span>
         </span>
       </div>
@@ -399,6 +399,12 @@
 {% block scripts %}
 <script>
 const PHOTO_ID = {{ photo.id }};
+
+async function openInPhotos(photoId) {
+  const r = await fetch('/api/open-in-photos/' + photoId, {method: 'POST'});
+  const d = await r.json();
+  if (!d.ok) toast('Could not open in Photos: ' + (d.error || 'unknown error'), 'err');
+}
 
 function currentTags() {
   return [...document.querySelectorAll('#tag-editor .tag')].map(el => el.dataset.tag);

@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -665,6 +666,32 @@ def api_zone_delete(zone_id: int):
 @app.route("/api/stats")
 def api_stats():
     return jsonify(db().stats())
+
+
+@app.route("/api/open-in-photos/<int:photo_id>", methods=["POST"])
+def open_in_photos(photo_id: int):
+    """
+    Open the photo in Photos.app via AppleScript spotlight.
+    Only meaningful when called from the Mac running the reviewer.
+    """
+    photo = db().get_photo(photo_id)
+    if not photo or not photo.get("uuid"):
+        return jsonify({"ok": False, "error": "no uuid for this photo"}), 404
+    uuid = photo["uuid"]
+    try:
+        result = subprocess.run(
+            ["osascript",
+             "-e", 'tell application "Photos"',
+             "-e", "activate",
+             "-e", f'spotlight (first media item whose id is "{uuid}")',
+             "-e", "end tell"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return jsonify({"ok": False, "error": result.stderr.strip() or "osascript failed"})
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 
 @app.route("/conflicts")
