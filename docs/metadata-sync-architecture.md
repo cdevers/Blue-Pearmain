@@ -87,6 +87,10 @@ Three distinct categories, each with a defined action:
 
 In the proposals table, `conflict_type` is always one of `non_conflict`, `divergence`, or `collision`. The UI surfaces collisions prominently; non-conflicts can be batch-approved.
 
+**Divergence direction rule (tags):** When one tag set is a strict superset of the other, always propose syncing *upward* — adding the missing tags to the smaller side. Never propose removing tags from the larger side to match the smaller. Tag sets only grow through the sync engine; removal requires explicit human action outside this system. Concretely: if Flickr has `[nature, landscape, travel]` and Photos has `[nature]`, the proposal is "add `landscape` and `travel` to Photos", not "remove `landscape` and `travel` from Flickr".
+
+**Hash collision risk:** SHA-256 collisions are astronomically unlikely but theoretically possible. The hash is a fast-path filter only — if hashes match, the system skips full comparison. In `--verbose` mode, a sample of "hash-equal" records can be spot-checked against the full JSON to verify. No special handling is required in normal operation.
+
 ---
 
 ## Proposals table
@@ -95,31 +99,40 @@ The central new DB table. The sync engine writes proposals here; the apply step 
 
 ```sql
 CREATE TABLE IF NOT EXISTS metadata_proposals (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    photo_id        INTEGER NOT NULL REFERENCES photos(id),
-    field           TEXT NOT NULL,         -- 'title', 'description', 'tags'
-    proposed_value  TEXT,                  -- serialized (JSON for tags, plain text for title/description)
-    source          TEXT NOT NULL,         -- 'flickr' | 'photos' | 'manual'
-    target          TEXT NOT NULL,         -- 'flickr' | 'photos' | 'both'
-    conflict_type   TEXT NOT NULL,         -- 'non_conflict' | 'divergence' | 'collision'
-    status          TEXT NOT NULL DEFAULT 'pending',
-                                           -- 'pending' | 'applied' | 'rejected' | 'superseded'
-    created_at      TEXT NOT NULL,         -- ISO8601
-    resolved_at     TEXT,                  -- ISO8601; set when status leaves 'pending'
-    resolution_note TEXT                   -- optional human note
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    photo_id                INTEGER NOT NULL REFERENCES photos(id),
+    field                   TEXT NOT NULL,   -- 'title', 'description', 'tags'
+    proposed_value          TEXT,            -- serialized (JSON for tags, plain text for others)
+    source                  TEXT NOT NULL,   -- 'flickr' | 'photos' | 'manual'
+    target                  TEXT NOT NULL,   -- 'flickr' | 'photos'
+    conflict_type           TEXT NOT NULL,   -- 'non_conflict' | 'divergence' | 'collision'
+    source_hash_at_creation TEXT,            -- hash of source field at proposal creation time
+    status                  TEXT NOT NULL DEFAULT 'pending',
+                                             -- 'pending' | 'applied' | 'rejected' | 'superseded'
+    created_at              TEXT NOT NULL,   -- ISO8601
+    resolved_at             TEXT,            -- ISO8601; set when status leaves 'pending'
+    resolution_note         TEXT             -- optional human note
 );
 ```
 
-**Idempotency rules:**
-- Before inserting a new proposal, check if a `pending` proposal already exists for `(photo_id, field, proposed_value, target)`. If so, do not insert a duplicate.
-- If state changes (e.g. `flickr_tags` is updated by a new poll), any existing `pending` proposal for that `(photo_id, field)` is marked `superseded` and a fresh proposal is generated.
-- A `rejected` proposal is not regenerated unless the underlying source value changes (compare against `proposed_value` at rejection time).
+**Proposal identity key:** `(photo_id, field, proposed_value, target)`. Two proposals are duplicates if all four match. This is the deduplication check before every insert.
+
+**Idempotency and lifecycle rules:**
+
+1. **Deduplication:** Before inserting, check for an existing `pending` proposal with the same identity key. If found, skip the insert.
+
+2. **Staleness / supersession:** A proposal is stale when `source_hash_at_creation != current_source_hash` for that field. On this condition, mark the existing `pending` proposal `superseded` and generate a fresh one. Use hashes, not timestamps — timestamp changes (e.g. a re-fetch that returns the same value) must not trigger supersession.
+
+3. **Rejection persistence:** A `rejected` proposal is not regenerated unless the source hash changes. The sync engine checks: if a `rejected` proposal exists for `(photo_id, field)` and `source_hash_at_creation == current_source_hash`, skip proposal generation entirely.
+
+4. **No retroactive proposals on first migration:** When the schema migration runs and both `flickr_tags` and `photos_tags` are populated for the first time, the sync engine's first pass records the current state as baseline without generating proposals. This prevents a noise burst of thousands of proposals on initial rollout. Implemented by setting `meta_last_harmonized_at` to `NOW()` for all existing rows as part of the migration, then letting future changes generate proposals organically.
 
 **UX / workflow:**
 - The reviewer UI `/proposals` page (new) lists pending proposals grouped by conflict type.
 - **Non-conflicts** can be bulk-approved ("apply all tag additions to Photos").
-- **Divergences** are listed with a recommended action pre-selected; one click to confirm.
+- **Divergences** are listed with recommended action pre-selected; one click to confirm.
 - **Collisions** require explicit side-selection per field.
+- Proposals share a grouping key of `(field, target)` for batch operations — e.g. "apply all pending tag additions to Photos" in one action.
 - CLI: `bp sync-metadata --list-proposals` prints pending proposals in tabular form for headless review.
 
 ---
