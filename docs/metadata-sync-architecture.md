@@ -196,7 +196,7 @@ The sync engine runs the drift filter, classifies each out-of-sync field, and wr
 
 ## Phases
 
-### Phase 1 — DB schema: cache both sides
+### Phase 1 — DB schema: cache both sides ✓ done
 *Prerequisite for everything else. Safe to ship alone.*
 
 Add columns to the `photos` table and create the `metadata_proposals` table:
@@ -229,7 +229,7 @@ Add columns to the `photos` table and create the `metadata_proposals` table:
 
 ---
 
-### Phase 2 — Poller writes Flickr metadata to DB
+### Phase 2 — Poller writes Flickr metadata to DB ✓ done
 *Depends on Phase 1.*
 
 Stop discarding `flickr_title`, `flickr_description`, `flickr_tags` in `poller.py`. Write them into the new columns. Capture `lastupdate` into `flickr_last_updated`. Compute and store `flickr_tags_hash`. Set `meta_synced_flickr_at`.
@@ -243,7 +243,7 @@ Stop discarding `flickr_title`, `flickr_description`, `flickr_tags` in `poller.p
 
 ---
 
-### Phase 3 — Scanner writes Photos metadata to DB
+### Phase 3 — Scanner writes Photos metadata to DB ✓ done
 *Depends on Phase 1. Independent of Phase 2.*
 
 Add a Photos metadata pass to `bp scan` that reads title, description, and keywords from the Photos library for every photo with a `uuid`. Compute and store `photos_tags_hash`. Set `meta_synced_photos_at`. Detect changes by comparing incoming values against stored `photos_*` columns; log differences.
@@ -256,8 +256,17 @@ Add a Photos metadata pass to `bp scan` that reads title, description, and keywo
 
 ---
 
-### Phase 4 — Sync engine: diff and generate proposals (tags first)
+### Phase 4 — Sync engine: diff and generate proposals (tags first) — in progress
 *Depends on Phases 1–3. Tags only in this phase.*
+
+**Implemented so far:** `bp sync-metadata` now reads from the DB cache first
+(`meta_synced_flickr_at IS NOT NULL`) and falls back to a live Flickr API call only on
+cache misses. Cache hit/miss counts are tracked in batch totals and logged. A
+`photoscript.Photo(uuid)` lookup that raises `ValueError` (photo deleted from library)
+no longer crashes the batch; it is caught and re-raised as `RuntimeError` per the
+existing error contract.
+
+**Remaining work:**
 
 Rewrite `bp sync-metadata` to:
 1. Run the drift filter: select photos where `meta_last_harmonized_at < max(flickr_last_updated, meta_synced_photos_at)` (or NULL).
