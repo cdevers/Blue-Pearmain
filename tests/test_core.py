@@ -2542,6 +2542,266 @@ class TestPullBatch(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Phase 2: poller Flickr metadata cache helpers and poll-loop behaviour
+# ---------------------------------------------------------------------------
+
+class TestPollerHelpers(unittest.TestCase):
+    """Unit tests for _normalise_tag and _compute_tags_hash."""
+
+    def setUp(self):
+        from poller.poller import _normalise_tag, _compute_tags_hash
+        self._normalise_tag    = _normalise_tag
+        self._compute_tags_hash = _compute_tags_hash
+
+    def test_normalise_tag_strips_whitespace(self):
+        self.assertEqual(self._normalise_tag("  hello  "), "hello")
+
+    def test_normalise_tag_casefolds(self):
+        self.assertEqual(self._normalise_tag("Café"), "café")
+
+    def test_normalise_tag_nfc(self):
+        # NFC normalization: composed vs decomposed form
+        import unicodedata
+        decomposed = unicodedata.normalize("NFD", "café")
+        self.assertEqual(self._normalise_tag(decomposed), "café")
+
+    def test_compute_tags_hash_deterministic(self):
+        h1 = self._compute_tags_hash(["Alpha", "Beta"])
+        h2 = self._compute_tags_hash(["Alpha", "Beta"])
+        self.assertEqual(h1, h2)
+
+    def test_compute_tags_hash_order_independent(self):
+        h1 = self._compute_tags_hash(["Alpha", "Beta"])
+        h2 = self._compute_tags_hash(["Beta", "Alpha"])
+        self.assertEqual(h1, h2)
+
+    def test_compute_tags_hash_case_insensitive(self):
+        h1 = self._compute_tags_hash(["ALPHA"])
+        h2 = self._compute_tags_hash(["alpha"])
+        self.assertEqual(h1, h2)
+
+    def test_compute_tags_hash_deduplicates(self):
+        h1 = self._compute_tags_hash(["alpha"])
+        h2 = self._compute_tags_hash(["alpha", "alpha"])
+        self.assertEqual(h1, h2)
+
+    def test_compute_tags_hash_empty_list(self):
+        h = self._compute_tags_hash([])
+        self.assertEqual(len(h), 64)  # SHA-256 hex digest
+
+
+class TestFlickrPhotoToDb(unittest.TestCase):
+    """Tests for flickr_photo_to_db and _enrich_from_info."""
+
+    def setUp(self):
+        from poller.poller import flickr_photo_to_db, _enrich_from_info
+        self._flickr_photo_to_db = flickr_photo_to_db
+        self._enrich_from_info   = _enrich_from_info
+
+    def _make_photo(self, **overrides):
+        base = {
+            "id":     "12345",
+            "secret": "abc",
+            "server": "srv",
+            "farm":   1,
+            "title":  "My Photo",
+            "tags":   "foo bar",
+        }
+        base.update(overrides)
+        return base
+
+    def test_title_stored_as_flickr_title(self):
+        row = self._flickr_photo_to_db(self._make_photo(title="Summer Trip"))
+        self.assertEqual(row["flickr_title"], "Summer Trip")
+        self.assertNotIn("title", row)
+
+    def test_lastupdate_captured_from_extras(self):
+        row = self._flickr_photo_to_db(self._make_photo(lastupdate="1700000000"))
+        self.assertIn("flickr_last_updated", row)
+        self.assertTrue(row["flickr_last_updated"].startswith("2023"))
+
+    def test_no_lastupdate_when_absent(self):
+        row = self._flickr_photo_to_db(self._make_photo())
+        self.assertNotIn("flickr_last_updated", row)
+
+    def test_enrich_updates_flickr_title_from_getinfo(self):
+        row = self._flickr_photo_to_db(self._make_photo(title="Old Title"))
+        info = {"photo": {
+            "title":       {"_content": "New Title From Info"},
+            "description": {"_content": ""},
+            "tags":        {"tag": []},
+            "dates":       {},
+            "owner":       {},
+        }}
+        self._enrich_from_info(row, info)
+        self.assertEqual(row["flickr_title"], "New Title From Info")
+
+    def test_enrich_captures_lastupdate_from_dates(self):
+        row = self._flickr_photo_to_db(self._make_photo())
+        info = {"photo": {
+            "title":       {"_content": ""},
+            "description": {"_content": ""},
+            "tags":        {"tag": []},
+            "dates":       {"lastupdate": "1700000000"},
+            "owner":       {},
+        }}
+        self._enrich_from_info(row, info)
+        self.assertIn("flickr_last_updated", row)
+        self.assertTrue(row["flickr_last_updated"].startswith("2023"))
+
+    def test_enrich_does_not_overwrite_title_with_empty(self):
+        row = self._flickr_photo_to_db(self._make_photo(title="Keep This"))
+        info = {"photo": {
+            "title":       {"_content": ""},
+            "description": {"_content": ""},
+            "tags":        {"tag": []},
+            "dates":       {},
+            "owner":       {},
+        }}
+        self._enrich_from_info(row, info)
+        self.assertEqual(row["flickr_title"], "Keep This")
+
+
+class TestPollerMetadataCache(unittest.TestCase):
+    """Integration tests: poll() writes Flickr metadata cache columns to DB."""
+
+    def setUp(self):
+        from unittest.mock import MagicMock, patch
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db   = Database(Path(self._tmp.name) / "test.db")
+
+        # One minimal photo returned by the mock Flickr client
+        self.flickr_id = "poll-meta-001"
+        self.mock_client = MagicMock()
+        self.mock_client.get_recent_uploads.return_value = {
+            "photos": {
+                "photo": [{
+                    "id":          self.flickr_id,
+                    "secret":      "sec",
+                    "server":      "srv",
+                    "farm":        1,
+                    "title":       "Poll Title",
+                    "tags":        "alpha beta",
+                    "description": {"_content": "Poll desc"},
+                    "lastupdate":  "1700000000",
+                }],
+                "pages": 1,
+                "page":  1,
+            }
+        }
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _run_poll(self, **kwargs):
+        from poller.poller import poll
+        poll(
+            client=self.mock_client,
+            db=self.db,
+            thumb_root=None,
+            min_ts=0,
+            dry_run=False,
+            fetch_info=False,
+            **kwargs,
+        )
+
+    def _get_row(self):
+        row = self.db.conn.execute(
+            "SELECT * FROM photos WHERE flickr_id = ?", (self.flickr_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def test_flickr_title_written_to_db(self):
+        self._run_poll()
+        row = self._get_row()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["flickr_title"], "Poll Title")
+
+    def test_flickr_tags_stored_as_json(self):
+        self._run_poll()
+        row = self._get_row()
+        tags = json.loads(row["flickr_tags"])
+        self.assertIsInstance(tags, list)
+        self.assertIn("alpha", tags)
+        self.assertIn("beta", tags)
+
+    def test_flickr_tags_hash_set(self):
+        self._run_poll()
+        row = self._get_row()
+        self.assertIsNotNone(row["flickr_tags_hash"])
+        self.assertEqual(len(row["flickr_tags_hash"]), 64)
+
+    def test_flickr_last_updated_set(self):
+        self._run_poll()
+        row = self._get_row()
+        self.assertIsNotNone(row["flickr_last_updated"])
+        self.assertTrue(row["flickr_last_updated"].startswith("2023"))
+
+    def test_meta_synced_flickr_at_set(self):
+        self._run_poll()
+        row = self._get_row()
+        self.assertIsNotNone(row["meta_synced_flickr_at"])
+
+    def test_transient_fields_not_in_db_columns(self):
+        """thumbnail_url_l, flickr_is_public, etc. must not appear in the photos row."""
+        self._run_poll()
+        row = self._get_row()
+        cols = set(row.keys())
+        for bad in ("thumbnail_url_l", "thumbnail_url_m",
+                    "flickr_is_public", "flickr_owner_nsid", "original_format"):
+            self.assertNotIn(bad, cols, f"{bad!r} should not be a DB column")
+
+    def test_flickr_description_written_to_db(self):
+        self._run_poll()
+        row = self._get_row()
+        self.assertEqual(row["flickr_description"], "Poll desc")
+
+
+class TestUpsertPhotoTagSerialisation(unittest.TestCase):
+    """upsert_photo should auto-serialise flickr_tags and photos_tags lists."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db   = Database(Path(self._tmp.name) / "test.db")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def test_flickr_tags_list_serialised_to_json(self):
+        photo_id = self.db.upsert_photo({
+            "flickr_id":   "serial-flickr-001",
+            "flickr_tags": ["alpha", "beta"],
+        })
+        row = self.db.conn.execute(
+            "SELECT flickr_tags FROM photos WHERE id = ?", (photo_id,)
+        ).fetchone()
+        self.assertEqual(json.loads(row["flickr_tags"]), ["alpha", "beta"])
+
+    def test_photos_tags_list_serialised_to_json(self):
+        photo_id = self.db.upsert_photo({
+            "flickr_id":   "serial-photos-001",
+            "photos_tags": ["vacation", "summer"],
+        })
+        row = self.db.conn.execute(
+            "SELECT photos_tags FROM photos WHERE id = ?", (photo_id,)
+        ).fetchone()
+        self.assertEqual(json.loads(row["photos_tags"]), ["vacation", "summer"])
+
+    def test_flickr_tags_string_passed_through_unchanged(self):
+        payload = json.dumps(["gamma"])
+        photo_id = self.db.upsert_photo({
+            "flickr_id":   "serial-str-001",
+            "flickr_tags": payload,
+        })
+        row = self.db.conn.execute(
+            "SELECT flickr_tags FROM photos WHERE id = ?", (photo_id,)
+        ).fetchone()
+        self.assertEqual(row["flickr_tags"], payload)
+
+
+# ---------------------------------------------------------------------------
 # sync-metadata CLI
 # ---------------------------------------------------------------------------
 

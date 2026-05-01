@@ -25,9 +25,12 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import hashlib
+import json
 import logging
 import sys
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -42,6 +45,19 @@ from analyzer.privacy import classify
 from analyzer.tagger import propose_tags
 
 log = logging.getLogger("blue-pearmain.poller")
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _normalise_tag(tag: str) -> str:
+    return unicodedata.normalize("NFC", tag.strip().casefold())
+
+
+def _compute_tags_hash(tags: list[str]) -> str:
+    normed = sorted({_normalise_tag(t) for t in tags if t.strip()})
+    return hashlib.sha256(" ".join(normed).encode()).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +96,7 @@ def setup_logging(config: dict, verbose: bool):
 EXTRA_FIELDS = (
     "date_upload,date_taken,geo,tags,machine_tags,"
     "url_sq,url_t,url_s,url_m,url_l,url_o,"
-    "original_format,media,description,license,owner_name"
+    "original_format,media,description,license,owner_name,last_update"
 )
 
 
@@ -112,13 +128,20 @@ def flickr_photo_to_db(photo: dict, info: dict | None = None) -> dict:
         row["date_taken"] = date_taken  # already a string from Flickr
 
     # Title / description
-    row["title"] = photo.get("title", "")
+    row["flickr_title"] = photo.get("title", "")
 
     desc = photo.get("description", {})
     if isinstance(desc, dict):
         row["flickr_description"] = desc.get("_content", "")
     elif isinstance(desc, str):
         row["flickr_description"] = desc
+
+    # Last-update timestamp (present when last_update is in extras)
+    last_update = photo.get("lastupdate")
+    if last_update:
+        row["flickr_last_updated"] = datetime.fromtimestamp(
+            int(last_update), tz=timezone.utc
+        ).isoformat()
 
     # Tags from the list response (space-separated string)
     raw_tags = photo.get("tags", "")
@@ -155,6 +178,11 @@ def _enrich_from_info(row: dict, info: dict):
     """Pull richer fields from flickr.photos.getInfo response."""
     photo = info.get("photo", {})
 
+    # Title from getInfo is authoritative over the list response
+    title = (photo.get("title") or {}).get("_content", "")
+    if title:
+        row["flickr_title"] = title
+
     # Owner
     owner = photo.get("owner", {})
     row["flickr_owner_nsid"] = owner.get("nsid", "")
@@ -189,6 +217,12 @@ def _enrich_from_info(row: dict, info: dict):
     if upload_ts:
         row["date_uploaded_flickr"] = datetime.fromtimestamp(
             int(upload_ts), tz=timezone.utc
+        ).isoformat()
+
+    last_update = dates.get("lastupdate")
+    if last_update:
+        row["flickr_last_updated"] = datetime.fromtimestamp(
+            int(last_update), tz=timezone.utc
         ).isoformat()
 
     # Description
@@ -422,15 +456,16 @@ def poll(
                 proposed = propose_tags(row)
                 row["proposed_tags"] = proposed
 
-                # Serialise flickr_tags for storage (not a schema column — fold into proposed)
-                row.pop("flickr_tags", None)
-                row.pop("thumbnail_url_l", None)
-                row.pop("thumbnail_url_m", None)
-                row.pop("flickr_description", None)
-                row.pop("flickr_is_public", None)
-                row.pop("flickr_owner_nsid", None)
-                row.pop("title", None)
-                row.pop("original_format", None)
+                # Cache Flickr metadata for the sync engine
+                tags = row.get("flickr_tags") or []
+                row["flickr_tags"]           = json.dumps(tags)
+                row["flickr_tags_hash"]      = _compute_tags_hash(tags)
+                row["meta_synced_flickr_at"] = _now_iso()
+
+                # Drop transient fields that have no DB column
+                for _key in ("thumbnail_url_l", "thumbnail_url_m",
+                             "flickr_is_public", "flickr_owner_nsid", "original_format"):
+                    row.pop(_key, None)
 
                 if dry_run:
                     log.debug(f"  [dry-run] {flickr_id}: {state} — {reason} — tags: {proposed[:5]}")

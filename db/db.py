@@ -238,7 +238,8 @@ class Database:
         should be passed as Python lists; this method serialises them.
         """
         # Serialise list fields
-        for field in ("apple_labels", "apple_persons", "proposed_tags"):
+        for field in ("apple_labels", "apple_persons", "proposed_tags",
+                      "flickr_tags", "photos_tags"):
             if isinstance(data.get(field), list):
                 data[field] = json.dumps(data[field])
 
