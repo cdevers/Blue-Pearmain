@@ -3677,5 +3677,76 @@ class TestLinkOrphans(unittest.TestCase):
         self.assertIsNotNone(self.db.get_photo(photos_id))
 
 
+# ---------------------------------------------------------------------------
+# Reviewer UI — photo detail page
+# ---------------------------------------------------------------------------
+
+class TestPhotoDetailTemplate(unittest.TestCase):
+    """photo_detail route renders x-apple-photos:// link iff uuid is set."""
+
+    def setUp(self):
+        import reviewer.app as reviewer_app
+        self._tmp = tempfile.TemporaryDirectory()
+        db_path   = Path(self._tmp.name) / "test.db"
+        self._db  = Database(db_path)
+
+        # Wire the module-level _db used by the Flask app
+        reviewer_app._db = self._db
+
+        self._app    = reviewer_app.app
+        self._client = self._app.test_client()
+
+        # Photo with uuid (Photos-matched)
+        self.matched_id = self._db.upsert_photo({
+            "uuid":              "AAAA-1111",
+            "flickr_id":         "flickr-detail-001",
+            "original_filename": "IMG_detail.JPG",
+            "privacy_state":     "candidate_public",
+            "proposed_tags":     [],
+            "apple_persons":     [],
+            "apple_labels":      [],
+        })
+        # Flickr-only photo (no uuid)
+        self.flickr_only_id = self._db.upsert_photo({
+            "flickr_id":         "flickr-detail-002",
+            "original_filename": "flickr_only.JPG",
+            "privacy_state":     "candidate_public",
+            "proposed_tags":     [],
+            "apple_persons":     [],
+            "apple_labels":      [],
+        })
+
+    def tearDown(self):
+        self._db.close()
+        self._tmp.cleanup()
+
+    def _get(self, photo_id):
+        with self._app.test_request_context():
+            resp = self._client.get(f"/photo/{photo_id}")
+        return resp
+
+    def test_photos_link_present_when_uuid_set(self):
+        resp = self._get(self.matched_id)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.data.decode()
+        self.assertIn("x-apple-photos://AAAA-1111", body)
+
+    def test_photos_link_absent_when_uuid_null(self):
+        resp = self._get(self.flickr_only_id)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.data.decode()
+        self.assertNotIn("x-apple-photos://", body)
+
+    def test_photos_link_text_present(self):
+        resp = self._get(self.matched_id)
+        body = resp.data.decode()
+        self.assertIn("Photos", body)
+
+    def test_uuid_prefix_shown_in_details(self):
+        resp = self._get(self.matched_id)
+        body = resp.data.decode()
+        self.assertIn("AAAA-111", body)  # truncated prefix visible in details row
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
