@@ -256,28 +256,20 @@ Add a Photos metadata pass to `bp scan` that reads title, description, and keywo
 
 ---
 
-### Phase 4 — Sync engine: diff and generate proposals (tags first) — in progress
+### Phase 4 — Sync engine: diff and generate proposals (tags first) ✓ done
 *Depends on Phases 1–3. Tags only in this phase.*
 
-**Implemented so far:** `bp sync-metadata` now reads from the DB cache first
-(`meta_synced_flickr_at IS NOT NULL`) and falls back to a live Flickr API call only on
-cache misses. Cache hit/miss counts are tracked in batch totals and logged. A
-`photoscript.Photo(uuid)` lookup that raises `ValueError` (photo deleted from library)
-no longer crashes the batch; it is caught and re-raised as `RuntimeError` per the
-existing error contract.
+`bp sync-metadata` runs the drift filter, compares tag hashes, classifies
+divergences, and writes to `metadata_proposals`. No API calls. 70,946 photos
+processed in ~2.5 s; 60,220 hash matches (already in sync), ~11,226 proposals.
 
-**Remaining work:**
-
-Rewrite `bp sync-metadata` to:
-1. Run the drift filter: select photos where `meta_last_harmonized_at < max(flickr_last_updated, meta_synced_photos_at)` (or NULL).
-2. For each such photo, compare `flickr_tags_hash` vs `photos_tags_hash`.
-3. If hashes differ, expand to full set comparison and classify (`non_conflict`, `divergence`, `collision`).
-4. Write a proposal to `metadata_proposals` (deduplicated per idempotency rules).
-5. Set `meta_last_harmonized_at`.
-
-No Flickr API calls. No writes to Photos or Flickr. Pure DB reads → proposal writes.
-
-`bp sync-metadata --refresh-flickr` re-fetches from the Flickr API and updates the cache before running the sync engine (the old default behaviour, now opt-in).
+- **Drift filter:** selects photos where both caches populated and
+  `meta_last_harmonized_at < MAX(COALESCE(flickr_last_updated, meta_synced_flickr_at), meta_synced_photos_at)` (or NULL).
+- **Fast path:** hash match → set `meta_last_harmonized_at`, skip.
+- **Classification:** non_conflict / divergence / collision per architecture rules.
+- **Idempotency:** pending dup → skip; stale hash → supersede + new; rejected same hash → skip.
+- **`--refresh-flickr`:** re-fetches Flickr cache via API before syncing (opt-in).
+- Batch commits every 500 photos.
 
 **Files to change:**
 - `flickr/metadata_puller.py`
