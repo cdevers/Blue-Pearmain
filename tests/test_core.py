@@ -3811,6 +3811,52 @@ class TestClassifyTags(unittest.TestCase):
         self.assertEqual(p["target_hash_at_creation"], "PHASH")
 
 
+class TestClassifyTextField(unittest.TestCase):
+    """_classify_text_field"""
+
+    def setUp(self):
+        from flickr.metadata_puller import _classify_text_field
+        self._fn = _classify_text_field
+        self._now = "2026-01-01T00:00:00+00:00"
+
+    def test_both_empty_returns_no_proposals(self):
+        self.assertEqual(self._fn(1, "title", "", "", self._now), [])
+
+    def test_equal_returns_no_proposals(self):
+        self.assertEqual(self._fn(1, "title", "My Photo", "My Photo", self._now), [])
+
+    def test_whitespace_only_difference_returns_no_proposals(self):
+        self.assertEqual(self._fn(1, "title", "  My Photo  ", "My Photo", self._now), [])
+
+    def test_flickr_has_title_photos_empty_is_non_conflict(self):
+        props = self._fn(1, "title", "Sunset", "", self._now)
+        self.assertEqual(len(props), 1)
+        self.assertEqual(props[0]["conflict_type"], "non_conflict")
+        self.assertEqual(props[0]["source"], "flickr")
+        self.assertEqual(props[0]["target"], "photos")
+        self.assertEqual(props[0]["proposed_value"], "Sunset")
+
+    def test_photos_has_title_flickr_empty_is_non_conflict(self):
+        props = self._fn(1, "title", "", "My Title", self._now)
+        self.assertEqual(len(props), 1)
+        self.assertEqual(props[0]["source"], "photos")
+        self.assertEqual(props[0]["target"], "flickr")
+
+    def test_both_non_empty_different_is_collision(self):
+        props = self._fn(1, "title", "Sunset", "Golden Hour", self._now)
+        self.assertEqual(len(props), 2)
+        self.assertTrue(all(p["conflict_type"] == "collision" for p in props))
+
+    def test_field_set_correctly(self):
+        props = self._fn(1, "description", "Flickr desc", "", self._now)
+        self.assertEqual(props[0]["field"], "description")
+
+    def test_source_hash_at_creation_set(self):
+        props = self._fn(1, "title", "Sunset", "", self._now)
+        self.assertIsNotNone(props[0]["source_hash_at_creation"])
+        self.assertIsNone(props[0]["target_hash_at_creation"])  # target (photos) is empty → None
+
+
 class TestUpsertProposal(unittest.TestCase):
     """db.upsert_proposal idempotency rules."""
 
@@ -4050,6 +4096,34 @@ class TestRunSyncEngine(unittest.TestCase):
             "SELECT status FROM metadata_proposals WHERE photo_id=?", (pid,)
         ).fetchone()
         self.assertEqual(row["status"], "superseded")
+
+    def test_title_non_conflict_generates_proposal(self):
+        from flickr.metadata_puller import run_sync_engine
+        pid = self._add("TITLE1", [], [])
+        # Manually set flickr_title only
+        self.db.conn.execute(
+            "UPDATE photos SET flickr_title='Sunset at the Beach' WHERE id=?", (pid,)
+        )
+        self.db.conn.commit()
+        totals = run_sync_engine(self.db, [pid])
+        props = self._pending_proposals()
+        self.assertEqual(len(props), 1)
+        self.assertEqual(props[0]["field"], "title")
+        self.assertEqual(props[0]["conflict_type"], "non_conflict")
+        self.assertEqual(props[0]["proposed_value"], "Sunset at the Beach")
+
+    def test_title_collision_generates_two_proposals(self):
+        from flickr.metadata_puller import run_sync_engine
+        pid = self._add("TITLE2", [], [])
+        self.db.conn.execute(
+            "UPDATE photos SET flickr_title='Sunset', photos_title='Golden Hour' WHERE id=?", (pid,)
+        )
+        self.db.conn.commit()
+        totals = run_sync_engine(self.db, [pid])
+        props = self._pending_proposals()
+        self.assertEqual(len(props), 2)
+        self.assertTrue(all(p["field"] == "title" for p in props))
+        self.assertTrue(all(p["conflict_type"] == "collision" for p in props))
 
 
 # ---------------------------------------------------------------------------

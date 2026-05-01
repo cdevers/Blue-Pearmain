@@ -17,6 +17,7 @@ Usage:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import subprocess
@@ -34,6 +35,54 @@ log = logging.getLogger("blue-pearmain.metadata_puller")
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _field_hash(value: str) -> str:
+    return hashlib.sha256((value or "").strip().encode()).hexdigest()
+
+
+def _classify_text_field(
+    photo_id: int,
+    field: str,
+    flickr_val: str,
+    photos_val: str,
+    now: str,
+) -> list[dict]:
+    """Classify a title or description divergence and return proposal dicts."""
+    fval = (flickr_val or "").strip()
+    pval = (photos_val or "").strip()
+
+    if not fval and not pval:
+        return []
+    if fval == pval:
+        return []
+
+    fhash = _field_hash(fval) if fval else None
+    phash = _field_hash(pval) if pval else None
+
+    def make(source, target, proposed_value, conflict_type):
+        return {
+            "photo_id":                photo_id,
+            "field":                   field,
+            "proposed_value":          proposed_value,
+            "source":                  source,
+            "target":                  target,
+            "conflict_type":           conflict_type,
+            "source_hash_at_creation": fhash if source == "flickr" else phash,
+            "target_hash_at_creation": phash if target == "photos" else fhash,
+            "created_at":              now,
+        }
+
+    if not fval:
+        return [make("photos", "flickr", pval, "non_conflict")]
+    if not pval:
+        return [make("flickr", "photos", fval, "non_conflict")]
+
+    # Both non-empty and different → collision
+    return [
+        make("flickr", "photos", fval, "collision"),
+        make("photos", "flickr", pval, "collision"),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +132,7 @@ def run_sync_engine(
                 # drop because the source hash hasn't changed.
                 db.conn.execute(
                     "UPDATE metadata_proposals SET status='superseded', resolved_at=?"
-                    " WHERE photo_id=? AND field='tags' AND status='pending'",
+                    " WHERE photo_id=? AND status='pending'",
                     (now, photo_id),
                 )
                 for p in proposals:
@@ -119,10 +168,8 @@ def run_sync_engine(
         db.conn.commit()
 
     if not dry_run:
-        # Supersede pending proposals for any photo whose stored hashes now agree.
-        # This cleans up stale proposals that were created before a normalization fix
-        # caused the poller/scanner to recompute equal hashes, causing those photos
-        # to hit the hash_match fast path and skip per-photo supersede logic.
+        # Supersede stale pending proposals where values now agree.
+        # Tags: hash-equality check.
         cur = db.conn.execute(
             """UPDATE metadata_proposals
                SET status='superseded', resolved_at=?
@@ -136,7 +183,30 @@ def run_sync_engine(
             (now,),
         )
         if cur.rowcount:
-            log.info("sync_engine: superseded %d stale proposals (hashes now match)", cur.rowcount)
+            log.info(
+                "sync_engine: superseded %d stale tag proposals (hashes now match)",
+                cur.rowcount,
+            )
+        # Title and description: string-equality check.
+        for field, subquery in [
+            ("title",
+             "SELECT id FROM photos WHERE TRIM(COALESCE(flickr_title,''))"
+             " = TRIM(COALESCE(photos_title,''))"),
+            ("description",
+             "SELECT id FROM photos WHERE TRIM(COALESCE(flickr_description,''))"
+             " = TRIM(COALESCE(photos_description,''))"),
+        ]:
+            cur = db.conn.execute(
+                f"UPDATE metadata_proposals SET status='superseded', resolved_at=?"
+                f" WHERE status='pending' AND field=?"
+                f" AND photo_id IN ({subquery})",
+                (now, field),
+            )
+            if cur.rowcount:
+                log.info(
+                    "sync_engine: superseded %d stale %s proposals (values now match)",
+                    cur.rowcount, field,
+                )
         db.conn.commit()
 
     return totals
@@ -145,34 +215,51 @@ def run_sync_engine(
 def _harmonise_one(db: "Database", photo_id: int, now: str):
     """
     Return one of:
-      "hash_match"  — tags already in sync, nothing to do
-      "skipped"     — both sides empty, nothing to do
-      list[dict]    — proposals to upsert (may be empty list if both equal after normalisation)
+      "hash_match"  — all fields already in sync (tags confirmed via hash)
+      "skipped"     — all fields empty or equal, tags confirmed via slow path
+      list[dict]    — proposals to upsert (may be empty list)
       None          — photo row not found (error)
     """
     row = db.conn.execute(
-        """SELECT flickr_tags, flickr_tags_hash, photos_tags, photos_tags_hash
+        """SELECT flickr_tags, flickr_tags_hash, photos_tags, photos_tags_hash,
+                  flickr_title, photos_title,
+                  flickr_description, photos_description
            FROM photos WHERE id = ?""",
         (photo_id,),
     ).fetchone()
     if not row:
         return None
 
-    flickr_hash = row["flickr_tags_hash"]
-    photos_hash = row["photos_tags_hash"]
+    proposals = []
 
-    # Fast path: hashes match → already in sync
-    if flickr_hash and photos_hash and flickr_hash == photos_hash:
-        return "hash_match"
+    # Tags: fast-path hash check
+    fhash = row["flickr_tags_hash"]
+    phash = row["photos_tags_hash"]
+    tags_hash_match = fhash and phash and fhash == phash
+    if not tags_hash_match:
+        proposals.extend(
+            _classify_tags(photo_id, row["flickr_tags"], row["photos_tags"], fhash, phash, now)
+        )
 
-    return _classify_tags(
-        photo_id,
-        row["flickr_tags"],
-        row["photos_tags"],
-        flickr_hash,
-        photos_hash,
-        now,
-    )
+    # Title and description: always compare (short strings, no hash fast-path)
+    for field in ("title", "description"):
+        proposals.extend(
+            _classify_text_field(
+                photo_id, field,
+                row[f"flickr_{field}"], row[f"photos_{field}"],
+                now,
+            )
+        )
+
+    if not proposals:
+        if tags_hash_match:
+            return "hash_match"
+        # Slow path produced no proposals (e.g. punctuation-only tag difference,
+        # text fields equal). Return an empty list so the per-photo supersede still
+        # fires and clears any stale proposals for this photo.
+        return []
+
+    return proposals
 
 
 def _classify_tags(

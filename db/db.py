@@ -853,7 +853,9 @@ class Database:
                        mp.source, mp.target, mp.conflict_type, mp.created_at,
                        mp.source_hash_at_creation, mp.target_hash_at_creation,
                        p.flickr_id, p.uuid, p.original_filename, p.thumbnail_path,
-                       p.flickr_tags, p.photos_tags
+                       p.flickr_tags, p.photos_tags,
+                       p.flickr_title, p.photos_title,
+                       p.flickr_description, p.photos_description
                 FROM metadata_proposals mp
                 JOIN photos p ON p.id = mp.photo_id
                 WHERE mp.status = 'pending' {type_filter} {collision_filter}
@@ -863,6 +865,12 @@ class Database:
                     WHEN 'divergence' THEN 2
                     ELSE                   3
                   END,
+                  CASE mp.field
+                    WHEN 'tags'        THEN 1
+                    WHEN 'title'       THEN 2
+                    WHEN 'description' THEN 3
+                    ELSE                    4
+                  END,
                   mp.id
                 LIMIT ? OFFSET ?""",
             params,
@@ -870,9 +878,13 @@ class Database:
         result = []
         for r in rows:
             d = dict(r)
-            d["flickr_tags"]    = _json_loads_safe(d.get("flickr_tags"))
-            d["photos_tags"]    = _json_loads_safe(d.get("photos_tags"))
-            d["proposed_value"] = _json_loads_safe(d.get("proposed_value"))
+            d["flickr_tags"]  = _json_loads_safe(d.get("flickr_tags"))
+            d["photos_tags"]  = _json_loads_safe(d.get("photos_tags"))
+            # proposed_value is JSON for tags, plain text for title/description
+            if d.get("field") == "tags":
+                d["proposed_value"] = _json_loads_safe(d.get("proposed_value"))
+            else:
+                d["proposed_value"] = d.get("proposed_value") or ""
             result.append(d)
         return result
 

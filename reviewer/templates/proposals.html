@@ -236,6 +236,16 @@
   {% set flickr_set = p.flickr_tags | map('lower') | list %}
   {% set photos_set = p.photos_tags | map('lower') | list %}
   {% set proposed_set = p.proposed_value | map('lower') | list %}
+  {% if p.field == 'title' %}
+    {% set flickr_text_val = p.flickr_title or '' %}
+    {% set photos_text_val = p.photos_title or '' %}
+  {% elif p.field == 'description' %}
+    {% set flickr_text_val = p.flickr_description or '' %}
+    {% set photos_text_val = p.photos_description or '' %}
+  {% else %}
+    {% set flickr_text_val = '' %}
+    {% set photos_text_val = '' %}
+  {% endif %}
 
   <div class="proposal-card {{ p.conflict_type }}" id="card-{{ p.id }}">
     <img class="thumb"
@@ -245,10 +255,14 @@
     <div class="body">
       <div class="card-header">
         <span class="type-pill pill-{{ p.conflict_type | replace('_','-') }}">{{ p.conflict_type | replace('_',' ') }}</span>
+        {% if p.field != 'tags' %}
+        <span style="background:#1a1a2e; color:#99a; border:1px solid #334; border-radius:3px; padding:1px 6px; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.05em">{{ p.field }}</span>
+        {% endif %}
         <span class="filename">{{ p.original_filename or p.flickr_id or '?' }}</span>
         <a href="{{ url_for('photo_detail', photo_id=p.photo_id) }}" target="_blank">view ↗</a>
       </div>
 
+      {% if p.field == 'tags' %}
       <div class="tag-comparison">
         <div class="tag-side flickr">
           <div class="side-label">Flickr ({{ p.flickr_tags | length }} tags)</div>
@@ -275,17 +289,39 @@
           </div>
         </div>
       </div>
-
       <div class="proposed-action">
         {% if p.conflict_type == 'non_conflict' %}
           Apply <strong>{{ p.source }}</strong> tags → <strong>{{ p.target }}</strong>
           ({{ p.proposed_value | length }} tag{{ 's' if p.proposed_value | length != 1 }})
         {% elif p.conflict_type == 'divergence' %}
-          Add {{ (p.proposed_value | length) - (p.photos_tags if p.target == 'photos' else p.flickr_tags) | length }} missing tag{{ 's' if True }} from <strong>{{ p.source }}</strong> → <strong>{{ p.target }}</strong>
+          Add missing tags from <strong>{{ p.source }}</strong> → <strong>{{ p.target }}</strong>
         {% else %}
           Both sides differ — choose which wins
         {% endif %}
       </div>
+      {% else %}
+      <div class="tag-comparison" style="margin-bottom:12px">
+        <div class="tag-side flickr">
+          <div class="side-label">Flickr {{ p.field }}</div>
+          <div style="font-size:12px; color:var(--text); line-height:1.4; padding-top:2px">
+            {{ flickr_text_val if flickr_text_val else '<span class="tag-empty">empty</span>' | safe }}
+          </div>
+        </div>
+        <div class="tag-side photos">
+          <div class="side-label">Photos {{ p.field }}</div>
+          <div style="font-size:12px; color:var(--text); line-height:1.4; padding-top:2px">
+            {{ photos_text_val if photos_text_val else '<span class="tag-empty">empty</span>' | safe }}
+          </div>
+        </div>
+      </div>
+      <div class="proposed-action">
+        {% if p.conflict_type == 'non_conflict' %}
+          Apply <strong>{{ p.source }}</strong> {{ p.field }} → <strong>{{ p.target }}</strong>
+        {% else %}
+          Both sides differ — choose which wins
+        {% endif %}
+      </div>
+      {% endif %}
 
       <div class="card-actions">
         {% if p.conflict_type == 'collision' %}

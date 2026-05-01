@@ -40,6 +40,10 @@ def _compute_hash(tags: list[str]) -> str:
     return hashlib.sha256(" ".join(normed).encode()).hexdigest()
 
 
+def _compute_text_hash(value: str) -> str:
+    return hashlib.sha256((value or "").strip().encode()).hexdigest()
+
+
 def apply_proposal(
     db: "Database",
     proposal_id: int,
@@ -56,7 +60,9 @@ def apply_proposal(
                   mp.source, mp.target, mp.conflict_type, mp.status,
                   mp.source_hash_at_creation, mp.target_hash_at_creation,
                   p.flickr_id, p.uuid,
-                  p.flickr_tags_hash, p.photos_tags_hash
+                  p.flickr_tags_hash, p.photos_tags_hash,
+                  p.flickr_title, p.photos_title,
+                  p.flickr_description, p.photos_description
            FROM metadata_proposals mp
            JOIN photos p ON p.id = mp.photo_id
            WHERE mp.id = ?""",
@@ -68,9 +74,16 @@ def apply_proposal(
     if row["status"] != "pending":
         return {"ok": False, "reason": f"proposal already '{row['status']}'"}
 
-    # Apply-time staleness checks (architecture doc §Proposals table rules 4 & 5)
-    src_hash  = row["flickr_tags_hash"] if row["source"] == "flickr" else row["photos_tags_hash"]
-    tgt_hash  = row["photos_tags_hash"] if row["target"] == "photos" else row["flickr_tags_hash"]
+    # Apply-time staleness checks
+    field = row["field"]
+    if field == "tags":
+        src_hash = row["flickr_tags_hash"] if row["source"] == "flickr" else row["photos_tags_hash"]
+        tgt_hash = row["photos_tags_hash"] if row["target"] == "photos" else row["flickr_tags_hash"]
+    else:
+        flickr_text = row[f"flickr_{field}"] or ""
+        photos_text = row[f"photos_{field}"] or ""
+        src_hash = _compute_text_hash(flickr_text if row["source"] == "flickr" else photos_text)
+        tgt_hash = _compute_text_hash(photos_text if row["target"] == "photos" else flickr_text)
 
     if src_hash != row["source_hash_at_creation"]:
         _supersede(db, proposal_id)
@@ -79,14 +92,22 @@ def apply_proposal(
         _supersede(db, proposal_id)
         return {"ok": False, "reason": "target_changed"}
 
-    new_tags = json.loads(row["proposed_value"]) if row["proposed_value"] else []
-
-    if row["target"] == "photos":
-        return _apply_to_photos(db, row, new_tags, library_path)
-    if row["target"] == "flickr":
-        if flickr_client is None:
-            return {"ok": False, "reason": "no flickr_client provided"}
-        return _apply_to_flickr(db, row, new_tags, flickr_client)
+    if field == "tags":
+        new_tags = json.loads(row["proposed_value"]) if row["proposed_value"] else []
+        if row["target"] == "photos":
+            return _apply_to_photos(db, row, new_tags, library_path)
+        if row["target"] == "flickr":
+            if flickr_client is None:
+                return {"ok": False, "reason": "no flickr_client provided"}
+            return _apply_to_flickr(db, row, new_tags, flickr_client)
+    else:
+        new_value = row["proposed_value"] or ""
+        if row["target"] == "photos":
+            return _apply_text_to_photos(db, row, new_value)
+        if row["target"] == "flickr":
+            if flickr_client is None:
+                return {"ok": False, "reason": "no flickr_client provided"}
+            return _apply_text_to_flickr(db, row, new_value, flickr_client)
     return {"ok": False, "reason": f"unknown target '{row['target']}'"}
 
 
@@ -200,6 +221,87 @@ def _apply_to_flickr(
         "applied proposal %s → Flickr  photo_id=%s  tags=%d%s",
         row["id"], row["photo_id"], len(new_tags),
         " (truncated)" if truncated else "",
+    )
+    return {"ok": True}
+
+
+def _apply_text_to_photos(db: "Database", row, new_value: str) -> dict:
+    field = row["field"]  # "title" or "description"
+    uuid = row["uuid"]
+    if not uuid:
+        return {"ok": False, "reason": "photo has no uuid"}
+    if not _photos_is_running():
+        return {"ok": False, "reason": "Photos.app is not running"}
+
+    try:
+        import photoscript
+    except ImportError:
+        return {"ok": False, "reason": "photoscript not installed"}
+
+    try:
+        photo = photoscript.Photo(uuid)
+    except Exception as e:
+        return {"ok": False, "reason": f"photo not found in Photos: {e}"}
+
+    try:
+        if field == "title":
+            photo.title = new_value
+        else:
+            photo.description = new_value
+    except Exception as e:
+        return {"ok": False, "reason": f"write failed: {e}"}
+
+    try:
+        written = photo.title if field == "title" else photo.description
+        written = (written or "").strip()
+    except Exception:
+        written = new_value
+
+    now = _now_iso()
+    col = f"photos_{field}"
+    db.conn.execute(
+        f"UPDATE photos SET {col}=?, meta_synced_photos_at=?, updated_at=? WHERE id=?",
+        (written, now, now, row["photo_id"]),
+    )
+    _mark_applied(db, row["id"])
+    db.conn.commit()
+    log.info(
+        "applied proposal %s → Photos  photo_id=%s  field=%s",
+        row["id"], row["photo_id"], field,
+    )
+    return {"ok": True}
+
+
+def _apply_text_to_flickr(
+    db: "Database", row, new_value: str, flickr_client: "FlickrClient"
+) -> dict:
+    field = row["field"]
+    flickr_id = row["flickr_id"]
+    if not flickr_id:
+        return {"ok": False, "reason": "photo has no flickr_id"}
+
+    # set_meta requires both title and description; keep the current value for the unchanged field
+    current_title = row["flickr_title"] or ""
+    current_desc  = row["flickr_description"] or ""
+    try:
+        if field == "title":
+            flickr_client.set_meta(flickr_id, title=new_value, description=current_desc)
+        else:
+            flickr_client.set_meta(flickr_id, title=current_title, description=new_value)
+    except Exception as e:
+        return {"ok": False, "reason": f"Flickr API error: {e}"}
+
+    now = _now_iso()
+    col = f"flickr_{field}"
+    db.conn.execute(
+        f"UPDATE photos SET {col}=?, meta_synced_flickr_at=?, updated_at=? WHERE id=?",
+        (new_value, now, now, row["photo_id"]),
+    )
+    _mark_applied(db, row["id"])
+    db.conn.commit()
+    log.info(
+        "applied proposal %s → Flickr  photo_id=%s  field=%s",
+        row["id"], row["photo_id"], field,
     )
     return {"ok": True}
 
