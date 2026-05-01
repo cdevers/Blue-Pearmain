@@ -85,6 +85,21 @@ CREATE TABLE IF NOT EXISTS photos (
     perms_pushed_flickr     INTEGER DEFAULT 0,      -- boolean: have we set Flickr visibility?
     flickr_deleted          INTEGER DEFAULT 0,      -- boolean: photo was deleted from Flickr; skip future syncs
 
+    -- Metadata cache: last known state from each side
+    flickr_title            TEXT,                   -- last title fetched from Flickr
+    flickr_description      TEXT,                   -- last description fetched from Flickr
+    flickr_tags             TEXT,                   -- JSON array — last tags fetched from Flickr (original casing)
+    flickr_tags_hash        TEXT,                   -- SHA-256 of sorted normalised Flickr tag set
+    flickr_last_updated     TEXT,                   -- ISO8601 — Flickr's lastupdate timestamp for this photo
+    photos_title            TEXT,                   -- last title read from Apple Photos
+    photos_description      TEXT,                   -- last description read from Apple Photos
+    photos_tags             TEXT,                   -- JSON array — last keywords from Apple Photos (original casing)
+    photos_tags_hash        TEXT,                   -- SHA-256 of sorted normalised Photos tag set
+    meta_synced_flickr_at   TEXT,                   -- ISO8601 — when we last fetched from Flickr
+    meta_synced_photos_at   TEXT,                   -- ISO8601 — when we last read from Photos
+    meta_last_harmonized_at TEXT,                   -- ISO8601 — when sync engine last processed this photo
+    tags_truncated_for_flickr INTEGER DEFAULT 0,    -- boolean: canonical tags exceeded 75 on last Flickr push
+
     -- Thumbnail cache
     thumbnail_path          TEXT,                   -- absolute path on NAS to cached url_l JPEG
 
@@ -171,8 +186,11 @@ CREATE INDEX IF NOT EXISTS idx_photos_location      ON photos(latitude, longitud
 CREATE INDEX IF NOT EXISTS idx_photos_reviewed      ON photos(reviewed_at);
 CREATE INDEX IF NOT EXISTS idx_tag_events_photo     ON tag_events(photo_id);
 CREATE INDEX IF NOT EXISTS idx_photos_push_state    ON photos(privacy_state, perms_pushed_flickr);
-CREATE INDEX IF NOT EXISTS idx_photos_tags_pushed   ON photos(tags_pushed_flickr);
-CREATE INDEX IF NOT EXISTS idx_photos_updated       ON photos(updated_at);
+CREATE INDEX IF NOT EXISTS idx_photos_tags_pushed        ON photos(tags_pushed_flickr);
+CREATE INDEX IF NOT EXISTS idx_photos_updated            ON photos(updated_at);
+CREATE INDEX IF NOT EXISTS idx_photos_flickr_tags_hash   ON photos(flickr_tags_hash);
+CREATE INDEX IF NOT EXISTS idx_photos_photos_tags_hash   ON photos(photos_tags_hash);
+CREATE INDEX IF NOT EXISTS idx_photos_meta_harmonized    ON photos(meta_last_harmonized_at);
 
 
 -- ============================================================
@@ -228,3 +246,42 @@ CREATE INDEX IF NOT EXISTS idx_metadata_conflicts_photo
 CREATE INDEX IF NOT EXISTS idx_metadata_conflicts_unresolved
     ON metadata_conflicts(resolved)
     WHERE resolved = 0;
+
+
+-- ============================================================
+-- Metadata proposals: sync engine output, reviewed before apply
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS metadata_proposals (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    photo_id                INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+    field                   TEXT NOT NULL
+                                CHECK(field IN ('title', 'description', 'tags')),
+    proposed_value          TEXT,                   -- JSON for tags, plain text for title/description
+    source                  TEXT NOT NULL
+                                CHECK(source IN ('flickr', 'photos', 'manual')),
+    target                  TEXT NOT NULL
+                                CHECK(target IN ('flickr', 'photos')),
+    conflict_type           TEXT NOT NULL
+                                CHECK(conflict_type IN ('non_conflict', 'divergence', 'collision')),
+    source_hash_at_creation TEXT,                   -- source field hash when proposal was created
+    target_hash_at_creation TEXT,                   -- target field hash when proposal was created
+    status                  TEXT NOT NULL DEFAULT 'pending'
+                                CHECK(status IN ('pending', 'applied', 'rejected', 'superseded')),
+    created_at              TEXT NOT NULL,
+    resolved_at             TEXT,
+    resolution_note         TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_proposals_photo
+    ON metadata_proposals(photo_id);
+CREATE INDEX IF NOT EXISTS idx_proposals_pending
+    ON metadata_proposals(status)
+    WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_proposals_field_target
+    ON metadata_proposals(field, target, status)
+    WHERE status = 'pending';
+-- Enforce the identity key: no two pending proposals with the same (photo, field, value, target, source)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_proposals_identity
+    ON metadata_proposals(photo_id, field, proposed_value, target, source)
+    WHERE status = 'pending';

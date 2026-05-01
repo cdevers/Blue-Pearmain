@@ -1440,6 +1440,87 @@ class TestSchemaMigrations(unittest.TestCase):
             run(self.tmp_path, dry_run=False)
             run(self.tmp_path, dry_run=False)  # should not raise
 
+    def test_migration_008_adds_metadata_cache_columns(self):
+        import sys as _sys, io, contextlib
+        _sys.path.insert(0, str(Path(__file__).parent.parent / "db" / "migrations"))
+        from migrate_008_metadata_cache import run
+        with contextlib.redirect_stdout(io.StringIO()):
+            run(self.tmp_path, dry_run=False)
+        cols = {r[1] for r in self.db.conn.execute("PRAGMA table_info(photos)").fetchall()}
+        for col in ("flickr_title", "flickr_description", "flickr_tags", "flickr_tags_hash",
+                    "flickr_last_updated", "photos_title", "photos_description",
+                    "photos_tags", "photos_tags_hash", "meta_synced_flickr_at",
+                    "meta_synced_photos_at", "meta_last_harmonized_at",
+                    "tags_truncated_for_flickr"):
+            self.assertIn(col, cols, f"Missing column: {col}")
+
+    def test_migration_008_creates_proposals_table(self):
+        import sys as _sys, io, contextlib
+        _sys.path.insert(0, str(Path(__file__).parent.parent / "db" / "migrations"))
+        from migrate_008_metadata_cache import run
+        with contextlib.redirect_stdout(io.StringIO()):
+            run(self.tmp_path, dry_run=False)
+        row = self.db.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='metadata_proposals'"
+        ).fetchone()
+        self.assertIsNotNone(row)
+
+    def test_migration_008_sets_baseline_harmonized_at(self):
+        import sys as _sys, io, contextlib
+        _sys.path.insert(0, str(Path(__file__).parent.parent / "db" / "migrations"))
+        from migrate_008_metadata_cache import run
+        # Seed a photo first, then run migration
+        self.db.upsert_photo({
+            "uuid": "uuid-baseline-test", "original_filename": "test.jpg",
+            "privacy_state": "needs_review", "proposed_tags": [],
+            "apple_persons": [], "apple_labels": [],
+        })
+        with contextlib.redirect_stdout(io.StringIO()):
+            run(self.tmp_path, dry_run=False)
+        row = self.db.conn.execute(
+            "SELECT meta_last_harmonized_at FROM photos WHERE uuid = 'uuid-baseline-test'"
+        ).fetchone()
+        self.assertIsNotNone(row["meta_last_harmonized_at"],
+                             "Existing rows should have meta_last_harmonized_at set")
+
+    def test_migration_008_idempotent(self):
+        import sys as _sys, io, contextlib
+        _sys.path.insert(0, str(Path(__file__).parent.parent / "db" / "migrations"))
+        from migrate_008_metadata_cache import run
+        with contextlib.redirect_stdout(io.StringIO()):
+            run(self.tmp_path, dry_run=False)
+            run(self.tmp_path, dry_run=False)  # should not raise
+
+    def test_migration_008_proposals_identity_constraint(self):
+        """The unique index on metadata_proposals prevents duplicate pending proposals."""
+        import sys as _sys, io, contextlib
+        _sys.path.insert(0, str(Path(__file__).parent.parent / "db" / "migrations"))
+        from migrate_008_metadata_cache import run
+        with contextlib.redirect_stdout(io.StringIO()):
+            run(self.tmp_path, dry_run=False)
+        photo_id = self.db.upsert_photo({
+            "uuid": "uuid-proposal-test", "original_filename": "test.jpg",
+            "privacy_state": "needs_review", "proposed_tags": [],
+            "apple_persons": [], "apple_labels": [],
+        })
+        now = "2026-01-01T00:00:00+00:00"
+        self.db.conn.execute(
+            """INSERT INTO metadata_proposals
+               (photo_id, field, proposed_value, source, target, conflict_type, created_at)
+               VALUES (?, 'tags', '["nature"]', 'flickr', 'photos', 'non_conflict', ?)""",
+            (photo_id, now),
+        )
+        self.db.conn.commit()
+        # Inserting the same pending proposal again should fail
+        with self.assertRaises(Exception):
+            self.db.conn.execute(
+                """INSERT INTO metadata_proposals
+                   (photo_id, field, proposed_value, source, target, conflict_type, created_at)
+                   VALUES (?, 'tags', '["nature"]', 'flickr', 'photos', 'non_conflict', ?)""",
+                (photo_id, now),
+            )
+            self.db.conn.commit()
+
 
 # ---------------------------------------------------------------------------
 # bp exit codes
