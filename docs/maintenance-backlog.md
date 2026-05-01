@@ -1,0 +1,64 @@
+# Maintenance backlog
+
+Small improvements noted during development; none are urgent.
+
+---
+
+## 1. Shrink thumbnail cache (30 GB → ~7 GB)
+
+**Problem:** The thumbs directory is ~30 GB because `download_thumb` prefers `url_l`
+(1024 px). For review-grid use the 500 px `url_m` size is plenty, and the detail view
+can link out to Flickr directly for full resolution.
+
+**Change:** In `poller/poller.py`, `download_thumb` and `poll`, swap the preference so
+`url_m` is tried first and `url_l` is the fallback. Also update `EXTRA_FIELDS` to keep
+requesting both sizes.
+
+**Migration:** Existing 1024 px files can be left in place or deleted and re-downloaded
+at the smaller size on the next backfill poll. A one-time script that deletes files
+larger than, say, 200 KB from `data/thumbs/` and re-queues the downloads would work,
+or just let natural re-polls repopulate them over time.
+
+---
+
+## 2. "Open in Photos" link in the per-photo review UI
+
+**Problem:** The review UI runs on `localhost`, so the Mac's URL-scheme handler is
+available. Currently there's no way to jump from a photo's detail screen into
+Photos.app.
+
+**Change:** macOS supports `x-apple-photos://<uuid>` to open a specific photo. Add an
+anchor to the per-photo template wherever `uuid` is non-NULL:
+
+```html
+<a href="x-apple-photos://{{ photo.uuid }}">Open in Photos</a>
+```
+
+Only show it when `uuid` is set (some records are Flickr-only). The link does nothing
+on non-localhost connections (iPad/iPhone), so it can be conditionally hidden via a
+`?localhost=1` query param or a config flag if the LAN review UI ever gets a separate
+template.
+
+---
+
+## 3. WAL checkpoint maintenance
+
+**Problem:** The SQLite WAL file grew to 6.5 GB without being checkpointed (observed
+2026-04-30). This happens when the process crashes or is killed mid-write, leaving
+readers that block automatic checkpoints.
+
+**Manual fix (run when the app is idle):**
+
+```bash
+sqlite3 data/curator.db "PRAGMA wal_checkpoint(TRUNCATE);"
+# Run twice if the first result is 1|N|N (active reader blocked truncation)
+```
+
+**Long-term fix options:**
+- Add `PRAGMA wal_autocheckpoint = 1000;` to the connection setup in `db/db.py` (already
+  the SQLite default, but it only truncates in PASSIVE mode, not TRUNCATE mode).
+- Or add a `bp checkpoint` CLI command / cron step that runs
+  `PRAGMA wal_checkpoint(TRUNCATE)` after the nightly `bp-all` run once all connections
+  are closed.
+- Consider `PRAGMA journal_mode = DELETE` if single-writer access is guaranteed and
+  WAL is not needed for concurrency.
