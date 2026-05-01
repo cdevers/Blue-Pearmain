@@ -34,6 +34,36 @@ when `uuid` is non-NULL. `x-apple-photos://` is not a valid macOS URL scheme.
 
 ---
 
+## 4. Reviewer UI page load performance regression
+
+**Problem:** Page loads that were nearly instant are now taking minutes (observed
+2026-05-01, after Phase 2–3 schema and code changes).
+
+**Likely suspects to investigate:**
+- Migration 008 added ~13 new columns — `SELECT *` in list/grid queries now transfers
+  much more data per row. Check whether `get_photos()` or similar fetches full rows for
+  the grid.
+- The new `flickr_tags` / `photos_tags` JSON columns store potentially long strings for
+  every row returned by the grid.
+- Missing indexes on the new columns if any reviewer query filters or sorts on them.
+- `stats()` endpoint (called on dashboard load) may now be doing a full table scan over
+  a larger schema.
+- SQLite page cache cold after WAL checkpoint + schema migration.
+
+**How to investigate:**
+```bash
+# Time individual routes
+curl -w "\nTime: %{time_total}s\n" -o /dev/null -s http://localhost:5173/
+curl -w "\nTime: %{time_total}s\n" -o /dev/null -s "http://localhost:5173/review?state=needs_review"
+
+# Check query plans
+sqlite3 data/curator.db "EXPLAIN QUERY PLAN SELECT ..."
+
+# Profile with Flask debug logging or add timing to app.py routes
+```
+
+---
+
 ## 3. WAL checkpoint maintenance
 
 **Problem:** The SQLite WAL file grew to 6.5 GB without being checkpointed (observed
