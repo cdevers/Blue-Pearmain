@@ -34,7 +34,7 @@ def main() -> int:
     parser.add_argument("--dry-run",        action="store_true",
                         help="Compare and log; do not write to Photos or DB")
     parser.add_argument("--limit",          type=int, default=500,
-                        help="Process at most N photos (default 500)")
+                        help="Process at most N photos (default 500; 0 = all)")
     parser.add_argument("--photo-id",       type=int, default=None,
                         help="Process only this DB photo_id")
     parser.add_argument("--conflicts-only", action="store_true",
@@ -79,14 +79,22 @@ def main() -> int:
     if args.photo_id:
         photo_ids = [args.photo_id]
     else:
-        rows = db.conn.execute(
-            """SELECT id FROM photos
-               WHERE flickr_id IS NOT NULL AND uuid IS NOT NULL
-                 AND (flickr_deleted IS NULL OR flickr_deleted = 0)
-               ORDER BY id
-               LIMIT ?""",
-            (args.limit,),
-        ).fetchall()
+        if args.limit == 0:
+            rows = db.conn.execute(
+                """SELECT id FROM photos
+                   WHERE flickr_id IS NOT NULL AND uuid IS NOT NULL
+                     AND (flickr_deleted IS NULL OR flickr_deleted = 0)
+                   ORDER BY id""",
+            ).fetchall()
+        else:
+            rows = db.conn.execute(
+                """SELECT id FROM photos
+                   WHERE flickr_id IS NOT NULL AND uuid IS NOT NULL
+                     AND (flickr_deleted IS NULL OR flickr_deleted = 0)
+                   ORDER BY id
+                   LIMIT ?""",
+                (args.limit,),
+            ).fetchall()
         photo_ids = [r["id"] for r in rows]
 
     if not photo_ids:
