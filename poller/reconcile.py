@@ -138,20 +138,36 @@ def check_photo(
 
 def main():
     parser = argparse.ArgumentParser(description="Blue Pearmain reconciliation")
-    parser.add_argument("--config",  default="config/config.yml")
-    parser.add_argument("--fix",     action="store_true", help="Re-push mismatches")
-    parser.add_argument("--limit",   type=int, default=500)
-    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--config",           default="config/config.yml")
+    parser.add_argument("--fix",              action="store_true", help="Re-push mismatches")
+    parser.add_argument("--apply-proposals",  action="store_true",
+                        help="Apply pending non-conflict proposals to Photos/Flickr")
+    parser.add_argument("--limit",            type=int, default=500)
+    parser.add_argument("--verbose",          action="store_true")
     args = parser.parse_args()
 
     setup_logging(args.verbose)
-    log.info("Blue Pearmain reconciliation starting")
 
     with open(args.config) as f:
         config = yaml.safe_load(f)
 
     db_path = Path(config["database"]["path"]).expanduser()
     db = Database(db_path)
+
+    # --apply-proposals: apply pending non-conflict tag proposals and exit
+    if args.apply_proposals:
+        from flickr.proposal_applier import apply_batch
+        library_path = str(Path(config.get("photos_library", {}).get("path", "")).expanduser())
+        try:
+            client = FlickrClient.from_config(config)
+        except Exception:
+            client = None
+        totals = apply_batch(db, library_path, flickr_client=client, limit=args.limit)
+        print(f"applied={totals['applied']}  superseded={totals['superseded']}  failed={totals['failed']}")
+        db.close()
+        return 1 if totals["failed"] else 0
+
+    log.info("Blue Pearmain reconciliation starting")
 
     try:
         client = FlickrClient.from_config(config)

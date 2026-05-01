@@ -47,6 +47,8 @@ def main() -> int:
                         help="Process only this DB photo_id")
     parser.add_argument("--refresh-flickr",  action="store_true",
                         help="Re-fetch Flickr metadata via API before syncing")
+    parser.add_argument("--force",           action="store_true",
+                        help="Ignore drift filter; process all photos with warm caches")
     parser.add_argument("--verbose",         action="store_true")
     args = parser.parse_args()
 
@@ -81,7 +83,7 @@ def main() -> int:
     if args.photo_id:
         photo_ids = [args.photo_id]
     else:
-        photo_ids = _select_drift_filtered(db, limit=args.limit)
+        photo_ids = _select_drift_filtered(db, limit=args.limit, force=args.force)
 
     if not photo_ids:
         print("proposals=0  hash_matches=0  skipped=0  failed=0  (nothing in drift filter)")
@@ -111,25 +113,29 @@ def main() -> int:
     return 1 if totals["failed"] else 0
 
 
-def _select_drift_filtered(db, limit: int) -> list[int]:
+def _select_drift_filtered(db, limit: int, force: bool = False) -> list[int]:
     """
     Return photo IDs where both caches are populated and harmonization is
     either never done or stale relative to the most recent cache update.
+    When force=True, skip the harmonized_at staleness check and return all
+    photos with warm caches.
     """
-    query = """
-        SELECT id FROM photos
-        WHERE flickr_id IS NOT NULL
-          AND uuid IS NOT NULL
-          AND meta_synced_flickr_at IS NOT NULL
-          AND meta_synced_photos_at IS NOT NULL
-          AND (flickr_deleted IS NULL OR flickr_deleted = 0)
+    drift_clause = "" if force else """
           AND (
             meta_last_harmonized_at IS NULL
             OR meta_last_harmonized_at < MAX(
                 COALESCE(flickr_last_updated, meta_synced_flickr_at),
                 meta_synced_photos_at
             )
-          )
+          )"""
+    query = f"""
+        SELECT id FROM photos
+        WHERE flickr_id IS NOT NULL
+          AND uuid IS NOT NULL
+          AND meta_synced_flickr_at IS NOT NULL
+          AND meta_synced_photos_at IS NOT NULL
+          AND (flickr_deleted IS NULL OR flickr_deleted = 0)
+          {drift_clause}
         ORDER BY id
     """
     if limit and limit > 0:
@@ -149,7 +155,7 @@ def _refresh_flickr_cache(db, config: dict, args) -> int:
         log.error("Cannot initialise Flickr client: %s", e)
         return 2
 
-    photo_ids = _select_drift_filtered(db, limit=args.limit) if not args.photo_id else [args.photo_id]
+    photo_ids = _select_drift_filtered(db, limit=args.limit, force=args.force) if not args.photo_id else [args.photo_id]
     if not photo_ids:
         return 0
 

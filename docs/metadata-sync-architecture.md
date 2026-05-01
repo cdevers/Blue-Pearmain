@@ -279,30 +279,67 @@ processed in ~2.5 s; 60,220 hash matches (already in sync), ~11,226 proposals.
 
 ---
 
-### Phase 5 — Proposal review UI and apply step (tags)
+### Phase 5 — Proposal review UI and apply step (tags) ✓ done
 *Depends on Phase 4.*
 
-Add `/proposals` page to the reviewer UI:
-- Group by conflict type (collisions first, then divergences, then non-conflicts).
-- Non-conflicts: bulk-approve button ("apply all tag additions to Photos").
-- Divergences: recommended action pre-selected; one click to confirm.
-- Collisions: explicit side-selection per field.
+`/proposals` page in the reviewer UI groups by conflict type (collisions first, then
+divergences, then non-conflicts). 11,226 proposals generated on first run across 70,946
+photos (10,226 non-conflicts, 1,000 collisions, 0 divergences).
 
-Add `bp reconcile --fix` apply step for tags:
-- For each `pending` proposal with `target = 'photos'`: write via photoscript, verify by re-reading, mark `applied` only on confirmed success.
-- For each `pending` proposal with `target = 'flickr'`: call Flickr API, mark `applied` on success.
-- Failures leave status as `pending`; the next run retries automatically.
-- Respects 75-tag limit (see truncation policy above).
+- **Non-conflicts:** bulk-approve button applies all in one step.
+- **Divergences:** single Approve/Reject per card.
+- **Collisions:** "Use Flickr" / "Use Photos" buttons per card; approving either side
+  auto-rejects the sibling proposal. Collision pairs are deduplicated in the display
+  (only flickr→photos direction shown; photos→flickr sibling resolved automatically).
+- **Keyboard shortcuts:** `p` = approve / use Photos, `f` = use Flickr (collisions only),
+  `x` = reject / skip, `j`/`k` = navigate.
+- `bp reconcile --apply-proposals` applies pending non-conflict proposals from the CLI.
+- `flickr/proposal_applier.py`: apply-time staleness and target-drift re-checks, photoscript
+  verify-after-write, 75-tag truncation for Flickr target.
 
-**Files to change:**
-- `reviewer/app.py` + `reviewer/templates/proposals.html`
+**Files changed:**
+- `flickr/proposal_applier.py` (new)
+- `reviewer/app.py` + `reviewer/templates/proposals.html` (new)
 - `poller/reconcile.py`
-
-**Completion criteria:** tag proposals can be reviewed and applied end-to-end; full pipeline tested.
 
 ---
 
-### Phase 6 — Expand to title and description
+### Phase 6 — Manual merge editor for collision resolution
+*Depends on Phase 5.*
+
+Collisions currently require picking one side wholesale ("Use Flickr" or "Use Photos").
+This phase adds an inline merge editor so users can construct a custom tag set from
+elements of both sides — or add entirely new tags — without accepting either side entirely.
+
+**UI on the `/proposals` page, collision cards only:**
+- Expand/collapse inline editor triggered by an **Edit ✎** button (or `m` keyboard shortcut).
+- Both tag sets rendered as toggleable chips: checked = include in merged result.
+- All tags from both sides pre-checked by default; user unchecks to exclude.
+- Free-text input to add new tags not present on either side.
+- "Apply merged →" button sends the custom value to both Flickr and Photos simultaneously.
+- Merged result stored with `source = 'manual'` in `metadata_proposals` (already supported
+  by the schema).
+
+**Backend:**
+- New endpoint `POST /api/proposals/<id>/apply-manual` accepting `{"value": [...tags...]}`.
+- Applies the custom tag list to both targets; marks proposal `applied` and
+  auto-rejects the collision sibling.
+- Same staleness and drift re-checks as the regular apply path.
+
+**Keyboard shortcut:** `m` on a selected collision card opens the inline editor.
+Non-collision cards ignore `m`.
+
+**Files to change:**
+- `reviewer/app.py`
+- `reviewer/templates/proposals.html`
+- `flickr/proposal_applier.py` (extend to accept an explicit value override)
+
+**Completion criteria:** user can resolve any tag collision without accepting either side
+wholesale; merged result is applied to both Flickr and Photos in a single action.
+
+---
+
+### Phase 7 — Expand to title and description
 *Depends on Phase 5. Same pipeline, new fields.*
 
 Extend Phases 2–5 to cover `flickr_title`/`photos_title` and `flickr_description`/`photos_description`. These fields have no hash optimization needed (short strings). Collision handling in the UI becomes the main addition.
@@ -312,12 +349,12 @@ Extend Phases 2–5 to cover `flickr_title`/`photos_title` and `flickr_descripti
 - `canonical_pushed_to_flickr_at`, `canonical_pushed_to_photos_at` — per-field push confirmation timestamps.
 
 **Files to change:**
-- `db/schema.sql` + `db/migrations/migrate_009_canonical_metadata.py`
+- `db/schema.sql` + `db/migrations/migrate_010_canonical_metadata.py`
 - All files touched in Phases 2–5, extended for title/description
 
 ---
 
-### Phase 7 — Scheduled sync (cron / launchd)
+### Phase 8 — Scheduled sync (cron / launchd)
 *Depends on Phases 2–5.*
 
 Add a `bp cron` command or `launchd` plist that schedules:
@@ -353,7 +390,8 @@ bp sync-metadata (after poll — reads DB only, no API calls)
 /proposals UI (human, on demand)
   ├─► bulk-approve non-conflicts
   ├─► confirm divergences
-  └─► manually resolve collisions
+  ├─► pick a side for collisions (Use Flickr / Use Photos)
+  └─► manual merge editor for collisions (Phase 6) — custom tag set → both targets
 
 bp reconcile --fix (after sync-metadata)
   ├─► apply approved proposals → Flickr (tags ≤75) → mark applied on confirmed success
@@ -374,6 +412,7 @@ bp reconcile --fix (after sync-metadata)
 
 ## Migration numbering
 
-As of writing, migrations 001–007 exist. This work will consume:
-- `migrate_008_metadata_cache.py` — Phase 1 (`flickr_*`/`photos_*` columns, `metadata_proposals` table)
-- `migrate_009_canonical_metadata.py` — Phase 6 (`canonical_*` columns, push-tracking timestamps)
+- `migrate_001` through `migrate_007` — pre-existing
+- `migrate_008_metadata_cache.py` — Phase 1 (`flickr_*`/`photos_*` columns, `metadata_proposals` table) ✓
+- `migrate_009_review_queue_index.py` — performance: covering index on `photos(privacy_state, date_taken DESC, id DESC)` ✓
+- `migrate_010_canonical_metadata.py` — Phase 7 (`canonical_*` columns, push-tracking timestamps)

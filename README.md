@@ -67,7 +67,7 @@ Apple Photos Library          Flickr (cloud)
 | `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at, indexes on push state and tags, schema_migrations table |
 | `db/migrate_003_dimensions_and_dedup.py` | DB migration: adds width/height columns and duplicate_groups table |
 | `bp` | Unified command-line entry point |
-| `tests/` | Unit tests (263 tests) |
+| `tests/` | Unit tests (285 tests) |
 
 ## Requirements
 
@@ -497,7 +497,7 @@ All scripts are idempotent and safe to re-run.
 python -m pytest tests/ -q
 ```
 
-263 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, metadata-sync batch behaviour (PhotosDB caching, progress logging, flickr_deleted detection), Phase 2 Flickr metadata cache writes (flickr_title, flickr_tags JSON/hash, flickr_last_updated, meta_synced_flickr_at), and Phase 3 DB-cache-first reads in sync-metadata (cache hit/miss logic, API call avoidance), Phase 4 scanner Photos metadata cache writes (photos_title/description/tags/hash, meta_synced_photos_at, skip-condition update), and the reviewer "Open in Photos" API endpoint (AppleScript via osascript, template rendering, absent-when-no-uuid).
+285 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, metadata-sync batch behaviour (PhotosDB caching, progress logging, flickr_deleted detection), Phase 2 Flickr metadata cache writes (flickr_title, flickr_tags JSON/hash, flickr_last_updated, meta_synced_flickr_at), Phase 3 DB-cache-first reads in sync-metadata (cache hit/miss logic, API call avoidance), Phase 4 scanner Photos metadata cache writes (photos_title/description/tags/hash, meta_synced_photos_at, skip-condition update), Phase 4 sync engine (classify_tags, run_sync_engine, upsert_proposal), Phase 5 proposal applier (apply_proposal, apply_batch, staleness checks), drift filter with --force bypass, and the reviewer "Open in Photos" API endpoint (AppleScript via osascript, template rendering, absent-when-no-uuid).
 
 ## License
 

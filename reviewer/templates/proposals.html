@@ -1,0 +1,448 @@
+{% extends "base.html" %}
+{% block title %}Proposals — Blue Pearmain{% endblock %}
+
+{% block extra_style %}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex-wrap: wrap;
+}
+.toolbar .count { color: var(--muted); font-size: 13px; }
+.toolbar .spacer { flex: 1; }
+
+.type-pills { display: flex; gap: 8px; }
+.type-pill {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.pill-collision   { background: rgba(139,32,32,0.3); color: #f88; border: 1px solid #8b2020; }
+.pill-divergence  { background: rgba(122,92,0,0.3);  color: #fc9; border: 1px solid #7a5c00; }
+.pill-non-conflict{ background: rgba(45,125,70,0.3); color: #8e8; border: 1px solid #2d7d46; }
+
+.proposal-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 12px 24px;
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  overflow: hidden;
+}
+.proposal-card.collision  { border-left: 3px solid #8b2020; }
+.proposal-card.divergence { border-left: 3px solid #7a5c00; }
+.proposal-card.non_conflict { border-left: 3px solid #2d7d46; }
+
+.proposal-card .thumb {
+  width: 120px;
+  aspect-ratio: 4/3;
+  object-fit: cover;
+  background: var(--border);
+  display: block;
+  align-self: stretch;
+}
+.proposal-card .body { padding: 12px 16px; min-width: 0; }
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.card-header .filename {
+  font-size: 12px;
+  color: var(--muted);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-header a { font-size: 12px; color: var(--muted); }
+
+.tag-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.tag-side { font-size: 12px; }
+.tag-side .side-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.tag-side.flickr .side-label { color: #6ab4f5; }
+.tag-side.photos .side-label { color: #a0d8a0; }
+.tag-side .tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.tag-chip {
+  background: var(--border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--text);
+}
+.tag-chip.new { background: rgba(45,125,70,0.3); color: #8e8; }
+.tag-empty { color: var(--muted); font-style: italic; font-size: 11px; }
+
+.proposed-action {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+.proposed-action strong { color: var(--text); }
+
+.card-actions { display: flex; gap: 8px; }
+.btn-approve {
+  background: var(--green);
+  border: 1px solid #3d9e5a;
+  color: #fff;
+  padding: 5px 14px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--font);
+}
+.btn-approve:hover { background: #3d9e5a; }
+.btn-reject {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 5px 14px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--font);
+}
+.btn-reject:hover { border-color: #8b2020; color: #f88; }
+.btn-bulk {
+  background: var(--green);
+  border: 1px solid #3d9e5a;
+  color: #fff;
+  padding: 6px 16px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-weight: 600;
+}
+.btn-bulk:hover { background: #3d9e5a; }
+.btn-bulk:disabled { opacity: 0.5; cursor: default; }
+
+.empty-state {
+  padding: 60px 24px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.proposal-card.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.section-heading {
+  padding: 8px 24px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+.section-heading:first-child { border-top: none; margin-top: 0; }
+
+.pagination {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  padding: 20px;
+}
+.pagination a, .pagination span {
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  border: 1px solid var(--border);
+}
+.pagination a { color: var(--accent); }
+.pagination span { color: var(--muted); background: var(--surface); }
+{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <span class="count">{{ total }} pending proposal{{ 's' if total != 1 }}</span>
+  <div class="type-pills">
+    {% if counts.collision %}
+    <span class="type-pill pill-collision">{{ counts.collision }} collision{{ 's' if counts.collision != 1 }}</span>
+    {% endif %}
+    {% if counts.divergence %}
+    <span class="type-pill pill-divergence">{{ counts.divergence }} divergence{{ 's' if counts.divergence != 1 }}</span>
+    {% endif %}
+    {% if counts.non_conflict %}
+    <span class="type-pill pill-non-conflict">{{ counts.non_conflict }} non-conflict{{ 's' if counts.non_conflict != 1 }}</span>
+    {% endif %}
+  </div>
+  <span class="spacer"></span>
+  {% if counts.non_conflict %}
+  <button class="btn-bulk" id="btn-bulk-approve"
+          onclick="bulkApprove('non_conflict', this)">
+    Apply all {{ counts.non_conflict }} non-conflict{{ 's' if counts.non_conflict != 1 }} →
+  </button>
+  {% endif %}
+  <div class="kbd-hints">
+    <span><kbd>j</kbd>/<kbd>k</kbd> navigate</span>
+    <span><kbd>p</kbd> approve / use Photos</span>
+    <span><kbd>f</kbd> use Flickr <span style="color:#444">(collisions)</span></span>
+    <span><kbd>x</kbd> reject / skip</span>
+  </div>
+</div>
+
+{% if not proposals %}
+<div class="empty-state">
+  <p>No pending proposals.</p>
+  <p style="margin-top:8px; font-size:12px">Run <code>bp sync-metadata</code> to generate proposals from the tag cache.</p>
+</div>
+{% else %}
+
+{% set ns = namespace(last_type=None) %}
+{% for p in proposals %}
+  {% if p.conflict_type != ns.last_type %}
+    {% set ns.last_type = p.conflict_type %}
+    <div class="section-heading">
+      {% if p.conflict_type == 'collision' %}🔴 Collisions — both sides differ, choose one
+      {% elif p.conflict_type == 'divergence' %}🟡 Divergences — one side is a superset
+      {% else %}🟢 Non-conflicts — one side is empty
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% set flickr_set = p.flickr_tags | map('lower') | list %}
+  {% set photos_set = p.photos_tags | map('lower') | list %}
+  {% set proposed_set = p.proposed_value | map('lower') | list %}
+
+  <div class="proposal-card {{ p.conflict_type }}" id="card-{{ p.id }}">
+    <img class="thumb"
+         src="{{ url_for('thumb', photo_id=p.photo_id) }}"
+         alt="{{ p.original_filename or '' }}"
+         loading="lazy">
+    <div class="body">
+      <div class="card-header">
+        <span class="type-pill pill-{{ p.conflict_type | replace('_','-') }}">{{ p.conflict_type | replace('_',' ') }}</span>
+        <span class="filename">{{ p.original_filename or p.flickr_id or '?' }}</span>
+        <a href="{{ url_for('photo_detail', photo_id=p.photo_id) }}" target="_blank">view ↗</a>
+      </div>
+
+      <div class="tag-comparison">
+        <div class="tag-side flickr">
+          <div class="side-label">Flickr ({{ p.flickr_tags | length }} tags)</div>
+          <div class="tag-list">
+            {% if p.flickr_tags %}
+              {% for t in p.flickr_tags %}
+                <span class="tag-chip {% if t | lower not in photos_set %}new{% endif %}">{{ t }}</span>
+              {% endfor %}
+            {% else %}
+              <span class="tag-empty">no tags</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="tag-side photos">
+          <div class="side-label">Photos ({{ p.photos_tags | length }} tags)</div>
+          <div class="tag-list">
+            {% if p.photos_tags %}
+              {% for t in p.photos_tags %}
+                <span class="tag-chip {% if t | lower not in flickr_set %}new{% endif %}">{{ t }}</span>
+              {% endfor %}
+            {% else %}
+              <span class="tag-empty">no tags</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="proposed-action">
+        {% if p.conflict_type == 'non_conflict' %}
+          Apply <strong>{{ p.source }}</strong> tags → <strong>{{ p.target }}</strong>
+          ({{ p.proposed_value | length }} tag{{ 's' if p.proposed_value | length != 1 }})
+        {% elif p.conflict_type == 'divergence' %}
+          Add {{ (p.proposed_value | length) - (p.photos_tags if p.target == 'photos' else p.flickr_tags) | length }} missing tag{{ 's' if True }} from <strong>{{ p.source }}</strong> → <strong>{{ p.target }}</strong>
+        {% else %}
+          Both sides differ — choose which wins
+        {% endif %}
+      </div>
+
+      <div class="card-actions">
+        {% if p.conflict_type == 'collision' %}
+        <button class="btn-approve" onclick="approveProposal({{ p.id }}, this)">Use Flickr ✓</button>
+        <button class="btn-approve" onclick="approveReverse({{ p.id }}, this)">Use Photos ✓</button>
+        <button class="btn-reject"  onclick="rejectProposal({{ p.id }}, this)">Skip ↷</button>
+        {% else %}
+        <button class="btn-approve" onclick="approveProposal({{ p.id }}, this)">Approve ✓</button>
+        <button class="btn-reject"  onclick="rejectProposal({{ p.id }}, this)">Reject ✕</button>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% endfor %}
+
+{% if total_pages > 1 %}
+<div class="pagination">
+  {% if page > 1 %}
+    <a href="?page={{ page - 1 }}">← Prev</a>
+  {% endif %}
+  <span>Page {{ page }} / {{ total_pages }}</span>
+  {% if page < total_pages %}
+    <a href="?page={{ page + 1 }}">Next →</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function approveProposal(id, btn) {
+  btn.disabled = true;
+  btn.textContent = '…';
+  const r = await fetch('/api/proposals/' + id + '/approve', {method: 'POST'});
+  const d = await r.json();
+  if (d.ok) {
+    document.getElementById('card-' + id).style.opacity = '0.3';
+    btn.textContent = 'Applied ✓';
+  } else {
+    btn.disabled = false;
+    btn.textContent = 'Approve ✓';
+    toast('Could not apply: ' + (d.reason || 'unknown error'), 'err');
+  }
+}
+
+async function approveReverse(id, btn) {
+  btn.disabled = true;
+  btn.textContent = '…';
+  const r = await fetch('/api/proposals/' + id + '/approve-reverse', {method: 'POST'});
+  const d = await r.json();
+  if (d.ok) {
+    document.getElementById('card-' + id).style.opacity = '0.3';
+    btn.textContent = 'Applied ✓';
+  } else {
+    btn.disabled = false;
+    btn.textContent = 'Use Photos ✓';
+    toast('Could not apply: ' + (d.reason || 'unknown error'), 'err');
+  }
+}
+
+async function rejectProposal(id, btn) {
+  btn.disabled = true;
+  const r = await fetch('/api/proposals/' + id + '/reject', {method: 'POST'});
+  const d = await r.json();
+  if (d.ok) {
+    document.getElementById('card-' + id).style.opacity = '0.3';
+  } else {
+    btn.disabled = false;
+    toast('Reject failed', 'err');
+  }
+}
+
+async function bulkApprove(conflictType, btn) {
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = 'Applying…';
+  const r = await fetch('/api/proposals/bulk-approve', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({conflict_type: conflictType}),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    toast(`Applied ${d.applied}, failed ${d.failed}`, d.failed ? 'err' : 'ok');
+    setTimeout(() => location.reload(), 1000);
+  } else {
+    btn.disabled = false;
+    btn.textContent = orig;
+    toast('Bulk approve failed', 'err');
+  }
+}
+
+// Keyboard navigation — same p/x/j/k muscle memory as the reviewer
+let _selected = null;
+
+function _cards() {
+  return [...document.querySelectorAll('.proposal-card:not([style*="opacity: 0.3"])')];
+}
+
+function _select(card) {
+  if (_selected) _selected.classList.remove('selected');
+  _selected = card;
+  if (!card) return;
+  card.classList.add('selected');
+  card.scrollIntoView({block: 'nearest'});
+}
+
+// Click a card to select it
+document.addEventListener('click', e => {
+  const card = e.target.closest('.proposal-card');
+  if (card && !e.target.closest('button') && !e.target.closest('a')) _select(card);
+});
+
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input, textarea, select')) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  const cards = _cards();
+  const idx = _selected ? cards.indexOf(_selected) : -1;
+
+  const isCollision = _selected?.classList.contains('collision');
+
+  if (e.key === 'j' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    _select(cards[idx + 1] ?? cards[0]);
+  } else if (e.key === 'k' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    _select(cards[idx > 0 ? idx - 1 : cards.length - 1]);
+  } else if ((e.key === 'p' || e.key === 'P') && _selected) {
+    // p = Use Photos (on collision) or Approve (on non-conflict/divergence)
+    const id = +_selected.id.replace('card-', '');
+    _select(cards[idx + 1] ?? null);
+    if (isCollision) {
+      const btn = _selected.querySelectorAll('.btn-approve')[1];
+      approveReverse(id, btn);
+    } else {
+      const btn = _selected.querySelector('.btn-approve');
+      approveProposal(id, btn);
+    }
+  } else if ((e.key === 'f' || e.key === 'F') && _selected && isCollision) {
+    // f = Use Flickr (collision only)
+    const id = +_selected.id.replace('card-', '');
+    const btn = _selected.querySelector('.btn-approve');
+    _select(cards[idx + 1] ?? null);
+    approveProposal(id, btn);
+  } else if ((e.key === 'x' || e.key === 'X') && _selected) {
+    const id = +_selected.id.replace('card-', '');
+    const btn = _selected.querySelector('.btn-reject');
+    _select(cards[idx + 1] ?? null);
+    rejectProposal(id, btn);
+  }
+});
+
+// Auto-select first card on load
+const _first = _cards()[0];
+if (_first) _select(_first);
+</script>
+{% endblock %}

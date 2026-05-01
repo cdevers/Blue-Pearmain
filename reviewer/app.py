@@ -724,6 +724,75 @@ def api_conflict_resolve(conflict_id: int):
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/proposals")
+def proposals():
+    page     = int(request.args.get("page", 1))
+    per_page = int(request.args.get("per_page", 50))
+    offset   = (page - 1) * per_page
+    items    = db().get_pending_proposals(limit=per_page, offset=offset)
+    counts   = db().get_proposal_counts()
+    total    = counts["total"]
+    return render_template(
+        "proposals.html",
+        proposals=items,
+        counts=counts,
+        page=page,
+        total_pages=max(1, (total + per_page - 1) // per_page),
+        total=total,
+    )
+
+
+@app.route("/api/proposals/<int:proposal_id>/approve", methods=["POST"])
+def api_proposal_approve(proposal_id: int):
+    from flickr.proposal_applier import apply_proposal
+    library_path = str(Path(_config.get("photos_library", {}).get("path", "")).expanduser())
+    result = apply_proposal(db(), proposal_id, library_path, flickr_client=client())
+    if result.get("ok"):
+        sibling = db().find_collision_sibling(proposal_id)
+        if sibling:
+            db().resolve_proposal(sibling, "rejected", "collision sibling approved")
+    return jsonify(result)
+
+
+@app.route("/api/proposals/<int:proposal_id>/approve-reverse", methods=["POST"])
+def api_proposal_approve_reverse(proposal_id: int):
+    """Approve the opposite-direction sibling of a collision proposal."""
+    from flickr.proposal_applier import apply_proposal
+    library_path = str(Path(_config.get("photos_library", {}).get("path", "")).expanduser())
+    sibling = db().find_collision_sibling(proposal_id)
+    if not sibling:
+        return jsonify({"ok": False, "reason": "sibling proposal not found"})
+    result = apply_proposal(db(), sibling, library_path, flickr_client=client())
+    if result.get("ok"):
+        db().resolve_proposal(proposal_id, "rejected", "collision sibling approved")
+    return jsonify(result)
+
+
+@app.route("/api/proposals/<int:proposal_id>/reject", methods=["POST"])
+def api_proposal_reject(proposal_id: int):
+    _d = db()
+    _d.resolve_proposal(proposal_id, "rejected")
+    sibling = _d.find_collision_sibling(proposal_id)
+    if sibling:
+        _d.resolve_proposal(sibling, "rejected", "collision sibling rejected")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/proposals/bulk-approve", methods=["POST"])
+def api_proposals_bulk_approve():
+    from flickr.proposal_applier import apply_batch
+    data          = request.get_json() or {}
+    conflict_type = data.get("conflict_type", "non_conflict")
+    library_path  = str(Path(_config.get("photos_library", {}).get("path", "")).expanduser())
+    totals = apply_batch(
+        db(), library_path,
+        flickr_client=client(),
+        conflict_types=[conflict_type],
+        limit=500,
+    )
+    return jsonify({"ok": True, **totals})
+
+
 @app.route("/api/push_approved", methods=["POST"])
 def api_push_approved():
     """

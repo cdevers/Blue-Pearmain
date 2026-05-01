@@ -3309,6 +3309,30 @@ class TestSyncMetadataCLI(unittest.TestCase):
         result = self._run_cli(["--verbose"])
         self.assertIn("proposals=", result.stdout)
 
+    def test_force_bypasses_drift_filter(self):
+        # Insert a photo with warm caches AND a recent harmonized_at (would be
+        # excluded by drift filter). --force should still process it.
+        now = "2026-01-01T12:00:00+00:00"
+        later = "2026-01-01T13:00:00+00:00"
+        self.db.conn.execute(
+            """INSERT INTO photos
+               (flickr_id, uuid, meta_synced_flickr_at, meta_synced_photos_at,
+                meta_last_harmonized_at,
+                flickr_tags, photos_tags, flickr_tags_hash, photos_tags_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("111", "AAA-111", now, now, later,
+             '["beach"]', '[]',
+             "hash1", "hash2"),
+        )
+        self.db.conn.commit()
+        # Without --force, drift filter sees 0 (harmonized_at is newer than caches)
+        result_normal = self._run_cli()
+        self.assertIn("nothing in drift filter", result_normal.stdout)
+        # With --force, photo is included
+        result_force = self._run_cli(["--force"])
+        self.assertIn("proposals=", result_force.stdout)
+        self.assertNotIn("nothing in drift filter", result_force.stdout)
+
 
 # ---------------------------------------------------------------------------
 # End-to-end reconcile lifecycle: mismatch → fix → idempotent clean
@@ -3931,6 +3955,136 @@ class TestRunSyncEngine(unittest.TestCase):
         props = self._pending_proposals()
         self.assertEqual(len(props), 2)
         self.assertTrue(all(p["conflict_type"] == "collision" for p in props))
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — proposal applier and proposals UI
+# ---------------------------------------------------------------------------
+
+class TestApplyProposal(unittest.TestCase):
+    """apply_proposal staleness checks and rejection logic."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        self.db.upsert_photo({
+            "flickr_id": "F1", "uuid": "U1",
+            "privacy_state": "candidate_public",
+            "flickr_tags": '["nature"]', "flickr_tags_hash": "FH1",
+            "photos_tags": '[]',         "photos_tags_hash": "PH_EMPTY",
+            "meta_synced_flickr_at": "2026-01-01T00:00:00+00:00",
+            "meta_synced_photos_at": "2026-01-01T00:00:00+00:00",
+        })
+        self.photo_id = self.db.get_photo_by_flickr_id("F1")["id"]
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _insert_proposal(self, source_hash="FH1", target_hash="PH_EMPTY"):
+        self.db.upsert_proposal({
+            "photo_id": self.photo_id, "field": "tags",
+            "proposed_value": '["nature"]',
+            "source": "flickr", "target": "photos",
+            "conflict_type": "non_conflict",
+            "source_hash_at_creation": source_hash,
+            "target_hash_at_creation": target_hash,
+            "created_at": "2026-01-01T00:00:00+00:00",
+        })
+        self.db.conn.commit()
+        return self.db.conn.execute(
+            "SELECT id FROM metadata_proposals WHERE photo_id=? ORDER BY id DESC LIMIT 1",
+            (self.photo_id,)
+        ).fetchone()["id"]
+
+    def test_source_changed_supersedes(self):
+        from flickr.proposal_applier import apply_proposal
+        pid = self._insert_proposal(source_hash="STALE_HASH")
+        result = apply_proposal(self.db, pid, library_path="")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason"], "source_changed")
+        status = self.db.conn.execute(
+            "SELECT status FROM metadata_proposals WHERE id=?", (pid,)
+        ).fetchone()["status"]
+        self.assertEqual(status, "superseded")
+
+    def test_target_changed_supersedes(self):
+        from flickr.proposal_applier import apply_proposal
+        pid = self._insert_proposal(target_hash="STALE_TARGET")
+        result = apply_proposal(self.db, pid, library_path="")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason"], "target_changed")
+
+    def test_already_applied_returns_error(self):
+        from flickr.proposal_applier import apply_proposal
+        pid = self._insert_proposal()
+        self.db.resolve_proposal(pid, "applied")
+        result = apply_proposal(self.db, pid, library_path="")
+        self.assertFalse(result["ok"])
+        self.assertIn("applied", result["reason"])
+
+    def test_photos_not_running_returns_error(self):
+        from unittest.mock import patch
+        from flickr.proposal_applier import apply_proposal
+        pid = self._insert_proposal()
+        with patch("flickr.proposal_applier._photos_is_running", return_value=False):
+            result = apply_proposal(self.db, pid, library_path="/fake/path")
+        self.assertFalse(result["ok"])
+        self.assertIn("Photos", result["reason"])
+
+
+class TestGetPendingProposals(unittest.TestCase):
+    """db.get_pending_proposals ordering and filtering."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        # One photo per conflict type to avoid idempotency deduplication
+        for fid in ("A", "B", "C"):
+            self.db.upsert_photo({"flickr_id": fid, "uuid": f"U-{fid}",
+                                   "privacy_state": "candidate_public"})
+        self.pid_a = self.db.get_photo_by_flickr_id("A")["id"]
+        self.pid_b = self.db.get_photo_by_flickr_id("B")["id"]
+        self.pid_c = self.db.get_photo_by_flickr_id("C")["id"]
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _add(self, photo_id, conflict_type, target="photos"):
+        self.db.upsert_proposal({
+            "photo_id": photo_id, "field": "tags",
+            "proposed_value": '["x"]',
+            "source": "flickr", "target": target,
+            "conflict_type": conflict_type,
+            "source_hash_at_creation": "SH", "target_hash_at_creation": "TH",
+            "created_at": "2026-01-01T00:00:00+00:00",
+        })
+        self.db.conn.commit()
+
+    def test_collision_sorts_first(self):
+        self._add(self.pid_a, "non_conflict")
+        self._add(self.pid_b, "collision")
+        self._add(self.pid_c, "divergence")
+        items = self.db.get_pending_proposals()
+        types = [p["conflict_type"] for p in items]
+        self.assertEqual(types[0], "collision")
+        self.assertEqual(types[1], "divergence")
+        self.assertEqual(types[2], "non_conflict")
+
+    def test_filter_by_conflict_type(self):
+        self._add(self.pid_a, "non_conflict")
+        self._add(self.pid_b, "collision")
+        items = self.db.get_pending_proposals(conflict_type="non_conflict")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["conflict_type"], "non_conflict")
+
+    def test_proposed_value_decoded_as_list(self):
+        self._add(self.pid_a, "non_conflict")
+        items = self.db.get_pending_proposals()
+        self.assertIsInstance(items[0]["proposed_value"], list)
 
 
 # ---------------------------------------------------------------------------

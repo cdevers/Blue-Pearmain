@@ -832,12 +832,89 @@ class Database:
             ),
         )
 
+    def get_pending_proposals(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        conflict_type: str | None = None,
+    ) -> list[dict]:
+        """Return pending proposals joined with photo metadata, collisions first.
+
+        For collision proposals, only the flickr→photos direction is returned
+        (source='flickr'). The sibling photos→flickr proposal exists in the DB
+        and is resolved automatically when the displayed proposal is actioned.
+        """
+        type_filter = "AND mp.conflict_type = ?" if conflict_type else ""
+        # Suppress the photos→flickr half of each collision pair from display
+        collision_filter = "AND NOT (mp.conflict_type = 'collision' AND mp.source = 'photos')"
+        params: list = ([conflict_type] if conflict_type else []) + [limit, offset]
+        rows = self.conn.execute(
+            f"""SELECT mp.id, mp.photo_id, mp.field, mp.proposed_value,
+                       mp.source, mp.target, mp.conflict_type, mp.created_at,
+                       mp.source_hash_at_creation, mp.target_hash_at_creation,
+                       p.flickr_id, p.uuid, p.original_filename, p.thumbnail_path,
+                       p.flickr_tags, p.photos_tags
+                FROM metadata_proposals mp
+                JOIN photos p ON p.id = mp.photo_id
+                WHERE mp.status = 'pending' {type_filter} {collision_filter}
+                ORDER BY
+                  CASE mp.conflict_type
+                    WHEN 'collision'  THEN 1
+                    WHEN 'divergence' THEN 2
+                    ELSE                   3
+                  END,
+                  mp.id
+                LIMIT ? OFFSET ?""",
+            params,
+        ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["flickr_tags"]    = _json_loads_safe(d.get("flickr_tags"))
+            d["photos_tags"]    = _json_loads_safe(d.get("photos_tags"))
+            d["proposed_value"] = _json_loads_safe(d.get("proposed_value"))
+            result.append(d)
+        return result
+
+    def resolve_proposal(
+        self, proposal_id: int, status: str, note: str | None = None
+    ) -> None:
+        assert status in ("rejected", "applied", "superseded")
+        self.conn.execute(
+            """UPDATE metadata_proposals
+               SET status=?, resolved_at=?, resolution_note=? WHERE id=?""",
+            (status, _now_iso(), note, proposal_id),
+        )
+        self.conn.commit()
+
+    def find_collision_sibling(self, proposal_id: int) -> int | None:
+        """Return the id of the opposite-direction collision proposal, if pending."""
+        p = self.conn.execute(
+            "SELECT photo_id, field, source FROM metadata_proposals WHERE id=?",
+            (proposal_id,),
+        ).fetchone()
+        if not p:
+            return None
+        sibling = self.conn.execute(
+            """SELECT id FROM metadata_proposals
+               WHERE photo_id=? AND field=? AND source!=? AND status='pending'
+                 AND conflict_type='collision'""",
+            (p["photo_id"], p["field"], p["source"]),
+        ).fetchone()
+        return sibling["id"] if sibling else None
+
     def get_proposal_counts(self) -> dict:
-        """Return pending proposal counts by conflict_type."""
+        """Return pending proposal counts by conflict_type (display-facing).
+
+        Collision proposals exist in pairs (flickr→photos and photos→flickr).
+        Only the flickr→photos direction is shown in the UI, so collisions are
+        counted once per photo rather than twice.
+        """
         rows = self.conn.execute(
             """SELECT conflict_type, COUNT(*) AS n
                FROM metadata_proposals
                WHERE status = 'pending'
+                 AND NOT (conflict_type = 'collision' AND source = 'photos')
                GROUP BY conflict_type"""
         ).fetchall()
         counts = {r["conflict_type"]: r["n"] for r in rows}
@@ -871,4 +948,8 @@ class Database:
             result["metadata_conflicts"] = self.get_conflict_counts()
         except Exception:
             result["metadata_conflicts"] = {"total": 0, "title": 0, "description": 0, "tags": 0}
+        try:
+            result["proposals"] = self.get_proposal_counts()
+        except Exception:
+            result["proposals"] = {"total": 0, "non_conflict": 0, "divergence": 0, "collision": 0}
         return result
