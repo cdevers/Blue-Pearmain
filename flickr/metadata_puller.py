@@ -170,9 +170,13 @@ def _classify_tags(
     ptags_raw = json.loads(photos_tags_json) if photos_tags_json else []
 
     def norm(tag: str) -> str:
-        # Flickr silently strips spaces from tags ("harvard square" → "harvardsquare"),
-        # so ignore internal spaces when comparing across sides.
-        return unicodedata.normalize("NFC", tag.strip().casefold()).replace(" ", "")
+        # Flickr normalizes tags to alphanumeric-only, silently stripping spaces,
+        # hyphens, and other punctuation ("close-up" → "closeup", "new york" →
+        # "newyork"). Keep only isalnum() chars so comparisons match Flickr's view.
+        return "".join(
+            c for c in unicodedata.normalize("NFC", tag.strip().casefold())
+            if c.isalnum()
+        )
 
     ftags_norm = {norm(t) for t in ftags_raw if t.strip()}
     ptags_norm = {norm(t) for t in ptags_raw if t.strip()}
