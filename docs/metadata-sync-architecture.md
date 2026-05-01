@@ -1,81 +1,151 @@
 # Metadata Sync Architecture
 
-**Goal:** Make the local SQLite database a cache of "last known state" for both Flickr and Apple Photos metadata (title, description, tags). Once both sides are in the DB, a lightweight sync engine can detect changes, surface conflicts for manual resolution, and push updates to either side — without hitting the Flickr API per-photo on every run.
+**Goal:** Make the local SQLite database a cache of "last known state" for both Flickr and Apple Photos metadata (title, description, tags). Once both sides are in the DB, a lightweight sync engine can detect changes, generate reviewable proposals, and push confirmed values to either side — without hitting the Flickr API per-photo on every run.
 
 **Ultimate vision:** An eventually-consistent bridge. When metadata changes on Flickr or in Apple Photos, the other side reflects it within a configurable window (hours to days via scheduled jobs), with manual conflict resolution for cases where both sides changed independently.
+
+**Implementation order:** Start with tags only. Tags are the highest-volume field; getting tag sync right validates the whole proposal/apply pipeline. Expand to title and description once the pipeline is proven.
 
 ---
 
 ## Design principles
 
-These are non-negotiable constraints that shape every implementation decision:
+Non-negotiable constraints that shape every implementation decision:
 
 1. **No silent writes.** Nothing changes on either Flickr or Apple Photos without an explicit, logged operation. Background jobs detect and cache; they do not write.
-2. **Explicit state only.** The DB reflects confirmed state. A field is only marked "synced" after the write is confirmed, not when it is queued.
-3. **Manual conflict resolution.** When both sides have changed independently, the system surfaces the conflict in the reviewer UI; it never auto-resolves.
-4. **Idempotent operations.** Applying the same sync twice does nothing. Each per-field push flag or timestamp makes this checkable.
-5. **Separate validation from mutation.** `bp reconcile` (validate mode) detects mismatches. `bp reconcile --fix` (harmonize mode) applies them. Keep them separate.
+2. **Explicit state only.** The DB reflects confirmed state. A field is only marked "applied" after the write is confirmed, not when it is queued.
+3. **Proposals, not direct writes.** The sync engine produces proposals (`pending` records in `metadata_proposals`). Proposals are reviewed and applied separately. No change bypasses the proposal lifecycle.
+4. **Manual conflict resolution.** When both sides have changed independently, the system surfaces the conflict for human decision; it never auto-resolves.
+5. **Idempotent operations.** Applying the same proposal twice does nothing. Rejecting a proposal suppresses it until state genuinely changes.
+6. **Separate validation from mutation.** `bp reconcile` (validate mode) detects mismatches. `bp reconcile --fix` (harmonize mode) applies confirmed proposals. Keep them separate.
+7. **Verify after Photos writes.** Apple Photos APIs are less reliable than Flickr's. After writing via photoscript, re-read the value to confirm it was applied. Mark as applied only on confirmed success.
 
 ---
 
 ## Field authority matrix
 
-Explicit per-field rules prevent flip-flopping and silent overwrites:
-
 | Field | Authority | Default direction | Notes |
 |-------|-----------|-------------------|-------|
+| `tags` | Merged / manual | Both sides contribute; conflicts reviewed | Highest priority; implement first |
 | `title` | Neither (manual) | Conflict → review queue | Either side may have been edited by the user |
 | `description` | Neither (manual) | Conflict → review queue | Either side may have been edited by the user |
-| `tags` | Merged / manual | Both sides contribute; conflicts reviewed | See tag model below |
 | `date_taken` | Apple Photos (EXIF) | Photos → Flickr | EXIF is ground truth; Flickr's copy should match |
 | `permissions` | DB / policy | DB → Flickr | Existing review → reconcile flow; unchanged |
 | `albums` | Flickr (primary) | Flickr → Photos (read-only reflection) | Handled separately; see `docs/album-metadata-sync.md` |
 
-*"Neither (manual)"* means: if both sides are non-empty and different, the system does not pick a winner — it writes a conflict record and waits for a human decision.
+*"Neither (manual)"* means: if both sides are non-empty and different, the system records a conflict and waits for a human decision.
 
 ---
 
-## Tag model
+## Change detection semantics
 
-Tags are the most complex field because both sides legitimately contribute different values:
+Precise per-field rules prevent unnecessary churn and noisy proposals.
 
-- **Flickr tags** are user-applied, human-curated, and the publishing target.
-- **Photos keywords** may include Apple ML labels, geofence zone names, and manually added keywords.
+### Tags
+Compare as **normalized sets** (see tag normalization below). Two tag sets are considered equal if their normalized forms are identical sets.
 
-**Canonical form rules:**
-- Stored as JSON arrays in the DB.
-- Comparison is case-insensitive and order-insensitive (set semantics).
-- On write, original casing from the source is preserved.
-- Deduplication: exact case-insensitive duplicates are removed; near-synonyms are not merged automatically.
+- Tag order change only → **no change**
+- Case change only (e.g. `Nature` → `nature`) → **no change** (normalized away)
+- Whitespace-only difference → **no change** (normalized away)
+- Tags added on one side → **non-conflict proposal** (see conflict classification)
+- Tags removed on one side → **divergence** (requires review)
+- Tags completely different → **collision** (requires review)
 
-**Sync policy:**
-- Flickr has tags, Photos has none → write Flickr tags to Photos (clear win).
-- Photos has tags, Flickr has none → write Photos tags to Flickr (clear win, respecting 75-tag limit).
-- Both have tags and they differ → conflict record; human picks or merges manually.
-- Both have the same tags (case-insensitive set equality) → no-op.
+### Title
+Compare after trimming leading/trailing whitespace. Any remaining difference is a detected change. Case-only changes are **not** normalized away for titles (a user may have intentionally changed `"my photo"` to `"My Photo"`).
 
-**Flickr 75-tag limit:** When a canonical tag set would exceed 75 tags when pushed to Flickr:
-1. Truncate at 75, preferring shorter tags (fewer characters) as a proxy for specificity.
-2. Log a warning with the full list of dropped tags.
-3. Record the truncation in the DB (`tags_truncated_for_flickr = 1`) so the UI can surface it.
-4. Never silently drop tags; always leave an audit trail.
+### Description
+Compare after trimming leading/trailing whitespace. Any remaining difference is a detected change.
 
 ---
 
-## Change tracking
+## Tag normalization
 
-The system must distinguish *"we last fetched this"* from *"the remote side last changed this."* Without that distinction, a re-fetch looks identical to a new change.
+Canonical form applied before all comparisons and before storing to DB:
 
-**Timestamps stored per photo:**
+1. **Trim** leading and trailing whitespace.
+2. **Lowercase** (Unicode-aware: `"Ñoño".lower()`).
+3. **NFC normalize** (Python: `unicodedata.normalize("NFC", tag)`).
+4. **Deduplicate** within a set (case-insensitive exact matches only; near-synonyms are not merged).
+5. **No delimiter splitting** — tags are stored as discrete items; commas or spaces within a tag string are preserved as part of the tag (Flickr and Photos both use discrete tag objects, not delimiter-separated strings in their APIs).
+
+Original casing from the source is preserved in storage (`flickr_tags`, `photos_tags`). Normalization is applied only for comparison, and to the `canonical_tags` column when writing the resolved value.
+
+**Tag hash:** Store `flickr_tags_hash` and `photos_tags_hash` (SHA-256 of the sorted normalized tag set, as a hex string). The sync engine filters on `flickr_tags_hash != photos_tags_hash` before doing the full set comparison, avoiding per-photo JSON parsing at scale.
+
+---
+
+## Conflict classification
+
+Three distinct categories, each with a defined action:
+
+| Type | Definition | Example | Action |
+|------|-----------|---------|--------|
+| **Non-conflict** | One side has a value; the other is empty | Photos has no tags; Flickr has tags | Auto-generate proposal; no human review required |
+| **Divergence** | Both sides have values; one side's value is a strict extension of the other (tags: one set is a superset) | Flickr has `[nature, landscape]`; Photos has `[nature]` | Generate proposal; recommend auto-apply but allow review |
+| **Collision** | Both sides have values and neither is a superset of the other | Flickr title: `"Sunset"`, Photos title: `"Golden Hour"` | Generate conflict proposal; **requires human resolution** |
+
+In the proposals table, `conflict_type` is always one of `non_conflict`, `divergence`, or `collision`. The UI surfaces collisions prominently; non-conflicts can be batch-approved.
+
+---
+
+## Proposals table
+
+The central new DB table. The sync engine writes proposals here; the apply step reads from here. Nothing is written to either Flickr or Photos without a proposal record.
+
+```sql
+CREATE TABLE IF NOT EXISTS metadata_proposals (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    photo_id        INTEGER NOT NULL REFERENCES photos(id),
+    field           TEXT NOT NULL,         -- 'title', 'description', 'tags'
+    proposed_value  TEXT,                  -- serialized (JSON for tags, plain text for title/description)
+    source          TEXT NOT NULL,         -- 'flickr' | 'photos' | 'manual'
+    target          TEXT NOT NULL,         -- 'flickr' | 'photos' | 'both'
+    conflict_type   TEXT NOT NULL,         -- 'non_conflict' | 'divergence' | 'collision'
+    status          TEXT NOT NULL DEFAULT 'pending',
+                                           -- 'pending' | 'applied' | 'rejected' | 'superseded'
+    created_at      TEXT NOT NULL,         -- ISO8601
+    resolved_at     TEXT,                  -- ISO8601; set when status leaves 'pending'
+    resolution_note TEXT                   -- optional human note
+);
+```
+
+**Idempotency rules:**
+- Before inserting a new proposal, check if a `pending` proposal already exists for `(photo_id, field, proposed_value, target)`. If so, do not insert a duplicate.
+- If state changes (e.g. `flickr_tags` is updated by a new poll), any existing `pending` proposal for that `(photo_id, field)` is marked `superseded` and a fresh proposal is generated.
+- A `rejected` proposal is not regenerated unless the underlying source value changes (compare against `proposed_value` at rejection time).
+
+**UX / workflow:**
+- The reviewer UI `/proposals` page (new) lists pending proposals grouped by conflict type.
+- **Non-conflicts** can be bulk-approved ("apply all tag additions to Photos").
+- **Divergences** are listed with a recommended action pre-selected; one click to confirm.
+- **Collisions** require explicit side-selection per field.
+- CLI: `bp sync-metadata --list-proposals` prints pending proposals in tabular form for headless review.
+
+---
+
+## Drift detection
+
+A photo is considered **in sync** when:
+
+```
+meta_last_harmonized_at >= max(flickr_last_updated, meta_synced_photos_at)
+```
+
+If `flickr_last_updated` advances (a new Flickr poll fetched a newer `lastupdate`), the photo needs re-harmonization. If `meta_synced_photos_at` advances (Photos was re-scanned), same. The sync engine processes only photos where this condition is false — avoiding redundant work on every run.
+
+---
+
+## Change tracking columns
 
 | Column | Meaning |
 |--------|---------|
 | `meta_synced_flickr_at` | When we last successfully fetched Flickr metadata |
-| `meta_synced_photos_at` | When we last successfully read Photos metadata |
 | `flickr_last_updated` | `lastupdate` from Flickr API — when Flickr last modified this photo |
-| `meta_last_harmonized_at` | When the sync engine last ran for this photo |
-
-`flickr_last_updated` is the key: if it advances since our last fetch, something changed on Flickr. Apple Photos has no equivalent field-level change timestamp, so for Photos we rely on periodic re-scans and detect changes by comparing stored vs current values.
+| `meta_synced_photos_at` | When we last successfully read Photos metadata |
+| `meta_last_harmonized_at` | When the sync engine last processed this photo |
+| `flickr_tags_hash` | SHA-256 of sorted normalized Flickr tag set |
+| `photos_tags_hash` | SHA-256 of sorted normalized Photos tag set |
 
 ---
 
@@ -85,21 +155,22 @@ The system must distinguish *"we last fetched this"* from *"the remote side last
 - The poller fetches Flickr title/description/tags but discards them before writing to the DB (`poller.py` lines 425–432).
 - Apple Photos metadata is read live via osxphotos during sync, not cached.
 - The DB has no stored representation of either side's current metadata state.
-- Conflicts are detected and stored in `metadata_conflicts` but only relative to the live values at the time of the run.
+- Conflicts are detected and stored in `metadata_conflicts` but only relative to the live values at the time of the run, with no proposal lifecycle.
 
 ---
 
 ## Target state
 
 ```
-Flickr API  ──poll──►  photos.flickr_title / flickr_description / flickr_tags
+Flickr API  ──poll──►  flickr_title / flickr_description / flickr_tags / flickr_tags_hash
                                         │
-                                  sync engine (per-field)
+                                  sync engine (per-field, drift-filtered)
+                                  generates metadata_proposals
                                         │
-Apple Photos ──scan──► photos.photos_title / photos_description / photos_tags
+Apple Photos ──scan──► photos_title / photos_description / photos_tags / photos_tags_hash
 ```
 
-The sync engine compares the two cached columns on a per-field basis, applies the field authority policy, writes to `canonical_*` columns where unambiguous, and surfaces conflicts for manual resolution. All this happens without live API calls once the cache is warm.
+The sync engine runs the drift filter, classifies each out-of-sync field, and writes proposals. The reviewer UI and/or `bp reconcile --fix` applies confirmed proposals. No API calls during sync once the cache is warm.
 
 ---
 
@@ -108,148 +179,137 @@ The sync engine compares the two cached columns on a per-field basis, applies th
 ### Phase 1 — DB schema: cache both sides
 *Prerequisite for everything else. Safe to ship alone.*
 
-Add columns to the `photos` table via a new migration:
+Add columns to the `photos` table and create the `metadata_proposals` table:
+
+**`photos` table additions:**
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `flickr_title` | TEXT | Last title fetched from Flickr |
 | `flickr_description` | TEXT | Last description fetched from Flickr |
-| `flickr_tags` | TEXT | JSON array — last tags fetched from Flickr |
-| `flickr_last_updated` | TEXT | ISO8601 — Flickr's `lastupdate` timestamp for this photo |
+| `flickr_tags` | TEXT | JSON array — last tags fetched from Flickr (original casing) |
+| `flickr_tags_hash` | TEXT | SHA-256 of sorted normalized Flickr tag set |
+| `flickr_last_updated` | TEXT | ISO8601 — Flickr's `lastupdate` for this photo |
 | `photos_title` | TEXT | Last title read from Apple Photos |
 | `photos_description` | TEXT | Last description read from Apple Photos |
-| `photos_tags` | TEXT | JSON array — last keywords read from Apple Photos |
+| `photos_tags` | TEXT | JSON array — last keywords read from Apple Photos (original casing) |
+| `photos_tags_hash` | TEXT | SHA-256 of sorted normalized Photos tag set |
 | `meta_synced_flickr_at` | TEXT | ISO8601 — when we last fetched from Flickr |
 | `meta_synced_photos_at` | TEXT | ISO8601 — when we last read from Photos |
 | `meta_last_harmonized_at` | TEXT | ISO8601 — when sync engine last ran for this photo |
-| `tags_truncated_for_flickr` | INTEGER | Boolean — canonical tags exceeded 75 and were truncated on last push |
+| `tags_truncated_for_flickr` | INTEGER | Boolean — canonical tags exceeded 75 on last push |
+
+**New `metadata_proposals` table:** as defined in the proposals section above.
 
 **Files to change:**
-- `db/schema.sql` — add columns to `CREATE TABLE IF NOT EXISTS photos`
-- `db/migrations/migrate_008_metadata_cache.py` — ALTER TABLE for existing DBs
+- `db/schema.sql`
+- `db/migrations/migrate_008_metadata_cache.py`
 
-**Completion criteria:** columns exist in schema and migration; no other behaviour changes yet.
+**Completion criteria:** columns and table exist; no behaviour changes yet.
 
 ---
 
 ### Phase 2 — Poller writes Flickr metadata to DB
-*Depends on Phase 1. Makes `bp poll` populate the Flickr cache.*
+*Depends on Phase 1.*
 
-Stop discarding `flickr_title`, `flickr_description`, `flickr_tags` in `poller.py` before `upsert_photo()`. Write them into the new columns instead. Also capture `lastupdate` from the Flickr API response into `flickr_last_updated`. Set `meta_synced_flickr_at` on every upsert.
+Stop discarding `flickr_title`, `flickr_description`, `flickr_tags` in `poller.py`. Write them into the new columns. Capture `lastupdate` into `flickr_last_updated`. Compute and store `flickr_tags_hash`. Set `meta_synced_flickr_at`.
 
-`bp poll --backfill --days N` then becomes the initial bulk population pass and the recurring "refresh Flickr cache" job.
-
-**Incremental refresh:** Flickr's `people.getPhotos` can be sorted by `date-updated`. Adding `--sort updated` to `bp poll` would let a daily job fetch only recently-changed photos, making incremental refreshes much faster than a full backfill. This is a nice-to-have, not required for Phase 2 to be complete.
+**Incremental refresh (nice-to-have):** `bp poll --sort updated` fetches photos sorted by `date-updated` descending, enabling a daily job to skip unchanged photos. Not required for Phase 2 completion.
 
 **Files to change:**
-- `poller/poller.py` — remove the three `.pop()` lines; map fields to new column names; capture `lastupdate`
+- `poller/poller.py`
 
-**Completion criteria:** after `bp poll --backfill`, `flickr_title`/`flickr_description`/`flickr_tags`/`flickr_last_updated` are populated for all photos that have a `flickr_id`.
+**Completion criteria:** after `bp poll --backfill`, `flickr_tags`/`flickr_tags_hash`/`flickr_last_updated` populated for all photos with `flickr_id`.
 
 ---
 
-### Phase 3 — Fast sync-metadata reads from DB
-*Depends on Phases 1 & 2. The main performance win.*
+### Phase 3 — Scanner writes Photos metadata to DB
+*Depends on Phase 1. Independent of Phase 2.*
 
-Rewrite `pull_batch()` / `pull_photo_metadata()` in `flickr/metadata_puller.py` to:
-1. Read `flickr_*` columns from the DB instead of calling `flickr.get_photo_info()` per photo.
-2. Read `photos_*` columns from the DB instead of opening osxphotos per photo (when the cache is warm).
-3. Compare per-field using the field authority policy above.
-4. Set `meta_last_harmonized_at` on completion.
-
-**Flags:**
-- `bp sync-metadata --refresh-flickr` — re-fetches all from Flickr API and updates cache before comparing (the current default behaviour, now opt-in).
-- `bp sync-metadata --refresh-photos` — re-reads Photos library before comparing.
-- `bp sync-metadata` with no flags — reads from DB cache only; fast path.
+Add a Photos metadata pass to `bp scan` that reads title, description, and keywords from the Photos library for every photo with a `uuid`. Compute and store `photos_tags_hash`. Set `meta_synced_photos_at`. Detect changes by comparing incoming values against stored `photos_*` columns; log differences.
 
 **Files to change:**
-- `flickr/metadata_puller.py` — replace live-fetch with DB-read; keep live-fetch behind `--refresh-*` flags
-- `flickr/sync_metadata.py` — wire up `--refresh-flickr` / `--refresh-photos` flags
+- `poller/scanner.py` (or new `poller/metadata_scanner.py`)
+- `bp` if a new sub-command
 
-**Completion criteria:** `bp sync-metadata` with a warm cache completes in under 60 seconds for 71k photos.
+**Completion criteria:** after `bp scan`, `photos_tags`/`photos_tags_hash` populated for all photos with `uuid`.
 
 ---
 
-### Phase 4 — Scanner writes Photos metadata to DB
-*Depends on Phase 1. Independent of Phases 2 & 3.*
+### Phase 4 — Sync engine: diff and generate proposals (tags first)
+*Depends on Phases 1–3. Tags only in this phase.*
 
-Add a Photos metadata pass to `bp scan` that reads `title`, `description`, and `keywords` from the Photos library for every photo with a `uuid` and writes them to `photos_title`, `photos_description`, `photos_tags`. Sets `meta_synced_photos_at`.
+Rewrite `bp sync-metadata` to:
+1. Run the drift filter: select photos where `meta_last_harmonized_at < max(flickr_last_updated, meta_synced_photos_at)` (or NULL).
+2. For each such photo, compare `flickr_tags_hash` vs `photos_tags_hash`.
+3. If hashes differ, expand to full set comparison and classify (`non_conflict`, `divergence`, `collision`).
+4. Write a proposal to `metadata_proposals` (deduplicated per idempotency rules).
+5. Set `meta_last_harmonized_at`.
 
-This is the Apple Photos analogue of Phase 2. Because Apple Photos has no `lastupdate` equivalent, the scanner detects changes by comparing incoming values against the stored `photos_*` columns and logging differences.
+No Flickr API calls. No writes to Photos or Flickr. Pure DB reads → proposal writes.
+
+`bp sync-metadata --refresh-flickr` re-fetches from the Flickr API and updates the cache before running the sync engine (the old default behaviour, now opt-in).
 
 **Files to change:**
-- `poller/scanner.py` (or a new `poller/metadata_scanner.py`) — add keywords/title/description to the per-photo scan pass
-- `bp` — wire up if a new sub-command is added
+- `flickr/metadata_puller.py`
+- `flickr/sync_metadata.py`
 
-**Completion criteria:** after `bp scan`, `photos_title`/`photos_description`/`photos_tags` are populated for all photos with a `uuid`.
+**Completion criteria:** `bp sync-metadata` with warm cache completes in under 60 seconds for 71k photos; proposals appear in `metadata_proposals`.
 
 ---
 
-### Phase 5 — Canonical columns and conflict resolution UI
-*Depends on Phases 1–4.*
+### Phase 5 — Proposal review UI and apply step (tags)
+*Depends on Phase 4.*
 
-Add `canonical_title`, `canonical_description`, `canonical_tags` columns to the DB. These hold the resolved "what should be on both sides" value after conflict resolution.
+Add `/proposals` page to the reviewer UI:
+- Group by conflict type (collisions first, then divergences, then non-conflicts).
+- Non-conflicts: bulk-approve button ("apply all tag additions to Photos").
+- Divergences: recommended action pre-selected; one click to confirm.
+- Collisions: explicit side-selection per field.
 
-**Do not introduce canonical columns until Phases 1–4 are complete.** Introducing them earlier risks collapsing the source-distinct representation before the sync engine is trustworthy.
-
-The sync engine (run as part of `bp sync-metadata`) sets canonical values per the field authority matrix:
-- Clear win (one side empty, other has value) → canonical = the non-empty value
-- Both agree → canonical = either (they're equal)
-- Both differ → write to `metadata_conflicts`; canonical stays NULL until resolved
-
-Extend the reviewer UI `/conflicts` page to:
-- Show `flickr_*` vs `photos_*` side-by-side per field
-- "Use Flickr" / "Use Photos" / "Skip for now" buttons per field (not per photo — fields are resolved individually)
-- Resolving a field writes the chosen value to `canonical_*` and marks that conflict record resolved
-
-**Per-field push tracking:** Add `canonical_pushed_to_flickr_at` and `canonical_pushed_to_photos_at` timestamps (or per-field boolean flags) so the reconcile step knows exactly what still needs pushing. This ensures idempotency: re-running reconcile after a partial failure pushes only unconfirmed fields.
+Add `bp reconcile --fix` apply step for tags:
+- For each `pending` proposal with `target = 'photos'`: write via photoscript, verify by re-reading, mark `applied` only on confirmed success.
+- For each `pending` proposal with `target = 'flickr'`: call Flickr API, mark `applied` on success.
+- Failures leave status as `pending`; the next run retries automatically.
+- Respects 75-tag limit (see truncation policy above).
 
 **Files to change:**
-- `db/schema.sql` + new migration (`migrate_009_canonical_metadata.py`) — add `canonical_*` columns and push-tracking fields
-- `flickr/metadata_puller.py` — write canonical values as part of sync
-- `reviewer/app.py` — extend `/conflicts` API routes
-- `reviewer/templates/conflicts.html` — extend UI (or new page)
+- `reviewer/app.py` + `reviewer/templates/proposals.html`
+- `poller/reconcile.py`
+
+**Completion criteria:** tag proposals can be reviewed and applied end-to-end; full pipeline tested.
 
 ---
 
-### Phase 6 — bp reconcile pushes metadata bidirectionally
-*Depends on Phase 5.*
+### Phase 6 — Expand to title and description
+*Depends on Phase 5. Same pipeline, new fields.*
 
-Extend `bp reconcile` with two modes:
+Extend Phases 2–5 to cover `flickr_title`/`photos_title` and `flickr_description`/`photos_description`. These fields have no hash optimization needed (short strings). Collision handling in the UI becomes the main addition.
 
-**Validate mode** (`bp reconcile`, existing behaviour extended):
-- Detect photos where `canonical_*` differs from `flickr_*` or `photos_*`.
-- Report mismatches; no writes.
-
-**Harmonize mode** (`bp reconcile --fix`, extended):
-- Push `canonical_title`/`canonical_description`/`canonical_tags` to Flickr where `canonical_pushed_to_flickr_at` is NULL.
-- Push to Apple Photos via photoscript where `canonical_pushed_to_photos_at` is NULL.
-- On confirmed success, set the push timestamp.
-- On failure, leave timestamp NULL so the next run retries.
-
-**Tag limit (Flickr → 75 tags):** See tag model section above.
+**Add `canonical_*` columns here** (not before):
+- `canonical_title`, `canonical_description`, `canonical_tags` — the resolved value after a collision is manually resolved.
+- `canonical_pushed_to_flickr_at`, `canonical_pushed_to_photos_at` — per-field push confirmation timestamps.
 
 **Files to change:**
-- `poller/reconcile.py` — add metadata validation and harmonize steps
-- `flickr/flickr_client.py` — add `set_photo_meta(flickr_id, title, description)` if not present
+- `db/schema.sql` + `db/migrations/migrate_009_canonical_metadata.py`
+- All files touched in Phases 2–5, extended for title/description
 
 ---
 
 ### Phase 7 — Scheduled sync (cron / launchd)
-*Depends on Phases 2–4.*
+*Depends on Phases 2–5.*
 
-Add a `bp cron` command (or a `launchd` plist installer) that schedules:
-- `bp poll` — daily (refreshes Flickr cache, picks up new uploads)
-- `bp scan` — weekly (refreshes Photos cache; slower due to library open)
-- `bp sync-metadata` — after each poll completes (fast once cache is warm)
-- `bp reconcile --fix` — after each sync-metadata (pushes resolved canonical values)
+Add a `bp cron` command or `launchd` plist that schedules:
+- `bp poll` — daily (refreshes Flickr cache)
+- `bp scan` — weekly (refreshes Photos cache)
+- `bp sync-metadata` — after each poll (fast drift detection, generates proposals)
+- `bp reconcile --fix` — after sync-metadata (applies non-conflict proposals automatically; leaves collisions for the UI)
 
-The reviewer dashboard should show "Flickr cache: N hours old" and "Photos cache: N hours old" using `meta_synced_flickr_at` / `meta_synced_photos_at`.
+Reviewer dashboard: show "Flickr cache: N hours old" and "Photos cache: N hours old".
 
 **Files to change:**
-- New `bp cron` sub-command or `launchd/com.bluepearmain.sync.plist`
-- `reviewer/app.py` — expose last-sync timestamps to dashboard template
-- `reviewer/templates/dashboard.html` — show staleness indicators
+- `bp cron` sub-command or `launchd/com.bluepearmain.sync.plist`
+- `reviewer/app.py` + `reviewer/templates/dashboard.html`
 
 ---
 
@@ -257,26 +317,26 @@ The reviewer dashboard should show "Flickr cache: N hours old" and "Photos cache
 
 ```
 bp poll (daily)
-  └─► flickr_title, flickr_description, flickr_tags,
-      flickr_last_updated, meta_synced_flickr_at
+  └─► flickr_tags, flickr_tags_hash, flickr_last_updated, meta_synced_flickr_at
 
 bp scan (weekly)
-  └─► photos_title, photos_description, photos_tags,
-      meta_synced_photos_at
+  └─► photos_tags, photos_tags_hash, meta_synced_photos_at
 
-bp sync-metadata (after poll, reads from DB — no API calls)
-  ├─► writes canonical_* where unambiguous (per field authority matrix)
-  ├─► writes metadata_conflicts where both sides differ
-  └─► sets meta_last_harmonized_at
+bp sync-metadata (after poll — reads DB only, no API calls)
+  ├─► drift filter: photos where harmonized < max(flickr_last_updated, photos_synced)
+  ├─► hash comparison → skip unchanged photos
+  ├─► full set diff → classify non_conflict / divergence / collision
+  ├─► write metadata_proposals (deduplicated)
+  └─► set meta_last_harmonized_at
 
-/conflicts UI (human, on demand)
-  └─► resolves per-field conflicts → writes canonical_*
+/proposals UI (human, on demand)
+  ├─► bulk-approve non-conflicts
+  ├─► confirm divergences
+  └─► manually resolve collisions
 
 bp reconcile --fix (after sync-metadata)
-  ├─► pushes canonical_* → Flickr (title, description, tags ≤75)
-  │     └─► sets canonical_pushed_to_flickr_at on confirmed success
-  └─► pushes canonical_* → Apple Photos (via photoscript)
-        └─► sets canonical_pushed_to_photos_at on confirmed success
+  ├─► apply approved proposals → Flickr (tags ≤75) → mark applied on confirmed success
+  └─► apply approved proposals → Photos (via photoscript, verify after write)
 ```
 
 ---
@@ -284,14 +344,15 @@ bp reconcile --fix (after sync-metadata)
 ## What is NOT in scope
 
 - Real-time change detection (webhooks, file-system watchers). Everything is pull-based on a schedule.
-- Auto-resolution of conflicts. All ambiguous cases go to the review queue.
+- Auto-resolution of collisions. All ambiguous cases go to the review queue.
 - Album sync (handled separately; see `docs/album-metadata-sync.md`).
 - Privacy/visibility changes (handled by the existing review → reconcile flow).
+- Tag synonym merging or semantic deduplication.
 
 ---
 
 ## Migration numbering
 
 As of writing, migrations 001–007 exist. This work will consume:
-- `migrate_008_metadata_cache.py` — Phase 1 (`flickr_*`/`photos_*` columns + timestamps)
-- `migrate_009_canonical_metadata.py` — Phase 5 (`canonical_*` columns + push-tracking fields)
+- `migrate_008_metadata_cache.py` — Phase 1 (`flickr_*`/`photos_*` columns, `metadata_proposals` table)
+- `migrate_009_canonical_metadata.py` — Phase 6 (`canonical_*` columns, push-tracking timestamps)
