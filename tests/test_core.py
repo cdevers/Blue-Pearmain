@@ -4533,5 +4533,43 @@ class TestPhotoDetailTemplate(unittest.TestCase):
         self.assertFalse(data["ok"])
 
 
+class TestCheckpoint(unittest.TestCase):
+    """db.checkpoint() and wal_autocheckpoint pragma."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.tmp.close()
+        from db.db import Database
+        self.db = Database(self.tmp.name)
+
+    def tearDown(self):
+        self.db.close()
+        import os
+        for ext in ("", "-wal", "-shm"):
+            try:
+                os.unlink(self.tmp.name + ext)
+            except FileNotFoundError:
+                pass
+
+    def test_checkpoint_returns_dict_with_expected_keys(self):
+        result = self.db.checkpoint()
+        self.assertIn("busy", result)
+        self.assertIn("log", result)
+        self.assertIn("checkpointed", result)
+
+    def test_checkpoint_truncate_on_empty_wal(self):
+        result = self.db.checkpoint(mode="TRUNCATE")
+        self.assertEqual(result["busy"], 0)
+
+    def test_checkpoint_passive_mode(self):
+        result = self.db.checkpoint(mode="PASSIVE")
+        self.assertIn("checkpointed", result)
+
+    def test_wal_autocheckpoint_set_to_500(self):
+        row = self.db.conn.execute("PRAGMA wal_autocheckpoint").fetchone()
+        self.assertEqual(row[0], 500)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

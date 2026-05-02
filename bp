@@ -10,6 +10,7 @@ Usage:
     bp thumbs                       Populate missing thumbnail paths
     bp reconcile [--fix] [--limit N] Check DB state vs actual Flickr state
     bp link-orphans [--dry-run]     Merge split Photos/Flickr records
+    bp checkpoint [--mode MODE]     Checkpoint the WAL file (default: truncate)
     bp ui                           Start the review UI (http://localhost:5173)
 
 Global options:
@@ -265,6 +266,33 @@ def cmd_link_orphans(args):
     ])
 
 
+def cmd_checkpoint(args):
+    """Run a WAL checkpoint and report results."""
+    import yaml
+    from db.db import Database
+
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+    db = Database(Path(config["database"]["path"]).expanduser())
+    result = db.checkpoint(mode=args.mode.upper())
+    db.close()
+
+    busy        = result["busy"]
+    log         = result["log"]
+    checkpointed = result["checkpointed"]
+
+    if log == 0:
+        print("WAL is empty — nothing to checkpoint.")
+    elif busy > 0:
+        print(
+            f"Checkpoint incomplete: {checkpointed}/{log} frames moved "
+            f"({busy} frame(s) blocked by active readers). "
+            f"Run again when the UI and other readers are stopped for a full truncate."
+        )
+    else:
+        print(f"Checkpoint complete: {checkpointed}/{log} frames moved, WAL truncated.")
+
+
 def _inject_argv(args, pairs):
     """Rebuild sys.argv from parsed args so subcommand main()s parse correctly."""
     new_argv = [sys.argv[0]]
@@ -355,6 +383,14 @@ def main():
     p_link.add_argument("--limit",   type=int, default=None,
                         help="Max pairs to process (default: all)")
 
+    # checkpoint
+    p_ckpt = sub.add_parser("checkpoint", help="Run a WAL checkpoint to shrink the WAL file")
+    p_ckpt.add_argument(
+        "--mode", default="truncate",
+        choices=["truncate", "passive", "full", "restart"],
+        help="Checkpoint mode (default: truncate)",
+    )
+
     args = parser.parse_args()
 
     # Attach config/verbose to all subcommands
@@ -371,6 +407,7 @@ def main():
     if not hasattr(args, "album"):           args.album = None
     if not hasattr(args, "photo_id"):        args.photo_id = None
     if not hasattr(args, "conflicts_only"):  args.conflicts_only = False
+    if not hasattr(args, "mode"):            args.mode = "truncate"
 
     dispatch = {
         "pipeline":      cmd_pipeline,
@@ -383,6 +420,7 @@ def main():
         "sync-albums":   cmd_sync_albums,
         "sync-metadata": cmd_sync_metadata,
         "link-orphans":  cmd_link_orphans,
+        "checkpoint":    cmd_checkpoint,
     }
     dispatch[args.command](args)
 

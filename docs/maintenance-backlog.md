@@ -49,24 +49,26 @@ when `uuid` is non-NULL. `x-apple-photos://` is not a valid macOS URL scheme.
 
 ---
 
-## 3. WAL checkpoint maintenance ([GH #5](https://github.com/cdevers/Blue-Pearmain/issues/5))
+## 3. WAL checkpoint maintenance ([GH #5](https://github.com/cdevers/Blue-Pearmain/issues/5)) ✓ Implemented
 
 **Problem:** The SQLite WAL file grew to 6.5 GB without being checkpointed (observed
 2026-04-30). This happens when the process crashes or is killed mid-write, leaving
 readers that block automatic checkpoints.
 
-**Manual fix (run when the app is idle):**
+**Implemented (2026-05-02):**
+- `PRAGMA wal_autocheckpoint = 500` added to `db/db.py` `_connect()` — passive
+  checkpoints now trigger every 500 pages (half the SQLite default), keeping the WAL
+  from growing large under normal operation.
+- `Database.checkpoint(mode)` method added to `db/db.py`.
+- `bp checkpoint [--mode MODE]` CLI command added — runs TRUNCATE by default,
+  reports busy/log/checkpointed frame counts. Use `--mode passive` when the UI or
+  other readers are active.
+
+**Manual emergency fix (if WAL grows large):**
 
 ```bash
-sqlite3 data/curator.db "PRAGMA wal_checkpoint(TRUNCATE);"
-# Run twice if the first result is 1|N|N (active reader blocked truncation)
+# Stop the UI daemon first, then:
+bp checkpoint
+# If busy > 0, readers are still active; try:
+bp checkpoint --mode passive
 ```
-
-**Long-term fix options:**
-- Add `PRAGMA wal_autocheckpoint = 1000;` to the connection setup in `db/db.py` (already
-  the SQLite default, but it only truncates in PASSIVE mode, not TRUNCATE mode).
-- Or add a `bp checkpoint` CLI command / cron step that runs
-  `PRAGMA wal_checkpoint(TRUNCATE)` after the nightly `bp-all` run once all connections
-  are closed.
-- Consider `PRAGMA journal_mode = DELETE` if single-writer access is guaranteed and
-  WAL is not needed for concurrency.

@@ -72,6 +72,7 @@ class Database:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA wal_autocheckpoint = 500")
         return conn
 
     @property
@@ -87,6 +88,19 @@ class Database:
         if conn:
             conn.close()
             self._local.conn = None
+
+    def checkpoint(self, mode: str = "TRUNCATE") -> dict:
+        """
+        Run a WAL checkpoint and return {busy, log, checkpointed}.
+        TRUNCATE shrinks the WAL file to zero but requires no active readers.
+        PASSIVE (the default SQLite behaviour) is safe with concurrent readers
+        but leaves the WAL file in place.
+        If busy > 0, some WAL frames couldn't be moved (readers still active).
+        """
+        row = self.conn.execute(f"PRAGMA wal_checkpoint({mode})").fetchone()
+        if row:
+            return {"busy": row[0], "log": row[1], "checkpointed": row[2]}
+        return {"busy": 0, "log": 0, "checkpointed": 0}
 
     # -----------------------------------------------------------------------
     # Late-linking: merge a Flickr-only record into a Photos-only record
