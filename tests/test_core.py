@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from analyzer.privacy import classify
 from analyzer.tagger import propose_tags
-from poller.scanner import normalise_dt, build_enriched_row
+from poller.scanner import normalise_dt, normalise_dt_plus1, build_enriched_row
 from db.db import Database, haversine_m
 
 
@@ -60,6 +60,33 @@ class TestNormaliseDt(unittest.TestCase):
         self.assertEqual(
             normalise_dt("2026-04-09T03:06:11+00:00"),
             "2026-04-09 03:06:11",
+        )
+
+
+class TestNormaliseDtPlus1(unittest.TestCase):
+    """normalise_dt_plus1 returns the normalised timestamp incremented by one second."""
+
+    def test_adds_one_second(self):
+        # Sub-second timestamp whose truncated form is :50; +1s gives :51
+        self.assertEqual(
+            normalise_dt_plus1("2022-02-14T20:14:50.941984-05:00"),
+            "2022-02-14 20:14:51",
+        )
+
+    def test_carries_across_minute_boundary(self):
+        self.assertEqual(
+            normalise_dt_plus1("2024-06-16T10:00:59.9-04:00"),
+            "2024-06-16 10:01:00",
+        )
+
+    def test_none_returns_none(self):
+        self.assertIsNone(normalise_dt_plus1(None))
+
+    def test_exact_second_still_increments(self):
+        # Even a Photos record with no sub-seconds gets +1 (rare but safe)
+        self.assertEqual(
+            normalise_dt_plus1("2023-05-06T16:34:28-04:00"),
+            "2023-05-06 16:34:29",
         )
 
 
@@ -858,6 +885,16 @@ class TestFindFlickrMatch(unittest.TestCase):
         matches = find_flickr_match({}, self.db)
         self.assertEqual(matches, [])
 
+    def test_match_flickr_rounded_up(self):
+        # Flickr rounds sub-second EXIF times to the nearest second while Photos
+        # truncates.  A Photos timestamp of :50.941 normalises to :50, but the
+        # Flickr record has :51.  The matcher must find the record via +1s fallback.
+        from poller.scanner import find_flickr_match
+        self.db.upsert_photo({"flickr_id": "CCC", "date_taken": "2024-06-16 10:00:01"})
+        photo_row = {"date_taken": "2024-06-16T10:00:00.941984-04:00"}
+        matches = find_flickr_match(photo_row, self.db)
+        flickr_ids = [m["flickr_id"] for m in matches]
+        self.assertIn("CCC", flickr_ids)
 
 
 # ---------------------------------------------------------------------------
@@ -3724,6 +3761,28 @@ class TestLinkOrphans(unittest.TestCase):
         linked, failed = link_orphans(self.db, dry_run=False, limit=100)
         self.assertEqual(linked, 0)
         self.assertIsNotNone(self.db.get_photo(photos_id))
+
+    def test_links_when_flickr_timestamp_rounded_up(self):
+        # Reproduces the real-world off-by-one: Photos stores sub-second precision
+        # (truncated to :50) while Flickr rounds the same EXIF time to :51.
+        from poller.link_orphans import link_orphans
+        photos_id = self.db.upsert_photo({
+            "uuid":              "uuid-round",
+            "original_filename": "IMG_round.HEIC",
+            "date_taken":        "2022-02-14T20:14:50.941984-05:00",
+            "privacy_state":     "candidate_public",
+            "apple_labels":      [],
+            "apple_persons":     [],
+        })
+        flickr_row = self.db.upsert_photo({
+            "flickr_id":  "flickr-round",
+            "date_taken": "2022-02-14 20:14:51",
+        })
+        linked, failed = link_orphans(self.db, dry_run=False, limit=100)
+        self.assertEqual(linked, 1)
+        self.assertEqual(failed, 0)
+        self.assertEqual(self.db.get_photo(photos_id)["flickr_id"], "flickr-round")
+        self.assertIsNone(self.db.get_photo(flickr_row))
 
 
 # ---------------------------------------------------------------------------

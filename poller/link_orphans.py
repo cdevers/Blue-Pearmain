@@ -24,9 +24,10 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent))
 
 from db.db import Database
-from poller.scanner import normalise_dt
+from scanner import normalise_dt, normalise_dt_plus1
 
 log = logging.getLogger("blue-pearmain.link-orphans")
 
@@ -97,7 +98,13 @@ def find_orphan_pairs(db: Database, limit: int) -> list[tuple[int, int]]:
         if not dt:
             continue
 
-        for flickr_id in flickr_by_dt.get(dt, []):
+        # Check both dt and dt+1: Flickr rounds sub-second EXIF times while
+        # Apple Photos truncates, so a photo at :50.94 normalises to :50 here
+        # but appears as :51 on Flickr.  Prefer exact match; fall back to +1s.
+        candidates = flickr_by_dt.get(dt, []) + flickr_by_dt.get(
+            normalise_dt_plus1(row["date_taken"]) or "", []
+        )
+        for flickr_id in candidates:
             if flickr_id not in claimed:
                 pairs.append((flickr_id, row["id"]))
                 claimed.add(flickr_id)

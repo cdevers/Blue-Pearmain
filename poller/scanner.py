@@ -238,6 +238,24 @@ def normalise_dt(dt_str: str | None) -> str | None:
     return dt_str[:19].replace("T", " ")  # always YYYY-MM-DD HH:MM:SS
 
 
+def normalise_dt_plus1(dt_str: str | None) -> str | None:
+    """
+    Return the normalised timestamp incremented by one second, or None.
+
+    Flickr rounds sub-second EXIF times to the nearest second while Apple
+    Photos truncates them.  A photo with date_taken 20:14:50.941 therefore
+    normalises to 20:14:50 on the Photos side but appears as 20:14:51 on
+    Flickr.  Checking dt+1 catches this systematic off-by-one.
+    """
+    dt = normalise_dt(dt_str)
+    if not dt:
+        return None
+    try:
+        return (datetime.fromisoformat(dt) + timedelta(seconds=1)).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
 def find_flickr_match(photo_row: dict, db: Database) -> list[dict]:
     """
     Find Flickr DB records that match a Photos record.
@@ -251,10 +269,17 @@ def find_flickr_match(photo_row: dict, db: Database) -> list[dict]:
     if not dt:
         return []
 
-    rows = db.conn.execute(
-        "SELECT * FROM photos WHERE date_taken LIKE ? AND uuid IS NULL",
-        (f"{dt}%",),
-    ).fetchall()
+    dt1 = normalise_dt_plus1(photo_row.get("date_taken"))
+    if dt1:
+        rows = db.conn.execute(
+            "SELECT * FROM photos WHERE (date_taken LIKE ? OR date_taken LIKE ?) AND uuid IS NULL",
+            (f"{dt}%", f"{dt1}%"),
+        ).fetchall()
+    else:
+        rows = db.conn.execute(
+            "SELECT * FROM photos WHERE date_taken LIKE ? AND uuid IS NULL",
+            (f"{dt}%",),
+        ).fetchall()
 
     if not rows:
         return []
