@@ -4,6 +4,15 @@ These instructions apply to every session in this project. Follow them without b
 
 ---
 
+## GitHub issue lifecycle
+
+Every non-trivial piece of work must be tracked in a GitHub issue:
+
+- **Before coding:** once we've agreed on the problem and approach, create or identify the issue. Do this before making any code changes.
+- **After coding:** update the issue — either close it with a note summarising what was done, or leave a status comment if the work is only partially complete.
+
+---
+
 ## After every round of changes
 
 For each meaningful change (bug fix, feature, refactor):
@@ -11,7 +20,7 @@ For each meaningful change (bug fix, feature, refactor):
 1. **Tests** — add or update tests in `tests/` covering the changed behaviour. Run `python -m pytest tests/ -q` and confirm all tests pass before committing.
 2. **README** — update `README.md` to reflect any user-visible change: new commands, changed behaviour, updated test count.
 3. **Docs** — if a `docs/` file describes work that was just completed, mark it done (e.g. `✓ done`) or update its status line.
-4. **GitHub issue** — if the work corresponds to an open issue at https://github.com/cdevers/Blue-Pearmain/issues, reference it in the commit message (e.g. `Closes #1`) and note progress in the issue if it is only partially complete.
+4. **GitHub issue** — reference the issue in the commit message (e.g. `Closes #1`). After the commit, update the issue with a status comment or close it with a summary of what was done.
 5. **Git commit** — create a commit that describes what changed and why, following the style of recent commits in this repo. Co-author line: `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>`.
 
 ---
