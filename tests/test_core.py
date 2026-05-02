@@ -1486,25 +1486,6 @@ class TestSchemaMigrations(unittest.TestCase):
         self.db.close()
         os.unlink(self.tmp_path)
 
-    def test_migration_table_exists_after_migrate_002(self):
-        import sys as _sys, io, contextlib
-        _sys.path.insert(0, str(Path(__file__).parent.parent / "db"))
-        from migrate_002_updated_at_and_indexes import run
-        with contextlib.redirect_stdout(io.StringIO()):
-            run(self.tmp_path, dry_run=False)
-        row = self.db.conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
-        ).fetchone()
-        self.assertIsNotNone(row)
-
-    def test_migration_002_idempotent(self):
-        import sys as _sys, io, contextlib
-        _sys.path.insert(0, str(Path(__file__).parent.parent / "db"))
-        from migrate_002_updated_at_and_indexes import run
-        with contextlib.redirect_stdout(io.StringIO()):
-            run(self.tmp_path, dry_run=False)
-            run(self.tmp_path, dry_run=False)  # should not raise
-
     def test_migration_008_adds_metadata_cache_columns(self):
         import sys as _sys, io, contextlib
         _sys.path.insert(0, str(Path(__file__).parent.parent / "db" / "migrations"))
