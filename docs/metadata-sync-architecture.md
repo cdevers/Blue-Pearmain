@@ -426,6 +426,32 @@ bp reconcile --fix (after sync-metadata)
 
 ---
 
+### Phase 9 — Deferred cleanup (non-urgent)
+
+Two small housekeeping items identified during post-migration review. Neither affects
+correctness of the current pipeline; both are quality-of-life for future maintainability.
+
+**1. Normalize `_normalise_tags` in the legacy path.**
+`pull_photo_metadata` (reachable only via `bp sync-metadata --refresh-flickr`) calls
+`_normalise_tags` which uses `.lower()` instead of `.casefold()` and keeps punctuation
+(hyphens, spaces). The active pipeline (`run_sync_engine` / `_classify_tags`) uses
+`casefold()` + NFC + `isalnum()`, matching the hash functions in `poller.py` and
+`scanner.py`. The legacy function should be updated to match, or the dead code removed
+if `--refresh-flickr` is eventually retired. Not a current bug (that path is dry-run
+only); just a latent inconsistency.
+
+**2. Implement `bp db prune-proposals`.**
+Applied, superseded, and rejected proposals accumulate indefinitely. A periodic prune
+command (e.g. `bp db prune-proposals --older-than 90d`) will eventually be needed to
+prevent unbounded table growth and keep query performance stable. Not urgent at current
+data volumes, but should be done before the table grows into the millions of rows.
+
+**Files to change:**
+- `flickr/metadata_puller.py` (`_normalise_tags` cleanup)
+- `bp` + `db/db.py` (new `db prune-proposals` subcommand)
+
+---
+
 ## What is NOT in scope
 
 - Real-time change detection (webhooks, file-system watchers). Everything is pull-based on a schedule.

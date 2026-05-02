@@ -60,8 +60,11 @@ Apple Photos Library          Flickr (cloud)
 | `poller/thumbnailer.py` | Populate thumbnail paths for the review UI |
 | `poller/link_orphans.py` | Batch-link Photos-only / Flickr-only record pairs by capture timestamp |
 | `poller/reconcile.py` | Compare DB push state against actual Flickr state |
+| `flickr/sync_metadata.py` | `bp sync-metadata` entry point; drift filter + sync engine dispatch |
+| `flickr/metadata_puller.py` | Cache-based sync engine: diff, classify, generate proposals |
+| `flickr/proposal_applier.py` | Apply approved proposals to Photos or Flickr with staleness re-checks |
 | `reviewer/app.py` | Flask web UI |
-| `reviewer/templates/` | Jinja2 templates (dashboard, review grid, photo detail, faces, zones, duplicates, conflicts) |
+| `reviewer/templates/` | Jinja2 templates (dashboard, review grid, photo detail, faces, zones, duplicates, conflicts, proposals) |
 | `config/` | Configuration templates and launchd plists |
 | `db/migrate_001_privacy_state_check.py` | DB migration: adds CHECK constraint on privacy_state |
 | `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at, indexes on push state and tags, schema_migrations table |
@@ -108,14 +111,17 @@ bp scan                            # Scan recent Photos additions (last 7 days)
 bp thumbs                          # Populate missing thumbnail paths
 bp reconcile                       # Check DB vs actual Flickr state
 bp reconcile --fix                 # Check and repair mismatches
+bp reconcile --apply-proposals     # Apply pending non-conflict metadata proposals
+bp pipeline                        # Sync-metadata then auto-apply non-conflict proposals
 bp link-orphans                    # Merge split Photos-only/Flickr-only records (see below)
 bp link-orphans --dry-run          # Count linkable pairs without writing
 bp sync-albums                     # Sync Apple Photos albums → Flickr photosets (backfill)
 bp sync-albums --dry-run           # Preview what would be pushed without writing
 bp sync-albums --album "Vacation"  # Sync a single named album only
-bp sync-metadata                   # Pull Flickr metadata back into Apple Photos
+bp sync-metadata                   # Diff cached metadata, generate proposals
 bp sync-metadata --dry-run         # Detect differences without writing anything
 bp sync-metadata --conflicts-only  # Record conflicts only; skip Photos writes
+bp sync-metadata --force           # Process all photos, ignoring last-harmonized timestamp
 bp ui                              # Start the review UI (http://localhost:5173)
 ```
 
@@ -139,17 +145,20 @@ mkdir -p ~/Library/Logs/BluePearmain
 
 cp config/com.cdevers.blue-pearmain.poller.plist ~/Library/LaunchAgents/
 cp config/com.cdevers.blue-pearmain.reviewer.plist ~/Library/LaunchAgents/
+cp config/com.cdevers.blue-pearmain.pipeline.plist ~/Library/LaunchAgents/
 
-# Edit paths in both plists to match your install location, then:
+# Edit paths in all plists to match your install location, then:
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.poller.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.pipeline.plist
 ```
 
-The reviewer starts immediately and restarts automatically if it crashes. The poller runs hourly. Logs are written to `~/Library/Logs/BluePearmain/` and are visible in Console.app:
+The reviewer starts immediately and restarts automatically if it crashes. The poller runs hourly. The pipeline runs every 6 hours: it diffs cached metadata against both sides, generates proposals, and auto-applies any non-conflict proposals (collision proposals are left for manual review in the UI). Logs are written to `~/Library/Logs/BluePearmain/` and are visible in Console.app:
 
 ```bash
 tail -f ~/Library/Logs/BluePearmain/reviewer.log
 tail -f ~/Library/Logs/BluePearmain/poller.log
+tail -f ~/Library/Logs/BluePearmain/pipeline.log
 ```
 
 To restart either service:
@@ -329,61 +338,58 @@ Exit codes follow the same convention as `bp reconcile`: `0` = success, `1` = so
 
 When a photoset is created for an album, the first photo being pushed to it is used as the primary (cover) photo. The photoset URL is stored in the database so subsequent syncs can add to the existing set rather than creating duplicates.
 
-## Metadata sync (Flickr → Apple Photos)
+## Metadata sync
 
-`bp sync-metadata` compares Flickr title, description, and tags against the corresponding Apple Photos fields for every photo that has a linked `flickr_id` and `uuid`. It applies a simple policy per field:
+Blue Pearmain keeps Flickr and Apple Photos metadata (title, description, tags) in sync via a proposal pipeline. Both sides are cached in SQLite; the sync engine diffs the caches without making live API calls, classifies differences, and writes proposals. Proposals are either auto-applied (non-conflicts) or queued for manual review (collisions).
 
-| Situation | Action |
-|-----------|--------|
-| Flickr has a value, Photos doesn't | Write Flickr value to Photos |
-| Both sides have the same value | No-op |
-| Both sides have different non-empty values | Record a **conflict** for manual resolution |
-| Only Photos has a value | Preserve it — no-op |
-| Flickr returns "photo not found" (error 1) | Mark `flickr_deleted = 1` in DB; skip silently on future runs |
+### How it works
 
-Tags are compared as sets (case-insensitive) so capitalisation differences alone do not trigger a conflict.
+1. **`bp poll`** (hourly via launchd) fetches Flickr title, description, and tags into the local DB cache.
+2. **`bp scan`** reads Apple Photos title, description, and keywords into the cache.
+3. **`bp pipeline`** (every 6 hours via launchd) runs the sync engine:
+   - Diffs the two caches per field, skipping photos already confirmed in sync.
+   - Classifies each difference as one of three types:
 
-Photos deleted from Flickr are detected on first encounter, recorded in the database, and automatically excluded from all subsequent sync runs — no repeated warnings.
+| Type | Definition | Action |
+|------|-----------|--------|
+| **Non-conflict** | One side has a value; the other is empty | Auto-applied — no review needed |
+| **Divergence** | Both sides have values; one is a superset of the other (tags only) | Auto-applied |
+| **Collision** | Both sides have different non-empty values | Queued for manual resolution in `/proposals` |
+
+4. Non-conflict and divergence proposals are applied automatically. Collision proposals appear in the **Proposals** page of the reviewer UI (`/proposals`).
+
+Tags are compared as normalised sets (case-insensitive, punctuation-stripped to match Flickr's own normalisation) so capitalisation and hyphenation differences alone do not trigger a conflict.
 
 ### Commands
 
 ```bash
-bp sync-metadata                        # Write clear Flickr wins; record conflicts
-bp sync-metadata --dry-run              # Log what would change; no writes to Photos or DB
-bp sync-metadata --conflicts-only       # Record conflicts only; skip Photos writes
+bp pipeline                             # Diff caches + auto-apply non-conflicts (usual entry point)
+bp sync-metadata                        # Diff caches and generate proposals only (no apply)
+bp sync-metadata --dry-run              # Log what would change; no writes to DB
+bp sync-metadata --force                # Process all photos, ignoring last-harmonized timestamp
 bp sync-metadata --limit 100            # Process at most 100 photos
 bp sync-metadata --photo-id 42          # Process a single photo (useful for debugging)
+bp reconcile --apply-proposals          # Apply pending non-conflict proposals without re-syncing
 ```
 
-Output — progress lines are logged every 50 photos, followed by a summary:
+### Resolving collisions
 
-```
-2026-04-29T12:00:00  INFO      blue-pearmain.metadata_puller  Processing 500 photos
-2026-04-29T12:00:10  INFO      blue-pearmain.metadata_puller  Progress: 50 / 500 — written=8  conflicts=2  skipped=190  failed=0
-...
-written=12  conflicts=3  skipped=847  failed=0
-```
+When both Flickr and Photos have different non-empty values for a field, the collision appears in the **Proposals** page (`/proposals`). Each card shows the two values side by side with:
 
-Exit codes: `0` = success, `1` = some photos had write or API failures, `2` = operational error (DB unavailable, Photos library not found, `osxphotos` not installed).
+- **Use Flickr** — applies the Flickr value to Photos and marks the proposal applied.
+- **Use Photos** — applies the Photos value to Flickr and marks the proposal applied.
 
-### Resolving conflicts
-
-When both Flickr and Photos have different values for a field, the conflict is recorded in the database and surfaced in the **Conflicts** page of the reviewer UI (`/conflicts`). Each conflict shows the Flickr value and the Photos value side by side with two action buttons:
-
-- **Use Flickr** — marks the conflict resolved in favour of Flickr. Run `bp sync-metadata` afterwards to write the value to Photos.
-- **Keep Photos** — marks the conflict resolved in favour of Photos. The Photos value is left as-is; optionally push it up to Flickr with `bp reconcile --fix`.
-
-The conflict count appears as a badge on the Conflicts nav link and as a stat card on the dashboard whenever there are open conflicts.
+Keyboard shortcuts on the proposals page: `f` = use Flickr, `p` = use Photos, `x` = reject/skip, `j`/`k` = navigate.
 
 ### Requirements
 
-`bp sync-metadata` reads metadata via `osxphotos` and writes back to Apple Photos via `photoscript` (an AppleScript bridge). This requires:
+Applying proposals to Apple Photos requires:
 
-1. **Photos.app must be running** when the write step executes. The command checks for this and exits with a clear error message if Photos is not open.
-2. **Automation permission**: on macOS 14+, the first run may prompt for permission to allow the terminal to control Photos. Grant it once and it persists.
-3. `photoscript` installed (`pip install photoscript`).
+1. **Photos.app must be running** — the applier checks and leaves proposals pending if Photos is closed; they apply on the next pipeline run.
+2. **Automation permission** — on macOS 14+, grant terminal control of Photos once when prompted.
+3. `photoscript` in the project's venv (`uv add photoscript`).
 
-`--dry-run` and `--conflicts-only` do not require Photos to be running.
+`--dry-run` does not require Photos to be running.
 
 ## Faces
 
@@ -497,7 +503,7 @@ All scripts are idempotent and safe to re-run.
 python -m pytest tests/ -q
 ```
 
-285 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, metadata-sync batch behaviour (PhotosDB caching, progress logging, flickr_deleted detection), Phase 2 Flickr metadata cache writes (flickr_title, flickr_tags JSON/hash, flickr_last_updated, meta_synced_flickr_at), Phase 3 DB-cache-first reads in sync-metadata (cache hit/miss logic, API call avoidance), Phase 4 scanner Photos metadata cache writes (photos_title/description/tags/hash, meta_synced_photos_at, skip-condition update), Phase 4 sync engine (classify_tags, run_sync_engine, upsert_proposal), Phase 5 proposal applier (apply_proposal, apply_batch, staleness checks), drift filter with --force bypass, and the reviewer "Open in Photos" API endpoint (AppleScript via osascript, template rendering, absent-when-no-uuid).
+356 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, metadata-sync batch behaviour (PhotosDB caching, progress logging, flickr_deleted detection), Flickr metadata cache writes (flickr_title, flickr_tags JSON/hash, flickr_last_updated, meta_synced_flickr_at), DB-cache-first reads in sync-metadata (cache hit/miss logic, API call avoidance), scanner Photos metadata cache writes (photos_title/description/tags/hash, meta_synced_photos_at, skip-condition update), sync engine (classify_tags, classify_text_field, run_sync_engine, upsert_proposal, hash_match supersede), proposal applier (apply_proposal, apply_batch, staleness/drift re-checks, title/description apply), drift filter with --force bypass, and the reviewer "Open in Photos" API endpoint.
 
 ## License
 
