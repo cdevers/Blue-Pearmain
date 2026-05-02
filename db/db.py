@@ -971,4 +971,26 @@ class Database:
             result["flickr_only"] = row["n"] if row else 0
         except Exception:
             result["flickr_only"] = 0
+        try:
+            row = self.conn.execute(
+                """SELECT MAX(meta_synced_flickr_at) AS flickr_ts,
+                          MAX(meta_synced_photos_at) AS photos_ts
+                   FROM photos"""
+            ).fetchone()
+            now = datetime.now(timezone.utc)
+            def _age_hours(ts: str | None) -> float | None:
+                if not ts:
+                    return None
+                try:
+                    dt = datetime.fromisoformat(ts)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return (now - dt).total_seconds() / 3600
+                except Exception:
+                    return None
+            result["flickr_cache_age_hours"]  = _age_hours(row["flickr_ts"])  if row else None
+            result["photos_cache_age_hours"]  = _age_hours(row["photos_ts"])  if row else None
+        except Exception:
+            result["flickr_cache_age_hours"] = None
+            result["photos_cache_age_hours"] = None
         return result

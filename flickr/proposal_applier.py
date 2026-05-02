@@ -118,17 +118,27 @@ def apply_batch(
     conflict_types: list[str] | None = None,
     limit: int = 500,
 ) -> dict:
-    """Apply pending proposals in batch. Returns totals dict."""
+    """Apply pending proposals in batch. Returns totals dict.
+    Pass limit=0 for no cap.
+    """
     if conflict_types is None:
         conflict_types = ["non_conflict"]
 
     placeholders = ",".join("?" * len(conflict_types))
-    rows = db.conn.execute(
-        f"""SELECT id FROM metadata_proposals
-            WHERE status = 'pending' AND conflict_type IN ({placeholders})
-            ORDER BY id LIMIT ?""",
-        conflict_types + [limit],
-    ).fetchall()
+    if limit and limit > 0:
+        rows = db.conn.execute(
+            f"""SELECT id FROM metadata_proposals
+                WHERE status = 'pending' AND conflict_type IN ({placeholders})
+                ORDER BY id LIMIT ?""",
+            conflict_types + [limit],
+        ).fetchall()
+    else:
+        rows = db.conn.execute(
+            f"""SELECT id FROM metadata_proposals
+                WHERE status = 'pending' AND conflict_type IN ({placeholders})
+                ORDER BY id""",
+            conflict_types,
+        ).fetchall()
 
     totals: dict = {"applied": 0, "failed": 0, "superseded": 0}
     for r in rows:

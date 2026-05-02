@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.cdevers.blue-pearmain.pipeline.plist
+  launchd agent for Blue Pearmain metadata sync pipeline
+
+  Runs 'bp pipeline' every 6 hours: generates proposals for any photos whose
+  cached metadata has drifted, then auto-applies all non-conflict proposals.
+  Collision proposals are left pending for manual review in the UI.
+
+  Install:
+    cp config/com.cdevers.blue-pearmain.pipeline.plist \
+       ~/Library/LaunchAgents/com.cdevers.blue-pearmain.pipeline.plist
+    launchctl bootstrap gui/$(id -u) \
+       ~/Library/LaunchAgents/com.cdevers.blue-pearmain.pipeline.plist
+
+  Run now (without waiting for interval):
+    launchctl start com.cdevers.blue-pearmain.pipeline
+
+  Uninstall:
+    launchctl bootout gui/$(id -u) \
+       ~/Library/LaunchAgents/com.cdevers.blue-pearmain.pipeline.plist
+    rm ~/Library/LaunchAgents/com.cdevers.blue-pearmain.pipeline.plist
+
+  If load/unload give "Input/output error", use bootout/bootstrap instead:
+    launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.pipeline.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.pipeline.plist
+
+  Logs:
+    tail -f /Users/cdevers/Library/Logs/BluePearmain/pipeline.log
+
+  NOTE: Photos.app must be running for proposals targeting Apple Photos to apply.
+  Proposals are left pending if Photos is not open; they will apply on the next run.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cdevers.blue-pearmain.pipeline</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <!-- Update these paths to match your actual install location -->
+        <string>/Users/cdevers/.local/bin/uv</string>
+        <string>run</string>
+        <string>python</string>
+        <string>/Users/cdevers/Documents/GitHub/Blue Pearmain/bp</string>
+        <string>pipeline</string>
+        <string>--config</string>
+        <string>/Users/cdevers/Documents/GitHub/Blue Pearmain/config/config.yml</string>
+    </array>
+
+    <!-- Run every 6 hours -->
+    <key>StartInterval</key>
+    <integer>21600</integer>
+
+    <!-- Don't run immediately at login — let the poller seed fresh data first -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- Stdout/stderr for debugging -->
+    <key>StandardOutPath</key>
+    <string>/Users/cdevers/Library/Logs/BluePearmain/pipeline.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/cdevers/Library/Logs/BluePearmain/pipeline.log</string>
+
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>/Users/cdevers/Documents/GitHub/Blue Pearmain</string>
+
+    <!-- Don't thrash if it keeps crashing -->
+    <key>ThrottleInterval</key>
+    <integer>300</integer>
+</dict>
+</plist>

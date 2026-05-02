@@ -142,6 +142,30 @@
   </div>
   {% endif %}
 
+  {# Cache freshness row #}
+  {% set fa = stats.flickr_cache_age_hours %}
+  {% set pa = stats.photos_cache_age_hours %}
+  {% if fa is not none or pa is not none %}
+  <div style="margin-bottom:16px; font-size:12px; color:var(--muted); display:flex; gap:16px; flex-wrap:wrap">
+    {% if fa is not none %}
+    {% set fc = '#66bb6a' if fa < 12 else ('#f5a623' if fa < 48 else '#e57373') %}
+    <span>Flickr cache: <span style="color:{{ fc }}; font-weight:600">
+      {%- if fa < 1 -%}{{ (fa * 60)|int }}m
+      {%- elif fa < 24 -%}{{ fa|int }}h
+      {%- else -%}{{ (fa / 24)|int }}d
+      {%- endif %} old</span></span>
+    {% endif %}
+    {% if pa is not none %}
+    {% set pc = '#66bb6a' if pa < 12 else ('#f5a623' if pa < 48 else '#e57373') %}
+    <span>Photos cache: <span style="color:{{ pc }}; font-weight:600">
+      {%- if pa < 1 -%}{{ (pa * 60)|int }}m
+      {%- elif pa < 24 -%}{{ pa|int }}h
+      {%- else -%}{{ (pa / 24)|int }}d
+      {%- endif %} old</span></span>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <div style="margin-top:32px; display:flex; gap:12px; align-items:center; flex-wrap:wrap">
     <a href="{{ url_for('review', state='candidate_public') }}" class="btn btn-primary">
       Start reviewing →

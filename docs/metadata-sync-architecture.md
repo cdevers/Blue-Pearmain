@@ -369,20 +369,29 @@ editor). Will be added in `migrate_009_canonical_metadata.py` when Phase 6 ships
 
 ---
 
-### Phase 8 — Scheduled sync (cron / launchd)
+### Phase 8 — Scheduled sync (launchd) ✓ done
 *Depends on Phases 2–5.*
 
-Add a `bp cron` command or `launchd` plist that schedules:
-- `bp poll` — daily (refreshes Flickr cache)
-- `bp scan` — weekly (refreshes Photos cache)
-- `bp sync-metadata` — after each poll (fast drift detection, generates proposals)
-- `bp reconcile --fix` — after sync-metadata (applies non-conflict proposals automatically; leaves collisions for the UI)
+`bp pipeline` chains sync-metadata + apply in a single Python-import call (no subprocess
+overhead): runs `_select_drift_filtered` + `run_sync_engine` to generate proposals, then
+`apply_batch(conflict_types=["non_conflict"])` to auto-apply them. Collision proposals
+remain pending for human review.
 
-Reviewer dashboard: show "Flickr cache: N hours old" and "Photos cache: N hours old".
+`config/com.cdevers.blue-pearmain.pipeline.plist` runs `bp pipeline` every 6 hours via
+launchd. The existing `com.cdevers.blue-pearmain.poller.plist` continues to run `bp poll`
+every hour. `bp scan` is run manually (full Photos library scan is slow).
 
-**Files to change:**
-- `bp cron` sub-command or `launchd/com.bluepearmain.sync.plist`
-- `reviewer/app.py` + `reviewer/templates/dashboard.html`
+Dashboard freshness indicators: `db.stats()` now returns `flickr_cache_age_hours` and
+`photos_cache_age_hours` (computed from `MAX(meta_synced_flickr_at/photos_at)`).
+Dashboard shows "Flickr cache: Xh old" / "Photos cache: Xh old" with color coding
+(green < 12h, amber < 48h, red ≥ 48h).
+
+**Files changed:**
+- `bp` (`cmd_pipeline`, `pipeline` subparser)
+- `flickr/proposal_applier.py` (`apply_batch` limit=0 support)
+- `db/db.py` (`stats()` cache-age fields)
+- `config/com.cdevers.blue-pearmain.pipeline.plist` (new)
+- `reviewer/templates/dashboard.html` (freshness row)
 
 ---
 

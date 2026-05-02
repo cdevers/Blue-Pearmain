@@ -3,6 +3,7 @@
 bp — Blue Pearmain command-line interface
 
 Usage:
+    bp pipeline [--limit N]         Sync-metadata then auto-apply non-conflict proposals
     bp stats                        Show photo counts by privacy state
     bp poll [--backfill] [--days N] Poll Flickr for new/updated photos
     bp scan [--all] [--days N]      Scan Apple Photos library
@@ -150,6 +151,66 @@ def cmd_thumbs(args):
     ])
 
 
+def cmd_pipeline(args):
+    """
+    Run the full metadata sync pipeline without manual steps:
+      1. bp sync-metadata  — diff cached values, generate proposals
+      2. bp reconcile --apply-proposals  — auto-apply all non-conflict proposals
+    Collision proposals are left pending for manual review in the UI.
+    """
+    import logging
+    import yaml
+    from pathlib import Path as _Path
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+    log = logging.getLogger("blue-pearmain.pipeline")
+
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+
+    db_path      = config["database"]["path"]
+    library_path = str(_Path(config.get("photos_library", {}).get("path", "")).expanduser())
+
+    from db.db import Database
+    db = Database(db_path)
+
+    # Step 1: generate proposals for any photos whose cache has drifted
+    from flickr.sync_metadata import _select_drift_filtered
+    from flickr.metadata_puller import run_sync_engine
+
+    photo_ids = _select_drift_filtered(db, limit=0)
+    if photo_ids:
+        log.info("pipeline: sync-metadata — %d photos to harmonise", len(photo_ids))
+        sync_totals = run_sync_engine(db, photo_ids, verbose=args.verbose)
+        log.info(
+            "pipeline: sync-metadata done — proposals=%d  hash_matches=%d  skipped=%d  failed=%d",
+            sync_totals["proposals"], sync_totals["hash_matches"],
+            sync_totals["skipped"],   sync_totals["failed"],
+        )
+    else:
+        log.info("pipeline: sync-metadata — nothing to harmonise (all in sync)")
+        sync_totals = {}
+
+    # Step 2: auto-apply non-conflict proposals (both tags and title/description)
+    from flickr.proposal_applier import apply_batch
+
+    apply_totals = apply_batch(
+        db, library_path,
+        conflict_types=["non_conflict"],
+        limit=args.limit or 0,
+    )
+    log.info(
+        "pipeline: apply done — applied=%d  failed=%d  superseded=%d",
+        apply_totals["applied"], apply_totals["failed"], apply_totals["superseded"],
+    )
+
+    db.close()
+
+
 def cmd_reconcile(args):
     from poller.reconcile import main
     _run(main, args, [
@@ -248,6 +309,11 @@ def main():
     # thumbs
     sub.add_parser("thumbs", help="Populate missing thumbnail paths")
 
+    # pipeline
+    p_pipe = sub.add_parser("pipeline", help="Sync-metadata then auto-apply non-conflict proposals")
+    p_pipe.add_argument("--limit", type=int, default=None,
+                        help="Cap number of proposals applied (default: unlimited)")
+
     # reconcile
     p_rec = sub.add_parser("reconcile", help="Check DB state vs actual Flickr state")
     p_rec.add_argument("--fix",              action="store_true", help="Re-push mismatches")
@@ -298,6 +364,7 @@ def main():
     if not hasattr(args, "days"):            args.days = None
     if not hasattr(args, "backfill"):        args.backfill = False
     if not hasattr(args, "fix"):             args.fix = False
+    if not hasattr(args, "apply_proposals"): args.apply_proposals = False
     if not hasattr(args, "limit"):           args.limit = None
     if not hasattr(args, "port"):            args.port = 5173
     if not hasattr(args, "debug"):           args.debug = False
@@ -306,6 +373,7 @@ def main():
     if not hasattr(args, "conflicts_only"):  args.conflicts_only = False
 
     dispatch = {
+        "pipeline":      cmd_pipeline,
         "stats":         cmd_stats,
         "poll":          cmd_poll,
         "scan":          cmd_scan,
