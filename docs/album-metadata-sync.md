@@ -360,12 +360,12 @@ CREATE TABLE IF NOT EXISTS metadata_conflicts (
 
 1. **Folder hierarchy:** Apple Photos supports nested folders containing
    albums. Should these be mirrored as Flickr collections (which can contain
-   photosets)? Flickr collections are a Pro feature — leave for later.
+   photosets)? Flickr collections are a Pro feature — leave for later. ([GH #11](https://github.com/cdevers/Blue-Pearmain/issues/11))
 
 2. **Album deletion:** *(decision made)* If a photo is removed from an
    Apple Photos album, it is **not** removed from the Flickr photoset.
    Phase 1 is additive-only. Removal can be added later with an explicit
-   `--remove` flag on `bp sync-albums`.
+   `--remove` flag on `bp sync-albums`. ([GH #10](https://github.com/cdevers/Blue-Pearmain/issues/10))
 
 3. **Primary photo for new photosets:** *(resolved)* `flickr.photosets.create`
    requires a primary photo. The implementation uses the photo currently

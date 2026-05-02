@@ -1,6 +1,6 @@
 # iPhoto Library Migration — Design Notes
 
-**Status:** Not started. This document records the problem statement and rough design ideas for later implementation.
+**Status:** Not started. Blocked on storage strategy decision. Tracked in [GH #12](https://github.com/cdevers/Blue-Pearmain/issues/12). This document records the problem statement and rough design ideas for later implementation.
 
 ---
 

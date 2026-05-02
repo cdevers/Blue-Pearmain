@@ -4,7 +4,7 @@ Small improvements noted during development; none are urgent.
 
 ---
 
-## 1. Shrink thumbnail cache (30 GB → ~7 GB)
+## 1. Shrink thumbnail cache (30 GB → ~7 GB) ([GH #4](https://github.com/cdevers/Blue-Pearmain/issues/4))
 
 **Problem:** The thumbs directory is ~30 GB because `download_thumb` prefers `url_l`
 (1024 px). For review-grid use the 500 px `url_m` size is plenty, and the detail view
@@ -49,7 +49,7 @@ when `uuid` is non-NULL. `x-apple-photos://` is not a valid macOS URL scheme.
 
 ---
 
-## 3. WAL checkpoint maintenance
+## 3. WAL checkpoint maintenance ([GH #5](https://github.com/cdevers/Blue-Pearmain/issues/5))
 
 **Problem:** The SQLite WAL file grew to 6.5 GB without being checkpointed (observed
 2026-04-30). This happens when the process crashes or is killed mid-write, leaving

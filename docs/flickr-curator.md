@@ -1,4 +1,4 @@
-# flickr-curator: EXIF machine tag backfill idea
+# flickr-curator: EXIF machine tag backfill idea ([GH #8](https://github.com/cdevers/Blue-Pearmain/issues/8), [GH #9](https://github.com/cdevers/Blue-Pearmain/issues/9))
 
 ## Background
 
@@ -44,7 +44,7 @@ Add a **machine tag backfill** mode that:
 3. Calls `flickr.photos.addTags` to write them back
 4. Skips photos that already have machine tags (idempotent)
 
-**Priority:** low until machine tag search is confirmed working or Flickr fixes it.
+**Priority:** low until machine tag search is confirmed working or Flickr fixes it. Investigation tracked in [GH #8](https://github.com/cdevers/Blue-Pearmain/issues/8); backfill feature in [GH #9](https://github.com/cdevers/Blue-Pearmain/issues/9) (blocked on #8).
 
 ### Minimum viable tag set
 

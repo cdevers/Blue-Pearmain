@@ -1,7 +1,7 @@
 # LAN Access for the Review UI
 
 **Blue Pearmain — Feature Note**
-*Status: Pending | Author: cdevers | Last updated: 2026-04-15*
+*Status: Pending | Author: cdevers | Last updated: 2026-04-15 | Tracked: [GH #2](https://github.com/cdevers/Blue-Pearmain/issues/2) (URL + --host), [GH #3](https://github.com/cdevers/Blue-Pearmain/issues/3) (mDNS)*
 
 ---
 
@@ -17,7 +17,7 @@ The practical problem is **discoverability**: the Mac's LAN IP varies by network
 
 ## Planned Work
 
-1. **Print the LAN URL on startup.** When `bp ui` starts, detect the machine's LAN IP and log it alongside the localhost URL:
+1. **Print the LAN URL on startup.** ([GH #2](https://github.com/cdevers/Blue-Pearmain/issues/2)) When `bp ui` starts, detect the machine's LAN IP and log it alongside the localhost URL:
 
    ```
    Starting review UI at http://localhost:5173
@@ -26,9 +26,9 @@ The practical problem is **discoverability**: the Mac's LAN IP varies by network
 
    Use `socket.gethostbyname(socket.gethostname())` or iterate `socket.getaddrinfo` to find the first non-loopback IPv4 address.
 
-2. **Optionally advertise via mDNS / Bonjour.** Register a `_http._tcp` service so the UI appears as `blue-pearmain.local:5173` on the LAN without needing to know the IP. This requires either the `zeroconf` Python package or a launchd helper. Lower priority.
+2. **Optionally advertise via mDNS / Bonjour.** ([GH #3](https://github.com/cdevers/Blue-Pearmain/issues/3)) Register a `_http._tcp` service so the UI appears as `blue-pearmain.local:5173` on the LAN without needing to know the IP. This requires either the `zeroconf` Python package or a launchd helper. Lower priority.
 
-3. **`--host` flag on `bp ui`.** The subparser already lacks `--host`; add it so users can override the bind address explicitly:
+3. **`--host` flag on `bp ui`.** ([GH #2](https://github.com/cdevers/Blue-Pearmain/issues/2)) The subparser already lacks `--host`; add it so users can override the bind address explicitly:
 
    ```
    bp ui --host 0.0.0.0 --port 5173

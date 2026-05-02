@@ -132,7 +132,7 @@ CREATE TABLE IF NOT EXISTS metadata_proposals (
 
 6. **No retroactive proposals on first migration:** When the schema migration runs, set `meta_last_harmonized_at = NOW()` for all existing rows. The sync engine treats this as "assumed in sync at migration time" — it is not a verified sync state, but it suppresses the initial noise burst. Future changes will generate proposals organically. Document this clearly in the migration script.
 
-7. **Proposal table pruning:** Applied, rejected, and superseded proposals accumulate indefinitely. A periodic `bp db prune-proposals --older-than 90d` command (or equivalent) will eventually be needed. Not required now.
+7. **Proposal table pruning:** Applied, rejected, and superseded proposals accumulate indefinitely. A periodic `bp db prune-proposals --older-than 90d` command (or equivalent) will eventually be needed. Not required now. ([GH #6](https://github.com/cdevers/Blue-Pearmain/issues/6))
 
 **UX / workflow:**
 - The reviewer UI `/proposals` page (new) lists pending proposals grouped by conflict type.
@@ -304,7 +304,7 @@ photos (10,226 non-conflicts, 1,000 collisions, 0 divergences).
 
 ---
 
-### Phase 6 — Manual merge editor for collision resolution
+### Phase 6 — Manual merge editor for collision resolution ([GH #1](https://github.com/cdevers/Blue-Pearmain/issues/1))
 *Depends on Phase 5.*
 
 Collisions currently require picking one side wholesale ("Use Flickr" or "Use Photos").
@@ -431,7 +431,7 @@ bp reconcile --fix (after sync-metadata)
 Two small housekeeping items identified during post-migration review. Neither affects
 correctness of the current pipeline; both are quality-of-life for future maintainability.
 
-**1. Normalize `_normalise_tags` in the legacy path.**
+**1. Normalize `_normalise_tags` in the legacy path.** ([GH #7](https://github.com/cdevers/Blue-Pearmain/issues/7))
 `pull_photo_metadata` (reachable only via `bp sync-metadata --refresh-flickr`) calls
 `_normalise_tags` which uses `.lower()` instead of `.casefold()` and keeps punctuation
 (hyphens, spaces). The active pipeline (`run_sync_engine` / `_classify_tags`) uses
@@ -440,7 +440,7 @@ correctness of the current pipeline; both are quality-of-life for future maintai
 if `--refresh-flickr` is eventually retired. Not a current bug (that path is dry-run
 only); just a latent inconsistency.
 
-**2. Implement `bp db prune-proposals`.**
+**2. Implement `bp db prune-proposals`.** ([GH #6](https://github.com/cdevers/Blue-Pearmain/issues/6))
 Applied, superseded, and rejected proposals accumulate indefinitely. A periodic prune
 command (e.g. `bp db prune-proposals --older-than 90d`) will eventually be needed to
 prevent unbounded table growth and keep query performance stable. Not urgent at current
