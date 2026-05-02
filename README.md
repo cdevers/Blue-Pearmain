@@ -70,7 +70,7 @@ Apple Photos Library          Flickr (cloud)
 | `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at, indexes on push state and tags, schema_migrations table |
 | `db/migrate_003_dimensions_and_dedup.py` | DB migration: adds width/height columns and duplicate_groups table |
 | `bp` | Unified command-line entry point |
-| `tests/` | Unit tests (361 tests) |
+| `tests/` | Unit tests (366 tests) |
 
 ## Requirements
 
@@ -239,10 +239,12 @@ The grid view shows photos with proposed tags and action buttons. Keyboard short
 
 | Key | Action |
 |---|---|
-| `J` / `↓` | Select next conflict |
-| `K` / `↑` | Select previous conflict |
-| `F` | Resolve all fields in selected conflict using Flickr value |
-| `P` | Resolve all fields in selected conflict keeping Photos value |
+| `J` / `↓` | Select next proposal |
+| `K` / `↑` | Select previous proposal |
+| `F` | Use Flickr value (collision proposals) |
+| `P` | Use Photos value (collision) or Approve (non-conflict/divergence) |
+| `M` | Open inline merge editor (tag collision proposals only) |
+| `X` | Reject / skip |
 
 **Dashboard:**
 
@@ -503,7 +505,7 @@ All scripts are idempotent and safe to re-run.
 python -m pytest tests/ -q
 ```
 
-361 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, metadata-sync batch behaviour (PhotosDB caching, progress logging, flickr_deleted detection), Flickr metadata cache writes (flickr_title, flickr_tags JSON/hash, flickr_last_updated, meta_synced_flickr_at), DB-cache-first reads in sync-metadata (cache hit/miss logic, API call avoidance), scanner Photos metadata cache writes (photos_title/description/tags/hash, meta_synced_photos_at, skip-condition update), sync engine (classify_tags, classify_text_field, run_sync_engine, upsert_proposal, hash_match supersede), proposal applier (apply_proposal, apply_batch, staleness/drift re-checks, title/description apply), drift filter with --force bypass, and the reviewer "Open in Photos" API endpoint.
+366 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, metadata-sync batch behaviour (PhotosDB caching, progress logging, flickr_deleted detection), Flickr metadata cache writes (flickr_title, flickr_tags JSON/hash, flickr_last_updated, meta_synced_flickr_at), DB-cache-first reads in sync-metadata (cache hit/miss logic, API call avoidance), scanner Photos metadata cache writes (photos_title/description/tags/hash, meta_synced_photos_at, skip-condition update), sync engine (classify_tags, classify_text_field, run_sync_engine, upsert_proposal, hash_match supersede), proposal applier (apply_proposal, apply_batch, staleness/drift re-checks, title/description apply), drift filter with --force bypass, and the reviewer "Open in Photos" API endpoint.
 
 ## License
 

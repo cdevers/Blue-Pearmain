@@ -768,6 +768,23 @@ def api_proposal_approve_reverse(proposal_id: int):
     return jsonify(result)
 
 
+@app.route("/api/proposals/<int:proposal_id>/apply-manual", methods=["POST"])
+def api_proposal_apply_manual(proposal_id: int):
+    """Apply a user-constructed merged tag set to both Photos and Flickr."""
+    data = request.get_json() or {}
+    custom_tags = data.get("value")
+    if not isinstance(custom_tags, list):
+        return jsonify({"ok": False, "reason": "missing or invalid 'value' list"}), 400
+    from flickr.proposal_applier import apply_manual_merge
+    library_path = str(Path(_config.get("photos_library", {}).get("path", "")).expanduser())
+    result = apply_manual_merge(db(), proposal_id, custom_tags, library_path, flickr_client=client())
+    if result.get("ok"):
+        sibling = db().find_collision_sibling(proposal_id)
+        if sibling:
+            db().resolve_proposal(sibling, "applied", "resolved via manual merge of sibling")
+    return jsonify(result)
+
+
 @app.route("/api/proposals/<int:proposal_id>/reject", methods=["POST"])
 def api_proposal_reject(proposal_id: int):
     _d = db()

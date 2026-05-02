@@ -153,50 +153,145 @@ def apply_batch(
     return totals
 
 
+def apply_manual_merge(
+    db: "Database",
+    proposal_id: int,
+    custom_tags: list[str],
+    library_path: str,
+    flickr_client: "FlickrClient | None" = None,
+) -> dict:
+    """
+    Apply a user-constructed tag set to both Photos and Flickr simultaneously.
+    Only valid for pending tag collision proposals.  The caller is responsible
+    for resolving the sibling collision proposal afterward.
+    """
+    row = db.conn.execute(
+        """SELECT mp.id, mp.photo_id, mp.field, mp.conflict_type, mp.status,
+                  mp.source, mp.target,
+                  mp.source_hash_at_creation, mp.target_hash_at_creation,
+                  p.flickr_id, p.uuid,
+                  p.flickr_tags_hash, p.photos_tags_hash
+           FROM metadata_proposals mp
+           JOIN photos p ON p.id = mp.photo_id
+           WHERE mp.id = ?""",
+        (proposal_id,),
+    ).fetchone()
+
+    if not row:
+        return {"ok": False, "reason": "proposal not found"}
+    if row["field"] != "tags":
+        return {"ok": False, "reason": "apply-manual only valid for tag proposals"}
+    if row["conflict_type"] != "collision":
+        return {"ok": False, "reason": "apply-manual only valid for collision proposals"}
+    if row["status"] != "pending":
+        return {"ok": False, "reason": f"proposal already '{row['status']}'"}
+
+    # Apply-time staleness checks (same contract as apply_proposal)
+    src_hash = row["flickr_tags_hash"] if row["source"] == "flickr" else row["photos_tags_hash"]
+    tgt_hash = row["photos_tags_hash"] if row["target"] == "photos" else row["flickr_tags_hash"]
+    if src_hash != row["source_hash_at_creation"]:
+        _supersede(db, proposal_id)
+        return {"ok": False, "reason": "source_changed"}
+    if tgt_hash != row["target_hash_at_creation"]:
+        _supersede(db, proposal_id)
+        return {"ok": False, "reason": "target_changed"}
+
+    errors = []
+
+    if row["uuid"]:
+        r = _write_tags_to_photos(db, row["photo_id"], row["uuid"], custom_tags, library_path)
+        if not r["ok"]:
+            errors.append(f"Photos: {r['reason']}")
+
+    if row["flickr_id"]:
+        if flickr_client is None:
+            errors.append("Flickr: no flickr_client provided")
+        else:
+            r = _write_tags_to_flickr(
+                db, row["photo_id"], row["flickr_id"], custom_tags, flickr_client
+            )
+            if not r["ok"]:
+                errors.append(f"Flickr: {r['reason']}")
+
+    if errors:
+        return {"ok": False, "reason": "; ".join(errors)}
+
+    _mark_applied(db, proposal_id)
+    db.conn.commit()
+    log.info("manual merge proposal %s → both  photo_id=%s  tags=%d",
+             proposal_id, row["photo_id"], len(custom_tags))
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _write_tags_to_photos(
+    db: "Database", photo_id: int, uuid: str, new_tags: list[str], library_path: str
+) -> dict:
+    """Write tags to Photos.app and update the DB cache. Does not touch proposal state."""
+    if not _photos_is_running():
+        return {"ok": False, "reason": "Photos.app is not running"}
+    try:
+        import photoscript
+    except ImportError:
+        return {"ok": False, "reason": "photoscript not installed"}
+    try:
+        photo = photoscript.Photo(uuid)
+    except Exception as e:
+        return {"ok": False, "reason": f"photo not found in Photos: {e}"}
+    try:
+        photo.keywords = new_tags
+    except Exception as e:
+        return {"ok": False, "reason": f"write failed: {e}"}
+    try:
+        written = list(photo.keywords or [])
+    except Exception:
+        written = new_tags
+    now = _now_iso()
+    db.conn.execute(
+        "UPDATE photos SET photos_tags=?, photos_tags_hash=?, meta_synced_photos_at=?, updated_at=? WHERE id=?",
+        (json.dumps(written), _compute_hash(written), now, now, photo_id),
+    )
+    return {"ok": True, "written": written}
+
+
+def _write_tags_to_flickr(
+    db: "Database", photo_id: int, flickr_id: str, new_tags: list[str],
+    flickr_client: "FlickrClient",
+) -> dict:
+    """Write tags to Flickr and update the DB cache. Does not touch proposal state."""
+    truncated = len(new_tags) > MAX_FLICKR_TAGS
+    tags_to_write = new_tags[:MAX_FLICKR_TAGS] if truncated else new_tags
+    try:
+        flickr_client.set_tags(flickr_id, tags_to_write)
+    except Exception as e:
+        return {"ok": False, "reason": f"Flickr API error: {e}"}
+    now = _now_iso()
+    db.conn.execute(
+        """UPDATE photos
+           SET flickr_tags=?, flickr_tags_hash=?, meta_synced_flickr_at=?,
+               tags_truncated_for_flickr=?, updated_at=?
+           WHERE id=?""",
+        (json.dumps(tags_to_write), _compute_hash(tags_to_write), now,
+         1 if truncated else 0, now, photo_id),
+    )
+    return {"ok": True, "truncated": truncated}
+
 
 def _apply_to_photos(db: "Database", row, new_tags: list[str], library_path: str) -> dict:
     uuid = row["uuid"]
     if not uuid:
         return {"ok": False, "reason": "photo has no uuid"}
-    if not _photos_is_running():
-        return {"ok": False, "reason": "Photos.app is not running"}
-
-    try:
-        import photoscript
-    except ImportError:
-        return {"ok": False, "reason": "photoscript not installed"}
-
-    try:
-        photo = photoscript.Photo(uuid)
-    except Exception as e:
-        return {"ok": False, "reason": f"photo not found in Photos: {e}"}
-
-    try:
-        photo.keywords = new_tags
-    except Exception as e:
-        return {"ok": False, "reason": f"write failed: {e}"}
-
-    try:
-        written = list(photo.keywords or [])
-    except Exception:
-        written = new_tags  # can't re-read; assume success
-
-    now = _now_iso()
-    db.conn.execute(
-        """UPDATE photos
-           SET photos_tags=?, photos_tags_hash=?, meta_synced_photos_at=?, updated_at=?
-           WHERE id=?""",
-        (json.dumps(written), _compute_hash(written), now, now, row["photo_id"]),
-    )
+    result = _write_tags_to_photos(db, row["photo_id"], uuid, new_tags, library_path)
+    if not result["ok"]:
+        return result
+    written = result.get("written", new_tags)
     _mark_applied(db, row["id"])
     db.conn.commit()
-    log.info(
-        "applied proposal %s → Photos  photo_id=%s  tags=%d",
-        row["id"], row["photo_id"], len(written),
-    )
+    log.info("applied proposal %s → Photos  photo_id=%s  tags=%d",
+             row["id"], row["photo_id"], len(written))
     return {"ok": True}
 
 
@@ -206,32 +301,15 @@ def _apply_to_flickr(
     flickr_id = row["flickr_id"]
     if not flickr_id:
         return {"ok": False, "reason": "photo has no flickr_id"}
-
-    truncated = len(new_tags) > MAX_FLICKR_TAGS
-    if truncated:
-        new_tags = new_tags[:MAX_FLICKR_TAGS]
-
-    try:
-        flickr_client.set_tags(flickr_id, new_tags)
-    except Exception as e:
-        return {"ok": False, "reason": f"Flickr API error: {e}"}
-
-    now = _now_iso()
-    db.conn.execute(
-        """UPDATE photos
-           SET flickr_tags=?, flickr_tags_hash=?, meta_synced_flickr_at=?,
-               tags_truncated_for_flickr=?, updated_at=?
-           WHERE id=?""",
-        (json.dumps(new_tags), _compute_hash(new_tags), now,
-         1 if truncated else 0, now, row["photo_id"]),
-    )
+    result = _write_tags_to_flickr(db, row["photo_id"], flickr_id, new_tags, flickr_client)
+    if not result["ok"]:
+        return result
     _mark_applied(db, row["id"])
     db.conn.commit()
-    log.info(
-        "applied proposal %s → Flickr  photo_id=%s  tags=%d%s",
-        row["id"], row["photo_id"], len(new_tags),
-        " (truncated)" if truncated else "",
-    )
+    log.info("applied proposal %s → Flickr  photo_id=%s  tags=%d%s",
+             row["id"], row["photo_id"],
+             min(len(new_tags), MAX_FLICKR_TAGS),
+             " (truncated)" if result.get("truncated") else "")
     return {"ok": True}
 
 

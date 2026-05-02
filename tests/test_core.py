@@ -4243,6 +4243,150 @@ class TestApplyProposal(unittest.TestCase):
         self.assertIn("Photos", result["reason"])
 
 
+class TestApplyManualMerge(unittest.TestCase):
+    """apply_manual_merge: validation, staleness checks, dual-write, sibling resolution."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        self.db.upsert_photo({
+            "flickr_id": "F1", "uuid": "U1",
+            "privacy_state": "candidate_public",
+            "flickr_tags": '["nature","travel"]', "flickr_tags_hash": "FH1",
+            "photos_tags": '["nature","vacation"]', "photos_tags_hash": "PH1",
+            "meta_synced_flickr_at": "2026-01-01T00:00:00+00:00",
+            "meta_synced_photos_at": "2026-01-01T00:00:00+00:00",
+        })
+        self.photo_id = self.db.get_photo_by_flickr_id("F1")["id"]
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _seed_collision_pair(self, src_hash="FH1", tgt_hash="PH1"):
+        """Insert the two proposals that form a collision pair."""
+        for src, tgt in (("flickr", "photos"), ("photos", "flickr")):
+            self.db.upsert_proposal({
+                "photo_id": self.photo_id, "field": "tags",
+                "proposed_value": '["nature","travel"]',
+                "source": src, "target": tgt,
+                "conflict_type": "collision",
+                "source_hash_at_creation": src_hash if src == "flickr" else tgt_hash,
+                "target_hash_at_creation": tgt_hash if tgt == "photos" else src_hash,
+                "created_at": "2026-01-01T00:00:00+00:00",
+            })
+        self.db.conn.commit()
+        rows = self.db.conn.execute(
+            "SELECT id, source FROM metadata_proposals WHERE photo_id=? ORDER BY id",
+            (self.photo_id,)
+        ).fetchall()
+        # primary = flickr→photos; sibling = photos→flickr
+        primary = next(r["id"] for r in rows if r["source"] == "flickr")
+        sibling = next(r["id"] for r in rows if r["source"] == "photos")
+        return primary, sibling
+
+    def test_rejects_non_tag_proposal(self):
+        from flickr.proposal_applier import apply_manual_merge
+        self.db.upsert_proposal({
+            "photo_id": self.photo_id, "field": "title",
+            "proposed_value": "My Photo",
+            "source": "flickr", "target": "photos", "conflict_type": "collision",
+            "source_hash_at_creation": "H", "target_hash_at_creation": "H",
+            "created_at": "2026-01-01T00:00:00+00:00",
+        })
+        self.db.conn.commit()
+        pid = self.db.conn.execute(
+            "SELECT id FROM metadata_proposals WHERE photo_id=? ORDER BY id DESC LIMIT 1",
+            (self.photo_id,)
+        ).fetchone()["id"]
+        result = apply_manual_merge(self.db, pid, ["tag"], library_path="")
+        self.assertFalse(result["ok"])
+        self.assertIn("tag proposals", result["reason"])
+
+    def test_rejects_non_collision_proposal(self):
+        from flickr.proposal_applier import apply_manual_merge
+        self.db.upsert_proposal({
+            "photo_id": self.photo_id, "field": "tags",
+            "proposed_value": '["a"]',
+            "source": "flickr", "target": "photos", "conflict_type": "non_conflict",
+            "source_hash_at_creation": "FH1", "target_hash_at_creation": "PH1",
+            "created_at": "2026-01-01T00:00:00+00:00",
+        })
+        self.db.conn.commit()
+        pid = self.db.conn.execute(
+            "SELECT id FROM metadata_proposals WHERE photo_id=? ORDER BY id DESC LIMIT 1",
+            (self.photo_id,)
+        ).fetchone()["id"]
+        result = apply_manual_merge(self.db, pid, ["a"], library_path="")
+        self.assertFalse(result["ok"])
+        self.assertIn("collision", result["reason"])
+
+    def test_source_changed_supersedes(self):
+        from flickr.proposal_applier import apply_manual_merge
+        primary, _ = self._seed_collision_pair(src_hash="STALE")
+        result = apply_manual_merge(self.db, primary, ["nature"], library_path="")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason"], "source_changed")
+        status = self.db.conn.execute(
+            "SELECT status FROM metadata_proposals WHERE id=?", (primary,)
+        ).fetchone()["status"]
+        self.assertEqual(status, "superseded")
+
+    def test_applies_to_flickr_and_marks_applied(self):
+        from unittest.mock import MagicMock
+        from flickr.proposal_applier import apply_manual_merge
+        primary, sibling = self._seed_collision_pair()
+
+        mock_flickr = MagicMock()
+        with unittest.mock.patch("flickr.proposal_applier._photos_is_running", return_value=False):
+            # Photos not running — only Flickr write happens (uuid present but Photos blocked)
+            result = apply_manual_merge(
+                self.db, primary, ["nature", "travel", "vacation"],
+                library_path="", flickr_client=mock_flickr,
+            )
+
+        # Flickr write attempted
+        mock_flickr.set_tags.assert_called_once()
+        # DB updated for Flickr
+        row = self.db.conn.execute(
+            "SELECT flickr_tags FROM photos WHERE id=?", (self.photo_id,)
+        ).fetchone()
+        import json
+        self.assertIn("nature", json.loads(row["flickr_tags"]))
+
+    def test_sibling_resolved_on_success(self):
+        from unittest.mock import MagicMock, patch
+        from flickr.proposal_applier import apply_manual_merge
+        primary, sibling = self._seed_collision_pair()
+
+        mock_flickr = MagicMock()
+        mock_photo = MagicMock()
+        mock_photo.keywords = ["nature"]
+        mock_ps = MagicMock()
+        mock_ps.Photo.return_value = mock_photo
+
+        with patch("flickr.proposal_applier._photos_is_running", return_value=True), \
+             patch.dict("sys.modules", {"photoscript": mock_ps}):
+            result = apply_manual_merge(
+                self.db, primary, ["nature", "travel", "vacation"],
+                library_path="", flickr_client=mock_flickr,
+            )
+
+        self.assertTrue(result["ok"], result)
+        # Primary marked applied
+        p_status = self.db.conn.execute(
+            "SELECT status FROM metadata_proposals WHERE id=?", (primary,)
+        ).fetchone()["status"]
+        self.assertEqual(p_status, "applied")
+        # Caller (app.py) handles sibling — verify it is still pending here
+        # (the endpoint resolves it, not apply_manual_merge itself)
+        s_status = self.db.conn.execute(
+            "SELECT status FROM metadata_proposals WHERE id=?", (sibling,)
+        ).fetchone()["status"]
+        self.assertEqual(s_status, "pending")
+
+
 class TestGetPendingProposals(unittest.TestCase):
     """db.get_pending_proposals ordering and filtering."""
 

@@ -152,6 +152,117 @@
   color: var(--muted);
 }
 
+/* Merge editor */
+.btn-merge {
+  background: transparent;
+  border: 1px solid #7a5c00;
+  color: #fc9;
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--font);
+}
+.btn-merge:hover { background: rgba(122,92,0,0.25); }
+.merge-editor {
+  border-top: 1px solid var(--border);
+  padding: 14px 0 4px;
+  margin-top: 10px;
+}
+.merge-editor-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.merge-chips-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 10px;
+  min-height: 26px;
+}
+.merge-chip-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+.merge-chip-label input[type=checkbox] { display: none; }
+.merge-chip-tag {
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  border: 1px solid transparent;
+  transition: opacity .15s;
+}
+.merge-chip-label input:checked  + .merge-chip-tag { opacity: 1; }
+.merge-chip-label input:not(:checked) + .merge-chip-tag { opacity: 0.3; text-decoration: line-through; }
+.merge-chip-tag.source-flickr { background: rgba(106,180,245,0.2); border-color: #3a7fbb; color: #6ab4f5; }
+.merge-chip-tag.source-photos { background: rgba(160,216,160,0.2); border-color: #4a9a4a; color: #a0d8a0; }
+.merge-chip-tag.source-both   { background: var(--border); color: var(--text); border-color: #555; }
+.merge-chip-tag.source-new    { background: rgba(200,150,255,0.2); border-color: #8050bb; color: #c89eff; }
+.merge-add-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.merge-add-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 12px;
+  font-family: var(--font);
+  padding: 4px 8px;
+}
+.merge-add-input:focus { outline: 1px solid var(--accent); }
+.merge-add-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--font);
+}
+.merge-add-btn:hover { border-color: var(--accent); color: var(--accent); }
+.merge-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.merge-selected-count { font-size: 11px; color: var(--muted); flex: 1; }
+.btn-apply-merged {
+  background: #7a5c00;
+  border: 1px solid #a07800;
+  color: #fc9;
+  padding: 5px 14px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-weight: 600;
+}
+.btn-apply-merged:hover { background: #a07800; }
+.btn-apply-merged:disabled { opacity: 0.5; cursor: default; }
+.btn-cancel-merge {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 5px 10px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--font);
+}
+.btn-cancel-merge:hover { border-color: var(--muted); }
+
 .proposal-card.selected {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
@@ -210,6 +321,7 @@
     <span><kbd>j</kbd>/<kbd>k</kbd> navigate</span>
     <span><kbd>p</kbd> approve / use Photos</span>
     <span><kbd>f</kbd> use Flickr <span style="color:#444">(collisions)</span></span>
+    <span><kbd>m</kbd> merge editor <span style="color:#444">(tag collisions)</span></span>
     <span><kbd>x</kbd> reject / skip</span>
   </div>
 </div>
@@ -247,7 +359,10 @@
     {% set photos_text_val = '' %}
   {% endif %}
 
-  <div class="proposal-card {{ p.conflict_type }}" id="card-{{ p.id }}">
+  <div class="proposal-card {{ p.conflict_type }}" id="card-{{ p.id }}"
+       {% if p.conflict_type == 'collision' and p.field == 'tags' %}data-tag-collision="true"
+       data-flickr-tags="{{ p.flickr_tags | tojson | e }}"
+       data-photos-tags="{{ p.photos_tags | tojson | e }}"{% endif %}>
     <img class="thumb"
          src="{{ url_for('thumb', photo_id=p.photo_id) }}"
          alt="{{ p.original_filename or '' }}"
@@ -327,12 +442,34 @@
         {% if p.conflict_type == 'collision' %}
         <button class="btn-approve" onclick="approveProposal({{ p.id }}, this)">Use Flickr ✓</button>
         <button class="btn-approve" onclick="approveReverse({{ p.id }}, this)">Use Photos ✓</button>
+        {% if p.field == 'tags' %}
+        <button class="btn-merge"   onclick="toggleMergeEditor({{ p.id }})">Edit ✎</button>
+        {% endif %}
         <button class="btn-reject"  onclick="rejectProposal({{ p.id }}, this)">Skip ↷</button>
         {% else %}
         <button class="btn-approve" onclick="approveProposal({{ p.id }}, this)">Approve ✓</button>
         <button class="btn-reject"  onclick="rejectProposal({{ p.id }}, this)">Reject ✕</button>
         {% endif %}
       </div>
+
+      {% if p.conflict_type == 'collision' and p.field == 'tags' %}
+      <div class="merge-editor" id="merge-{{ p.id }}" style="display:none">
+        <div class="merge-editor-label">Custom merge — click tags to toggle in/out:</div>
+        <div class="merge-chips-container" id="merge-chips-{{ p.id }}"></div>
+        <div class="merge-add-row">
+          <input type="text" class="merge-add-input" id="merge-add-{{ p.id }}"
+                 placeholder="Add new tag…"
+                 onkeydown="if(event.key==='Enter'){addMergeChip({{ p.id }});event.preventDefault()}">
+          <button class="merge-add-btn" onclick="addMergeChip({{ p.id }})">+ Add</button>
+        </div>
+        <div class="merge-footer">
+          <span class="merge-selected-count" id="merge-count-{{ p.id }}">0 tags selected</span>
+          <button class="btn-apply-merged" id="merge-apply-{{ p.id }}"
+                  onclick="applyMerged({{ p.id }}, this)">Apply merged →</button>
+          <button class="btn-cancel-merge" onclick="toggleMergeEditor({{ p.id }})">Cancel</button>
+        </div>
+      </div>
+      {% endif %}
     </div>
   </div>
 {% endfor %}
@@ -416,7 +553,125 @@ async function bulkApprove(conflictType, btn) {
   }
 }
 
-// Keyboard navigation — same p/x/j/k muscle memory as the reviewer
+// ---------------------------------------------------------------------------
+// Merge editor
+// ---------------------------------------------------------------------------
+
+function _normTag(t) { return t.trim().toLowerCase(); }
+
+function _initMergeChips(id) {
+  const card = document.getElementById('card-' + id);
+  const flickrTags = JSON.parse(card.dataset.flickrTags || '[]');
+  const photosTags = JSON.parse(card.dataset.photosTags || '[]');
+
+  const flickrNorm = new Set(flickrTags.map(_normTag));
+  const photosNorm = new Set(photosTags.map(_normTag));
+
+  // Build deduplicated union, Flickr tags first, then Photos-only additions
+  const seen = new Set();
+  const chips = [];
+  for (const t of flickrTags) {
+    const k = _normTag(t);
+    if (!seen.has(k)) {
+      seen.add(k);
+      chips.push({tag: t, source: photosNorm.has(k) ? 'both' : 'flickr'});
+    }
+  }
+  for (const t of photosTags) {
+    const k = _normTag(t);
+    if (!seen.has(k)) {
+      seen.add(k);
+      chips.push({tag: t, source: 'photos'});
+    }
+  }
+
+  const container = document.getElementById('merge-chips-' + id);
+  container.innerHTML = chips.map(({tag, source}) =>
+    `<label class="merge-chip-label" title="${source === 'both' ? 'in both' : source + ' only'}">` +
+    `<input type="checkbox" value="${tag.replace(/"/g,'&quot;')}" checked ` +
+    `onchange="_updateMergeCount(${id})">` +
+    `<span class="merge-chip-tag source-${source}">${tag}</span></label>`
+  ).join('');
+
+  _updateMergeCount(id);
+}
+
+function _updateMergeCount(id) {
+  const checked = document.querySelectorAll(`#merge-chips-${id} input:checked`).length;
+  const added   = document.querySelectorAll(`#merge-chips-${id} .source-new`).length;
+  document.getElementById('merge-count-' + id).textContent =
+    `${checked} tag${checked !== 1 ? 's' : ''} selected` +
+    (added ? ` (${added} new)` : '');
+}
+
+function toggleMergeEditor(id) {
+  const editor = document.getElementById('merge-' + id);
+  const open   = editor.style.display === 'none';
+  editor.style.display = open ? '' : 'none';
+  if (open) {
+    _initMergeChips(id);
+    document.getElementById('merge-add-' + id).focus();
+  }
+}
+
+function addMergeChip(id) {
+  const input = document.getElementById('merge-add-' + id);
+  const tag   = input.value.trim();
+  if (!tag) return;
+
+  // Deduplicate against existing chips
+  const existing = [...document.querySelectorAll(`#merge-chips-${id} input`)];
+  if (existing.some(i => _normTag(i.value) === _normTag(tag))) {
+    // Just check it if it was unchecked
+    const match = existing.find(i => _normTag(i.value) === _normTag(tag));
+    if (match) { match.checked = true; _updateMergeCount(id); }
+    input.value = '';
+    return;
+  }
+
+  const label = document.createElement('label');
+  label.className = 'merge-chip-label';
+  label.title = 'new tag';
+  label.innerHTML =
+    `<input type="checkbox" value="${tag.replace(/"/g,'&quot;')}" checked ` +
+    `onchange="_updateMergeCount(${id})">` +
+    `<span class="merge-chip-tag source-new">${tag}</span>`;
+  document.getElementById('merge-chips-' + id).appendChild(label);
+  input.value = '';
+  _updateMergeCount(id);
+}
+
+async function applyMerged(id, btn) {
+  const selectedTags = [...document.querySelectorAll(`#merge-chips-${id} input:checked`)]
+    .map(i => i.value);
+  if (selectedTags.length === 0) {
+    toast('Select at least one tag', 'err');
+    return;
+  }
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = 'Applying…';
+  const r = await fetch('/api/proposals/' + id + '/apply-manual', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({value: selectedTags}),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    document.getElementById('card-' + id).style.opacity = '0.3';
+    btn.textContent = 'Applied ✓';
+    toast('Merged tags applied to both Flickr and Photos', 'ok');
+  } else {
+    btn.disabled = false;
+    btn.textContent = orig;
+    toast('Merge failed: ' + (d.reason || 'unknown error'), 'err');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard navigation
+// ---------------------------------------------------------------------------
+
 let _selected = null;
 
 function _cards() {
@@ -434,7 +689,7 @@ function _select(card) {
 // Click a card to select it
 document.addEventListener('click', e => {
   const card = e.target.closest('.proposal-card');
-  if (card && !e.target.closest('button') && !e.target.closest('a')) _select(card);
+  if (card && !e.target.closest('button') && !e.target.closest('a') && !e.target.closest('input')) _select(card);
 });
 
 document.addEventListener('keydown', e => {
@@ -443,8 +698,8 @@ document.addEventListener('keydown', e => {
 
   const cards = _cards();
   const idx = _selected ? cards.indexOf(_selected) : -1;
-
-  const isCollision = _selected?.classList.contains('collision');
+  const isCollision    = _selected?.classList.contains('collision');
+  const isTagCollision = _selected?.dataset.tagCollision === 'true';
 
   if (e.key === 'j' || e.key === 'ArrowDown') {
     e.preventDefault();
@@ -453,25 +708,27 @@ document.addEventListener('keydown', e => {
     e.preventDefault();
     _select(cards[idx > 0 ? idx - 1 : cards.length - 1]);
   } else if ((e.key === 'p' || e.key === 'P') && _selected) {
-    // p = Use Photos (on collision) or Approve (on non-conflict/divergence)
     const id = +_selected.id.replace('card-', '');
     _select(cards[idx + 1] ?? null);
     if (isCollision) {
-      const btn = _selected.querySelectorAll('.btn-approve')[1];
+      const btn = document.querySelector(`#card-${id} .btn-approve:nth-of-type(2)`);
       approveReverse(id, btn);
     } else {
-      const btn = _selected.querySelector('.btn-approve');
+      const btn = document.querySelector(`#card-${id} .btn-approve`);
       approveProposal(id, btn);
     }
   } else if ((e.key === 'f' || e.key === 'F') && _selected && isCollision) {
-    // f = Use Flickr (collision only)
     const id = +_selected.id.replace('card-', '');
-    const btn = _selected.querySelector('.btn-approve');
+    const btn = document.querySelector(`#card-${id} .btn-approve`);
     _select(cards[idx + 1] ?? null);
     approveProposal(id, btn);
+  } else if ((e.key === 'm' || e.key === 'M') && _selected && isTagCollision) {
+    e.preventDefault();
+    const id = +_selected.id.replace('card-', '');
+    toggleMergeEditor(id);
   } else if ((e.key === 'x' || e.key === 'X') && _selected) {
     const id = +_selected.id.replace('card-', '');
-    const btn = _selected.querySelector('.btn-reject');
+    const btn = document.querySelector(`#card-${id} .btn-reject`);
     _select(cards[idx + 1] ?? null);
     rejectProposal(id, btn);
   }
