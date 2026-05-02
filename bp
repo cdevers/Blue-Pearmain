@@ -11,6 +11,7 @@ Usage:
     bp reconcile [--fix] [--limit N] Check DB state vs actual Flickr state
     bp link-orphans [--dry-run]     Merge split Photos/Flickr records
     bp checkpoint [--mode MODE]     Checkpoint the WAL file (default: truncate)
+    bp all                          Full maintenance run (scan, poll, thumbs, pipeline, reconcile, sync-albums, checkpoint)
     bp ui                           Start the review UI (http://localhost:5173)
 
 Global options:
@@ -306,6 +307,66 @@ def _inject_argv(args, pairs):
     sys.argv = new_argv
 
 
+def _step_args(base, **overrides):
+    """Return a copy of base Namespace with overrides applied."""
+    import argparse as _ap
+    d = vars(base).copy()
+    d.update(overrides)
+    return _ap.Namespace(**d)
+
+
+def cmd_all(args):
+    """
+    Run the full periodic maintenance sequence:
+      1. scan --all       full Apple Photos index refresh
+      2. poll             catch recent Flickr uploads
+      3. thumbs           populate missing thumbnail paths
+      4. pipeline         metadata sync + auto-apply non-conflict proposals
+      5. reconcile --fix  repair DB/Flickr mismatches
+      6. sync-albums      push album memberships to Flickr
+      7. checkpoint       trim the WAL file
+    Each step runs independently; a failure is logged and the sequence continues.
+    Not included: 'scan --all' can be skipped with --skip-scan; 'bp poll --backfill'
+    and 'bp scan' incremental are intentionally excluded (manual operations).
+    """
+    import logging
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+    log = logging.getLogger("blue-pearmain.all")
+
+    steps = [
+        ("scan --all",      cmd_scan,        _step_args(args, all=True,       dry_run=False, days=None)),
+        ("poll",            cmd_poll,        _step_args(args, backfill=False, dry_run=False, days=None)),
+        ("thumbs",          cmd_thumbs,      args),
+        ("pipeline",        cmd_pipeline,    _step_args(args, limit=None)),
+        ("reconcile --fix", cmd_reconcile,   _step_args(args, fix=True,       apply_proposals=False, limit=None)),
+        ("sync-albums",     cmd_sync_albums, _step_args(args, dry_run=False,  album=None,    limit=None)),
+        ("checkpoint",      cmd_checkpoint,  _step_args(args, mode="truncate")),
+    ]
+
+    errors = []
+    for name, fn, step_args in steps:
+        log.info("all: -> %s", name)
+        try:
+            fn(step_args)
+        except SystemExit as e:
+            code = e.code if e.code is not None else 0
+            if code != 0:
+                log.warning("all: %s failed (exit %s) -- continuing", name, code)
+                errors.append(name)
+        except Exception as exc:
+            log.warning("all: %s failed: %s -- continuing", name, exc)
+            errors.append(name)
+
+    if errors:
+        log.warning("all: completed with %d error(s): %s", len(errors), ", ".join(errors))
+    else:
+        log.info("all: all steps complete")
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="bp",
@@ -383,6 +444,12 @@ def main():
     p_link.add_argument("--limit",   type=int, default=None,
                         help="Max pairs to process (default: all)")
 
+    # all
+    sub.add_parser(
+        "all",
+        help="Full maintenance run: scan --all, poll, thumbs, pipeline, reconcile --fix, sync-albums, checkpoint",
+    )
+
     # checkpoint
     p_ckpt = sub.add_parser("checkpoint", help="Run a WAL checkpoint to shrink the WAL file")
     p_ckpt.add_argument(
@@ -421,6 +488,7 @@ def main():
         "sync-metadata": cmd_sync_metadata,
         "link-orphans":  cmd_link_orphans,
         "checkpoint":    cmd_checkpoint,
+        "all":           cmd_all,
     }
     dispatch[args.command](args)
 

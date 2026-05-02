@@ -3,10 +3,18 @@
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   com.cdevers.blue-pearmain.pipeline.plist
-  launchd agent for Blue Pearmain metadata sync pipeline
+  launchd agent for Blue Pearmain full maintenance run
 
-  Runs 'bp pipeline' every 6 hours: generates proposals for any photos whose
-  cached metadata has drifted, then auto-applies all non-conflict proposals.
+  Runs 'bp all' every 6 hours:
+    1. scan --all       full Apple Photos index refresh
+    2. poll             catch recent Flickr uploads
+    3. thumbs           populate missing thumbnail paths
+    4. pipeline         metadata sync + auto-apply non-conflict proposals
+    5. reconcile --fix  repair DB/Flickr mismatches
+    6. sync-albums      push album memberships to Flickr
+    7. checkpoint       trim the WAL file
+
+  Each step runs independently; a failure is logged and the sequence continues.
   Collision proposals are left pending for manual review in the UI.
 
   Install:
@@ -45,7 +53,7 @@
         <string>run</string>
         <string>python</string>
         <string>/Users/cdevers/Documents/GitHub/Blue Pearmain/bp</string>
-        <string>pipeline</string>
+        <string>all</string>
         <string>--config</string>
         <string>/Users/cdevers/Documents/GitHub/Blue Pearmain/config/config.yml</string>
     </array>

@@ -4533,6 +4533,119 @@ class TestPhotoDetailTemplate(unittest.TestCase):
         self.assertFalse(data["ok"])
 
 
+class TestCmdAll(unittest.TestCase):
+    """bp all: correct step sequence, error isolation, per-step arg overrides."""
+
+    @classmethod
+    def _import_bp(cls):
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+        bp_path = str(Path(__file__).parent.parent / "bp")
+        loader = SourceFileLoader("bp_module", bp_path)
+        spec = importlib.util.spec_from_loader("bp_module", loader)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _args(self, **kwargs):
+        import argparse
+        base = dict(
+            config="config/config.yml", verbose=False, dry_run=False,
+            all=False, days=None, backfill=False, limit=None,
+            fix=False, apply_proposals=False, album=None, mode="truncate",
+            photo_id=None, conflicts_only=False, force=False,
+            port=5173, debug=False, oneliner=False,
+        )
+        base.update(kwargs)
+        return argparse.Namespace(**base)
+
+    def _patch_steps(self, bp, overrides=None):
+        """Replace all cmd_* steps with no-ops; apply per-name overrides."""
+        names = ("cmd_scan", "cmd_poll", "cmd_thumbs", "cmd_pipeline",
+                 "cmd_reconcile", "cmd_sync_albums", "cmd_checkpoint")
+        originals = {n: getattr(bp, n) for n in names}
+        for n in names:
+            setattr(bp, n, (overrides or {}).get(n, lambda a: None))
+        return originals
+
+    def _restore(self, bp, originals):
+        for n, orig in originals.items():
+            setattr(bp, n, orig)
+
+    def test_all_seven_steps_called_in_order(self):
+        bp = self._import_bp()
+        called = []
+        labels = {
+            "cmd_scan":        "scan",
+            "cmd_poll":        "poll",
+            "cmd_thumbs":      "thumbs",
+            "cmd_pipeline":    "pipeline",
+            "cmd_reconcile":   "reconcile",
+            "cmd_sync_albums": "sync_albums",
+            "cmd_checkpoint":  "checkpoint",
+        }
+        originals = self._patch_steps(
+            bp,
+            {n: (lambda lbl: lambda a: called.append(lbl))(lbl)
+             for n, lbl in labels.items()},
+        )
+        try:
+            bp.cmd_all(self._args())
+        finally:
+            self._restore(bp, originals)
+        self.assertEqual(
+            called,
+            ["scan", "poll", "thumbs", "pipeline", "reconcile", "sync_albums", "checkpoint"],
+        )
+
+    def test_failed_step_does_not_abort_sequence(self):
+        bp = self._import_bp()
+        called = []
+
+        def fail_scan(args):
+            called.append("scan")
+            raise SystemExit(1)
+
+        originals = self._patch_steps(bp, {
+            "cmd_scan": fail_scan,
+            "cmd_poll":        lambda a: called.append("poll"),
+            "cmd_thumbs":      lambda a: called.append("thumbs"),
+            "cmd_pipeline":    lambda a: called.append("pipeline"),
+            "cmd_reconcile":   lambda a: called.append("reconcile"),
+            "cmd_sync_albums": lambda a: called.append("sync_albums"),
+            "cmd_checkpoint":  lambda a: called.append("checkpoint"),
+        })
+        try:
+            bp.cmd_all(self._args())
+        finally:
+            self._restore(bp, originals)
+        # scan ran and failed; all six subsequent steps still ran
+        self.assertEqual(len(called), 7)
+        self.assertEqual(called[0], "scan")
+        self.assertIn("checkpoint", called)
+
+    def test_scan_gets_all_true_reconcile_gets_fix_true(self):
+        bp = self._import_bp()
+        captured = {}
+
+        def cap(name):
+            def fn(args): captured[name] = vars(args)
+            return fn
+
+        originals = self._patch_steps(bp, {
+            "cmd_scan":      cap("scan"),
+            "cmd_reconcile": cap("reconcile"),
+        })
+        try:
+            bp.cmd_all(self._args())
+        finally:
+            self._restore(bp, originals)
+        self.assertTrue(captured["scan"]["all"])
+        self.assertFalse(captured["scan"]["backfill"])
+        self.assertTrue(captured["reconcile"]["fix"])
+        self.assertFalse(captured["reconcile"]["apply_proposals"])
+
+
 class TestCheckpoint(unittest.TestCase):
     """db.checkpoint() and wal_autocheckpoint pragma."""
 

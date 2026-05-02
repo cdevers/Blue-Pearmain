@@ -72,3 +72,20 @@ bp checkpoint
 # If busy > 0, readers are still active; try:
 bp checkpoint --mode passive
 ```
+
+---
+
+## 4. Automate bp-all maintenance operations ([GH #13](https://github.com/cdevers/Blue-Pearmain/issues/13)) ✓ Partially implemented
+
+**`bp all` command (implemented 2026-05-02):** Runs the full periodic maintenance
+sequence: `scan --all` → `poll` → `thumbs` → `pipeline` → `reconcile --fix` →
+`sync-albums` → `checkpoint`. Each step runs independently; a failure is logged and
+the sequence continues.
+
+**`config/com.cdevers.blue-pearmain.pipeline.plist`** updated to call `bp all` instead
+of `bp pipeline`. The 6h daemon now runs the full maintenance sequence.
+
+**Not yet automated:**
+- `bp poll --backfill --days 100000` — must stay manual until the iCloud→Flickr
+  upload backlog (~29k photos as of 2026-05-02) is confirmed cleared.
+- `bp scan --all` now runs in the 6h daemon via `bp all`.

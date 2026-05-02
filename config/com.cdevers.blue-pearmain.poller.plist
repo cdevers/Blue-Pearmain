@@ -37,9 +37,10 @@
         <string>/Users/cdevers/.local/bin/uv</string>
         <string>run</string>
         <string>python</string>
-        <string>/Users/cdevers/Code/Blue-Pearmain/poller/poller.py</string>
+        <string>/Users/cdevers/Documents/GitHub/Blue Pearmain/bp</string>
+        <string>poll</string>
         <string>--config</string>
-        <string>/Users/cdevers/Code/Blue-Pearmain/config/config.yml</string>
+        <string>/Users/cdevers/Documents/GitHub/Blue Pearmain/config/config.yml</string>
     </array>
 
     <!-- Run every 60 minutes -->
@@ -58,7 +59,7 @@
 
     <!-- Working directory -->
     <key>WorkingDirectory</key>
-    <string>/Users/cdevers/Code/Blue-Pearmain</string>
+    <string>/Users/cdevers/Documents/GitHub/Blue Pearmain</string>
 
     <!-- Don't thrash if it keeps crashing -->
     <key>ThrottleInterval</key>

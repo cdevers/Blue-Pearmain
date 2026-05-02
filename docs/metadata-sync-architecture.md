@@ -377,9 +377,12 @@ overhead): runs `_select_drift_filtered` + `run_sync_engine` to generate proposa
 `apply_batch(conflict_types=["non_conflict"])` to auto-apply them. Collision proposals
 remain pending for human review.
 
-`config/com.cdevers.blue-pearmain.pipeline.plist` runs `bp pipeline` every 6 hours via
-launchd. The existing `com.cdevers.blue-pearmain.poller.plist` continues to run `bp poll`
-every hour. `bp scan` is run manually (full Photos library scan is slow).
+`config/com.cdevers.blue-pearmain.pipeline.plist` runs `bp all` every 6 hours via launchd
+([GH #13](https://github.com/cdevers/Blue-Pearmain/issues/13)). `bp all` is the full
+maintenance sequence: `scan --all`, `poll`, `thumbs`, `pipeline`, `reconcile --fix`,
+`sync-albums`, `checkpoint`. Each step runs independently; failures are logged and the
+sequence continues. The existing `com.cdevers.blue-pearmain.poller.plist` continues to
+run `bp poll` every hour for faster Flickr catch-up between the 6-hour cycles.
 
 Dashboard freshness indicators: `db.stats()` now returns `flickr_cache_age_hours` and
 `photos_cache_age_hours` (computed from `MAX(meta_synced_flickr_at/photos_at)`).
