@@ -70,7 +70,7 @@ Apple Photos Library          Flickr (cloud)
 | `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at, indexes on push state and tags, schema_migrations table |
 | `db/migrate_003_dimensions_and_dedup.py` | DB migration: adds width/height columns and duplicate_groups table |
 | `bp` | Unified command-line entry point |
-| `tests/` | Unit tests (373 tests) |
+| `tests/` | Unit tests (378 tests) |
 
 ## Requirements
 
@@ -302,7 +302,7 @@ bp link-orphans --dry-run   # preview how many pairs would be merged
 bp link-orphans             # merge all linkable pairs
 ```
 
-Pairs are matched by capture timestamp, timezone-normalised to second precision. Matching tolerates a one-second rounding difference: Apple Photos truncates sub-second EXIF times while Flickr rounds them, so a photo shot at `:50.941` appears as `:50` in the Photos record but `:51` in the Flickr record. Both the on-the-fly scanner and `bp link-orphans` check the truncated second and the rounded-up second. Where a Photos record matches more than one Flickr record at the same second (genuine duplicate uploads), the lowest-id Flickr record is used as the primary.
+Pairs are matched by capture timestamp, timezone-normalised to second precision. Matching tolerates up to a two-second rounding difference: Apple Photos truncates sub-second EXIF times while Flickr rounds them, so a photo shot at `:50.941` appears as `:50` in the Photos record but `:51` in the Flickr record. Some HEIC uploads exhibit a 2-second offset through Flickr's processing pipeline. Both the on-the-fly scanner and `bp link-orphans` check the truncated second, +1s, and +2s. Where a Photos record matches more than one Flickr record at the same second (genuine duplicate uploads), the lowest-id Flickr record is used as the primary.
 
 **`bp stats` also reports Approved + pushable** — the count of `approved_public` photos that have a `flickr_id` and haven't been pushed yet. This is the number the "Push approved" button in the review UI will actually act on. The larger "Approved public" total includes Photos-only records waiting for the Flickr iOS app to upload them; those cannot be pushed until they appear on Flickr and get linked.
 
@@ -508,7 +508,7 @@ All scripts are idempotent and safe to re-run.
 python -m pytest tests/ -q
 ```
 
-373 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, metadata-sync batch behaviour (PhotosDB caching, progress logging, flickr_deleted detection), Flickr metadata cache writes (flickr_title, flickr_tags JSON/hash, flickr_last_updated, meta_synced_flickr_at), DB-cache-first reads in sync-metadata (cache hit/miss logic, API call avoidance), scanner Photos metadata cache writes (photos_title/description/tags/hash, meta_synced_photos_at, skip-condition update), sync engine (classify_tags, classify_text_field, run_sync_engine, upsert_proposal, hash_match supersede), proposal applier (apply_proposal, apply_batch, staleness/drift re-checks, title/description apply), drift filter with --force bypass, WAL checkpoint (wal_autocheckpoint pragma, TRUNCATE and PASSIVE modes), `bp all` step sequencing and error isolation, and the reviewer "Open in Photos" API endpoint.
+378 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, metadata-sync batch behaviour (PhotosDB caching, progress logging, flickr_deleted detection), Flickr metadata cache writes (flickr_title, flickr_tags JSON/hash, flickr_last_updated, meta_synced_flickr_at), DB-cache-first reads in sync-metadata (cache hit/miss logic, API call avoidance), scanner Photos metadata cache writes (photos_title/description/tags/hash, meta_synced_photos_at, skip-condition update), sync engine (classify_tags, classify_text_field, run_sync_engine, upsert_proposal, hash_match supersede), proposal applier (apply_proposal, apply_batch, staleness/drift re-checks, title/description apply), drift filter with --force bypass, WAL checkpoint (wal_autocheckpoint pragma, TRUNCATE and PASSIVE modes), `bp all` step sequencing and error isolation, and the reviewer "Open in Photos" API endpoint.
 
 ## License
 

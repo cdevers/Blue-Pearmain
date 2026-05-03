@@ -256,6 +256,23 @@ def normalise_dt_plus1(dt_str: str | None) -> str | None:
         return None
 
 
+def normalise_dt_plus2(dt_str: str | None) -> str | None:
+    """
+    Return the normalised timestamp incremented by two seconds, or None.
+
+    Some Flickr uploads exhibit a 2-second offset rather than 1-second:
+    observed consistently for HEIC photos where sub-second rounding produces
+    an extra second of drift through Flickr's processing pipeline.
+    """
+    dt = normalise_dt(dt_str)
+    if not dt:
+        return None
+    try:
+        return (datetime.fromisoformat(dt) + timedelta(seconds=2)).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
 def find_flickr_match(photo_row: dict, db: Database) -> list[dict]:
     """
     Find Flickr DB records that match a Photos record.
@@ -270,10 +287,13 @@ def find_flickr_match(photo_row: dict, db: Database) -> list[dict]:
         return []
 
     dt1 = normalise_dt_plus1(photo_row.get("date_taken"))
-    if dt1:
+    dt2 = normalise_dt_plus2(photo_row.get("date_taken"))
+    patterns = [f"{dt}%"] + ([f"{dt1}%"] if dt1 else []) + ([f"{dt2}%"] if dt2 else [])
+    if len(patterns) > 1:
+        placeholders = " OR ".join("date_taken LIKE ?" for _ in patterns)
         rows = db.conn.execute(
-            "SELECT * FROM photos WHERE (date_taken LIKE ? OR date_taken LIKE ?) AND uuid IS NULL",
-            (f"{dt}%", f"{dt1}%"),
+            f"SELECT * FROM photos WHERE ({placeholders}) AND uuid IS NULL",
+            patterns,
         ).fetchall()
     else:
         rows = db.conn.execute(

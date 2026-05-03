@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 
 from db.db import Database
-from scanner import normalise_dt, normalise_dt_plus1
+from scanner import normalise_dt, normalise_dt_plus1, normalise_dt_plus2
 
 log = logging.getLogger("blue-pearmain.link-orphans")
 
@@ -98,11 +98,13 @@ def find_orphan_pairs(db: Database, limit: int) -> list[tuple[int, int]]:
         if not dt:
             continue
 
-        # Check both dt and dt+1: Flickr rounds sub-second EXIF times while
-        # Apple Photos truncates, so a photo at :50.94 normalises to :50 here
-        # but appears as :51 on Flickr.  Prefer exact match; fall back to +1s.
-        candidates = flickr_by_dt.get(dt, []) + flickr_by_dt.get(
-            normalise_dt_plus1(row["date_taken"]) or "", []
+        # Check dt, dt+1, dt+2: Flickr rounds sub-second EXIF times while Apple
+        # Photos truncates.  Most cases are off by 1s; some HEIC uploads exhibit
+        # a 2s offset through Flickr's processing pipeline.
+        candidates = (
+            flickr_by_dt.get(dt, [])
+            + flickr_by_dt.get(normalise_dt_plus1(row["date_taken"]) or "", [])
+            + flickr_by_dt.get(normalise_dt_plus2(row["date_taken"]) or "", [])
         )
         for flickr_id in candidates:
             if flickr_id not in claimed:

@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from analyzer.privacy import classify
 from analyzer.tagger import propose_tags
-from poller.scanner import normalise_dt, normalise_dt_plus1, build_enriched_row
+from poller.scanner import normalise_dt, normalise_dt_plus1, normalise_dt_plus2, build_enriched_row
 from db.db import Database, haversine_m
 
 
@@ -88,6 +88,25 @@ class TestNormaliseDtPlus1(unittest.TestCase):
             normalise_dt_plus1("2023-05-06T16:34:28-04:00"),
             "2023-05-06 16:34:29",
         )
+
+
+class TestNormaliseDtPlus2(unittest.TestCase):
+    """normalise_dt_plus2 returns the normalised timestamp incremented by two seconds."""
+
+    def test_adds_two_seconds(self):
+        self.assertEqual(
+            normalise_dt_plus2("2022-01-29T19:06:42.706693-05:00"),
+            "2022-01-29 19:06:44",
+        )
+
+    def test_carries_across_minute_boundary(self):
+        self.assertEqual(
+            normalise_dt_plus2("2024-06-16T10:00:59.1-04:00"),
+            "2024-06-16 10:01:01",
+        )
+
+    def test_none_returns_none(self):
+        self.assertIsNone(normalise_dt_plus2(None))
 
 
 # ---------------------------------------------------------------------------
@@ -895,6 +914,16 @@ class TestFindFlickrMatch(unittest.TestCase):
         matches = find_flickr_match(photo_row, self.db)
         flickr_ids = [m["flickr_id"] for m in matches]
         self.assertIn("CCC", flickr_ids)
+
+    def test_match_flickr_two_seconds_ahead(self):
+        # Some HEIC uploads exhibit a 2-second offset (observed for photos 58000/154037
+        # and 7299/154008). The matcher must find these via the +2s fallback.
+        from poller.scanner import find_flickr_match
+        self.db.upsert_photo({"flickr_id": "DDD", "date_taken": "2022-01-29 19:06:44"})
+        photo_row = {"date_taken": "2022-01-29T19:06:42.706693-05:00"}
+        matches = find_flickr_match(photo_row, self.db)
+        flickr_ids = [m["flickr_id"] for m in matches]
+        self.assertIn("DDD", flickr_ids)
 
 
 # ---------------------------------------------------------------------------
@@ -3763,6 +3792,28 @@ class TestLinkOrphans(unittest.TestCase):
         self.assertEqual(linked, 1)
         self.assertEqual(failed, 0)
         self.assertEqual(self.db.get_photo(photos_id)["flickr_id"], "flickr-round")
+        self.assertIsNone(self.db.get_photo(flickr_row))
+
+    def test_links_when_flickr_timestamp_two_seconds_ahead(self):
+        # Reproduces the 2-second offset observed for HEIC photos 58000/154037
+        # and 7299/154008 where Flickr's processing produces an extra second of drift.
+        from poller.link_orphans import link_orphans
+        photos_id = self.db.upsert_photo({
+            "uuid":              "uuid-2s",
+            "original_filename": "IMG_2s.HEIC",
+            "date_taken":        "2022-01-29T19:06:42.706693-05:00",
+            "privacy_state":     "candidate_public",
+            "apple_labels":      [],
+            "apple_persons":     [],
+        })
+        flickr_row = self.db.upsert_photo({
+            "flickr_id":  "flickr-2s",
+            "date_taken": "2022-01-29 19:06:44",
+        })
+        linked, failed = link_orphans(self.db, dry_run=False, limit=100)
+        self.assertEqual(linked, 1)
+        self.assertEqual(failed, 0)
+        self.assertEqual(self.db.get_photo(photos_id)["flickr_id"], "flickr-2s")
         self.assertIsNone(self.db.get_photo(flickr_row))
 
 
