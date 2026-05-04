@@ -153,6 +153,93 @@ def apply_batch(
     return totals
 
 
+def apply_collision_reverse(
+    db: "Database",
+    proposal_id: int,
+    flickr_client: "FlickrClient | None" = None,
+) -> dict:
+    """
+    Apply the current Photos value to Flickr for a collision proposal.
+
+    Called when the user clicks "Use Photos" on the displayed flickr→photos
+    collision proposal. Unlike apply_proposal on the sibling, this function
+    reads the Photos value directly from the photos row so it works even when
+    the photos→flickr sibling has been superseded by a sync run.
+
+    On success: marks the displayed proposal rejected and the sibling (any
+    status) applied.
+    """
+    row = db.conn.execute(
+        """SELECT mp.id, mp.photo_id, mp.field, mp.conflict_type, mp.status,
+                  mp.source, mp.target,
+                  p.flickr_id,
+                  p.flickr_tags, p.photos_tags,
+                  p.flickr_title, p.photos_title,
+                  p.flickr_description, p.photos_description
+           FROM metadata_proposals mp
+           JOIN photos p ON p.id = mp.photo_id
+           WHERE mp.id = ?""",
+        (proposal_id,),
+    ).fetchone()
+
+    if not row:
+        return {"ok": False, "reason": "proposal not found"}
+    if row["status"] != "pending":
+        return {"ok": False, "reason": f"proposal already '{row['status']}'"}
+    if row["conflict_type"] != "collision":
+        return {"ok": False, "reason": "approve-reverse only valid for collision proposals"}
+
+    flickr_id = row["flickr_id"]
+    if not flickr_id:
+        return {"ok": False, "reason": "photo has no flickr_id"}
+    if flickr_client is None:
+        return {"ok": False, "reason": "no flickr_client provided"}
+
+    field    = row["field"]
+    photo_id = row["photo_id"]
+
+    if field == "tags":
+        photos_tags = json.loads(row["photos_tags"]) if row["photos_tags"] else []
+        result = _write_tags_to_flickr(db, photo_id, flickr_id, photos_tags, flickr_client)
+        if not result["ok"]:
+            return result
+    else:
+        photos_value        = (row[f"photos_{field}"] or "").strip()
+        current_flickr_title = row["flickr_title"] or ""
+        current_flickr_desc  = row["flickr_description"] or ""
+        try:
+            if field == "title":
+                flickr_client.set_meta(flickr_id, title=photos_value, description=current_flickr_desc)
+            else:
+                flickr_client.set_meta(flickr_id, title=current_flickr_title, description=photos_value)
+        except Exception as e:
+            return {"ok": False, "reason": f"Flickr API error: {e}"}
+        now = _now_iso()
+        db.conn.execute(
+            f"UPDATE photos SET flickr_{field}=?, meta_synced_flickr_at=?, updated_at=? WHERE id=?",
+            (photos_value, now, now, photo_id),
+        )
+
+    # Reject the displayed proposal; mark the sibling (any status) as applied
+    db.conn.execute(
+        "UPDATE metadata_proposals SET status='rejected', resolved_at=?, resolution_note=? WHERE id=?",
+        (_now_iso(), "collision reverse: Photos value written to Flickr", proposal_id),
+    )
+    sibling = db.conn.execute(
+        """SELECT id FROM metadata_proposals
+           WHERE photo_id=? AND field=? AND source='photos' AND conflict_type='collision'
+           ORDER BY created_at DESC LIMIT 1""",
+        (photo_id, field),
+    ).fetchone()
+    if sibling:
+        _mark_applied(db, sibling["id"])
+
+    db.conn.commit()
+    log.info("collision-reverse proposal %s → Flickr  photo_id=%s  field=%s",
+             proposal_id, photo_id, field)
+    return {"ok": True}
+
+
 def apply_manual_merge(
     db: "Database",
     proposal_id: int,

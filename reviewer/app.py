@@ -761,15 +761,9 @@ def api_proposal_approve(proposal_id: int):
 
 @app.route("/api/proposals/<int:proposal_id>/approve-reverse", methods=["POST"])
 def api_proposal_approve_reverse(proposal_id: int):
-    """Approve the opposite-direction sibling of a collision proposal."""
-    from flickr.proposal_applier import apply_proposal
-    library_path = str(Path(_config.get("photos_library", {}).get("path", "")).expanduser())
-    sibling = db().find_collision_sibling(proposal_id)
-    if not sibling:
-        return jsonify({"ok": False, "reason": "sibling proposal not found"})
-    result = apply_proposal(db(), sibling, library_path, flickr_client=client())
-    if result.get("ok"):
-        db().resolve_proposal(proposal_id, "rejected", "collision sibling approved")
+    """Write the current Photos value to Flickr, resolving the collision."""
+    from flickr.proposal_applier import apply_collision_reverse
+    result = apply_collision_reverse(db(), proposal_id, flickr_client=client())
     return jsonify(result)
 
 

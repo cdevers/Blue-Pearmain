@@ -4438,6 +4438,121 @@ class TestApplyManualMerge(unittest.TestCase):
         self.assertEqual(s_status, "pending")
 
 
+class TestApplyCollisionReverse(unittest.TestCase):
+    """apply_collision_reverse: writes Photos value to Flickr, works even when sibling is superseded."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        self.db.upsert_photo({
+            "flickr_id": "F1", "uuid": "U1",
+            "privacy_state": "candidate_public",
+            "flickr_tags": '["travel"]',   "flickr_tags_hash": "FH1",
+            "photos_tags": '["nature"]',   "photos_tags_hash": "PH1",
+            "flickr_title": "Flickr Title",  "photos_title": "Photos Title",
+            "flickr_description": "Flickr desc", "photos_description": "Photos desc",
+            "meta_synced_flickr_at": "2026-01-01T00:00:00+00:00",
+            "meta_synced_photos_at": "2026-01-01T00:00:00+00:00",
+        })
+        self.photo_id = self.db.get_photo_by_flickr_id("F1")["id"]
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _seed_collision(self, field="tags", supersede_sibling=False):
+        for src, tgt in (("flickr", "photos"), ("photos", "flickr")):
+            self.db.upsert_proposal({
+                "photo_id": self.photo_id, "field": field,
+                "proposed_value": '["travel"]' if field == "tags" else "Flickr value",
+                "source": src, "target": tgt,
+                "conflict_type": "collision",
+                "source_hash_at_creation": "FH1" if src == "flickr" else "PH1",
+                "target_hash_at_creation": "PH1" if tgt == "photos" else "FH1",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            })
+        self.db.conn.commit()
+        rows = self.db.conn.execute(
+            "SELECT id, source FROM metadata_proposals WHERE photo_id=? AND field=? ORDER BY id",
+            (self.photo_id, field),
+        ).fetchall()
+        primary = next(r["id"] for r in rows if r["source"] == "flickr")
+        sibling = next(r["id"] for r in rows if r["source"] == "photos")
+        if supersede_sibling:
+            self.db.conn.execute(
+                "UPDATE metadata_proposals SET status='superseded' WHERE id=?", (sibling,)
+            )
+            self.db.conn.commit()
+        return primary, sibling
+
+    def test_writes_photos_tags_to_flickr(self):
+        from unittest.mock import MagicMock
+        from flickr.proposal_applier import apply_collision_reverse
+        primary, sibling = self._seed_collision(field="tags")
+        mock_flickr = MagicMock()
+        result = apply_collision_reverse(self.db, primary, flickr_client=mock_flickr)
+        self.assertTrue(result["ok"], result)
+        mock_flickr.set_tags.assert_called_once_with("F1", ["nature"])
+
+    def test_marks_primary_rejected_sibling_applied(self):
+        from unittest.mock import MagicMock
+        from flickr.proposal_applier import apply_collision_reverse
+        primary, sibling = self._seed_collision(field="tags")
+        apply_collision_reverse(self.db, primary, flickr_client=MagicMock())
+        p_status = self.db.conn.execute(
+            "SELECT status FROM metadata_proposals WHERE id=?", (primary,)
+        ).fetchone()["status"]
+        s_status = self.db.conn.execute(
+            "SELECT status FROM metadata_proposals WHERE id=?", (sibling,)
+        ).fetchone()["status"]
+        self.assertEqual(p_status, "rejected")
+        self.assertEqual(s_status, "applied")
+
+    def test_works_when_sibling_superseded(self):
+        """The key regression: sibling superseded by sync run should not block apply."""
+        from unittest.mock import MagicMock
+        from flickr.proposal_applier import apply_collision_reverse
+        primary, sibling = self._seed_collision(field="tags", supersede_sibling=True)
+        result = apply_collision_reverse(self.db, primary, flickr_client=MagicMock())
+        self.assertTrue(result["ok"], result)
+        s_status = self.db.conn.execute(
+            "SELECT status FROM metadata_proposals WHERE id=?", (sibling,)
+        ).fetchone()["status"]
+        self.assertEqual(s_status, "applied")
+
+    def test_writes_photos_title_to_flickr(self):
+        from unittest.mock import MagicMock
+        from flickr.proposal_applier import apply_collision_reverse
+        primary, _ = self._seed_collision(field="title")
+        mock_flickr = MagicMock()
+        result = apply_collision_reverse(self.db, primary, flickr_client=mock_flickr)
+        self.assertTrue(result["ok"], result)
+        mock_flickr.set_meta.assert_called_once_with("F1", title="Photos Title", description="Flickr desc")
+
+    def test_no_flickr_client_returns_error(self):
+        from flickr.proposal_applier import apply_collision_reverse
+        primary, _ = self._seed_collision(field="tags")
+        result = apply_collision_reverse(self.db, primary, flickr_client=None)
+        self.assertFalse(result["ok"])
+        self.assertIn("flickr_client", result["reason"])
+
+    def test_not_found_returns_error(self):
+        from flickr.proposal_applier import apply_collision_reverse
+        from unittest.mock import MagicMock
+        result = apply_collision_reverse(self.db, 9999, flickr_client=MagicMock())
+        self.assertFalse(result["ok"])
+        self.assertIn("not found", result["reason"])
+
+    def test_already_resolved_returns_error(self):
+        from unittest.mock import MagicMock
+        from flickr.proposal_applier import apply_collision_reverse
+        primary, _ = self._seed_collision(field="tags")
+        self.db.resolve_proposal(primary, "rejected")
+        result = apply_collision_reverse(self.db, primary, flickr_client=MagicMock())
+        self.assertFalse(result["ok"])
+
+
 class TestGetPendingProposals(unittest.TestCase):
     """db.get_pending_proposals ordering and filtering."""
 
