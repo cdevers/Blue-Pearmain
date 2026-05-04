@@ -130,9 +130,9 @@
   <div class="section-title">Recently reviewed</div>
   <div class="recent-grid">
     {% for photo in recent %}
-    <a href="{{ url_for('photo_detail', photo_id=loop.index) }}" style="text-decoration:none">
+    <a href="{{ url_for('photo_detail', photo_id=photo.id) }}" style="text-decoration:none">
       <div class="recent-thumb">
-        <img src="{{ url_for('thumb', photo_id=loop.index) }}"
+        <img src="{{ url_for('thumb', photo_id=photo.id) }}"
              alt="{{ photo.original_filename }}"
              loading="lazy">
         <div class="overlay">{{ photo.review_decision or photo.privacy_state }}</div>

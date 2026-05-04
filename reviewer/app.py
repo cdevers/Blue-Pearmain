@@ -86,7 +86,7 @@ def truncate_tags(tags: list, n: int = 8) -> str:
 def dashboard():
     stats = db().stats()
     recent = db().conn.execute(
-        """SELECT flickr_id, uuid, original_filename, thumbnail_path,
+        """SELECT id, flickr_id, uuid, original_filename, thumbnail_path,
                   privacy_state, review_decision, reviewed_at
            FROM photos
            WHERE reviewed_at IS NOT NULL
