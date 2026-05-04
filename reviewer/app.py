@@ -917,24 +917,39 @@ def api_rotate_flickr(photo_id: int):
     # Accumulate rotation in DB so all views can apply the CSS correction
     current = photo.get("display_rotation") or 0
     new_rotation = (current + degrees) % 360
+
+    # Flickr re-encodes the image on rotation, which invalidates the stored
+    # secret (and therefore the CDN URL). Refresh secret/server before busting
+    # the thumbnail cache so the next thumbnailer run fetches the right URL.
+    new_secret = photo.get("flickr_secret") or ""
+    new_server = photo.get("flickr_server") or ""
+    try:
+        info = c.get_photo_info(photo["flickr_id"])
+        p = info.get("photo", {})
+        new_secret = p.get("secret") or new_secret
+        new_server = p.get("server") or new_server
+    except FlickrError:
+        pass  # stale secret is better than crashing; thumbnailer will retry
+
     db().conn.execute(
-        "UPDATE photos SET display_rotation = ?, updated_at = datetime('now') WHERE id = ?",
-        (new_rotation, photo_id),
+        """UPDATE photos
+           SET display_rotation = ?,
+               flickr_secret    = ?,
+               flickr_server    = ?,
+               thumbnail_path   = NULL,
+               updated_at       = datetime('now')
+           WHERE id = ?""",
+        (new_rotation, new_secret, new_server, photo_id),
     )
     db().conn.commit()
 
-    # Bust the locally cached thumbnail so the next thumbnailer run re-fetches
-    # the corrected image from Flickr CDN
-    old_path = photo.get("thumbnail_path")
-    if old_path:
+    # Delete the stale local file (thumbnail_path already cleared above)
+    old_path = photo.get("thumbnail_path") or ""
+    if old_path and not old_path.startswith("http"):
         try:
             Path(old_path).unlink(missing_ok=True)
         except OSError:
             pass
-        db().conn.execute(
-            "UPDATE photos SET thumbnail_path = NULL WHERE id = ?", (photo_id,)
-        )
-        db().conn.commit()
 
     return jsonify({"ok": True, "display_rotation": new_rotation})
 

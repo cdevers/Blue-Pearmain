@@ -4845,12 +4845,16 @@ class TestRotateFlickrApi(unittest.TestCase):
         import reviewer.app as reviewer_app
         mock_c = MagicMock()
         mock_c.rotate.return_value = {"stat": "ok"}
+        mock_c.get_photo_info.return_value = {
+            "photo": {"secret": "newsecret123", "server": "65535"}
+        }
         reviewer_app._client = mock_c
         try:
             resp = self._post(self.photo_id, 180)
             self.assertEqual(resp.status_code, 200)
             self.assertTrue(resp.get_json()["ok"])
             mock_c.rotate.assert_called_once_with("flickr-rotate-001", 180)
+            mock_c.get_photo_info.assert_called_once_with("flickr-rotate-001")
         finally:
             reviewer_app._client = None
 
