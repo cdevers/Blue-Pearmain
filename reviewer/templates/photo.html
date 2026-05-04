@@ -513,6 +513,11 @@ async function rotateFlickr(degrees) {
   });
   const d = await r.json();
   if (d.ok) {
+    const img = document.getElementById('main-image');
+    if (img) {
+      img._rotationDeg = ((img._rotationDeg || 0) + degrees) % 360;
+      img.style.transform = `rotate(${img._rotationDeg}deg)`;
+    }
     toast(`Rotated ${degrees}° on Flickr`);
   } else {
     toast('Rotate failed: ' + (d.error || 'unknown'), 'err');
