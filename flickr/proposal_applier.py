@@ -141,16 +141,24 @@ def apply_batch(
             conflict_types,
         ).fetchall()
 
-    totals: dict = {"applied": 0, "failed": 0, "superseded": 0}
+    totals: dict = {"applied": 0, "failed": 0, "superseded": 0, "errors": []}
     for r in rows:
-        result = apply_proposal(db, r["id"], library_path, flickr_client)
+        try:
+            result = apply_proposal(db, r["id"], library_path, flickr_client)
+        except Exception as exc:
+            log.exception("apply_batch: proposal %s raised unexpected exception", r["id"])
+            totals["failed"] += 1
+            totals["errors"].append({"proposal_id": r["id"], "reason": str(exc)})
+            continue
         if result["ok"]:
             totals["applied"] += 1
         elif result.get("reason") in ("source_changed", "target_changed"):
             totals["superseded"] += 1
         else:
+            reason = result.get("reason", "unknown")
             totals["failed"] += 1
-            log.warning("apply_batch: proposal %s failed: %s", r["id"], result.get("reason"))
+            totals["errors"].append({"proposal_id": r["id"], "reason": reason})
+            log.warning("apply_batch: proposal %s failed: %s", r["id"], reason)
     return totals
 
 

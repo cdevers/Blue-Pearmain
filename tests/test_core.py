@@ -4352,6 +4352,116 @@ class TestApplyProposal(unittest.TestCase):
         self.assertIn("Photos", result["reason"])
 
 
+class TestApplyBatch(unittest.TestCase):
+    """apply_batch: continues past failures, populates errors list."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        # Two photos, each with a pending non-conflict proposal
+        for fid, uid in (("FA", "UA"), ("FB", "UB")):
+            self.db.upsert_photo({
+                "flickr_id": fid, "uuid": uid,
+                "privacy_state": "candidate_public",
+                "flickr_tags": '["foo"]', "flickr_tags_hash": f"H{fid}",
+                "photos_tags": '[]', "photos_tags_hash": "PH_EMPTY",
+                "meta_synced_flickr_at": "2026-01-01T00:00:00+00:00",
+                "meta_synced_photos_at": "2026-01-01T00:00:00+00:00",
+            })
+        self.pid_a = self._insert_proposal("FA", "HFA")
+        self.pid_b = self._insert_proposal("FB", "HFB")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _insert_proposal(self, flickr_id, src_hash):
+        photo_id = self.db.get_photo_by_flickr_id(flickr_id)["id"]
+        self.db.upsert_proposal({
+            "photo_id": photo_id, "field": "tags",
+            "proposed_value": '["foo"]',
+            "source": "flickr", "target": "photos",
+            "conflict_type": "non_conflict",
+            "source_hash_at_creation": src_hash,
+            "target_hash_at_creation": "PH_EMPTY",
+            "created_at": "2026-01-01T00:00:00+00:00",
+        })
+        self.db.conn.commit()
+        return self.db.conn.execute(
+            "SELECT id FROM metadata_proposals WHERE photo_id=? ORDER BY id DESC LIMIT 1",
+            (self.db.get_photo_by_flickr_id(flickr_id)["id"],),
+        ).fetchone()["id"]
+
+    def test_continues_past_exception(self):
+        """An unexpected exception on one proposal must not stop the batch."""
+        from unittest.mock import patch
+        from flickr.proposal_applier import apply_batch
+
+        call_order = []
+        def side_effect(db, proposal_id, library_path, flickr_client=None):
+            call_order.append(proposal_id)
+            if proposal_id == self.pid_a:
+                raise RuntimeError("simulated unexpected DB error")
+            return {"ok": True}
+
+        with patch("flickr.proposal_applier.apply_proposal", side_effect=side_effect):
+            result = apply_batch(self.db, library_path="")
+
+        self.assertIn(self.pid_a, call_order)
+        self.assertIn(self.pid_b, call_order)
+        self.assertEqual(result["applied"], 1)
+        self.assertEqual(result["failed"], 1)
+
+    def test_errors_list_populated_for_exception(self):
+        from unittest.mock import patch
+        from flickr.proposal_applier import apply_batch
+
+        with patch("flickr.proposal_applier.apply_proposal",
+                   side_effect=RuntimeError("boom")):
+            result = apply_batch(self.db, library_path="")
+
+        self.assertEqual(len(result["errors"]), 2)
+        self.assertTrue(all("proposal_id" in e and "reason" in e for e in result["errors"]))
+
+    def test_errors_list_populated_for_dict_failure(self):
+        """Failed proposals (dict return) also appear in errors list."""
+        from unittest.mock import patch
+        from flickr.proposal_applier import apply_batch
+
+        with patch("flickr.proposal_applier.apply_proposal",
+                   return_value={"ok": False, "reason": "photo not found"}):
+            result = apply_batch(self.db, library_path="")
+
+        self.assertEqual(result["failed"], 2)
+        self.assertEqual(len(result["errors"]), 2)
+        self.assertEqual(result["errors"][0]["reason"], "photo not found")
+
+    def test_superseded_not_in_errors(self):
+        """source_changed/target_changed are superseded, not failed, and not in errors."""
+        from unittest.mock import patch
+        from flickr.proposal_applier import apply_batch
+
+        with patch("flickr.proposal_applier.apply_proposal",
+                   return_value={"ok": False, "reason": "source_changed"}):
+            result = apply_batch(self.db, library_path="")
+
+        self.assertEqual(result["superseded"], 2)
+        self.assertEqual(result["failed"], 0)
+        self.assertEqual(result["errors"], [])
+
+    def test_empty_errors_list_on_full_success(self):
+        from unittest.mock import patch
+        from flickr.proposal_applier import apply_batch
+
+        with patch("flickr.proposal_applier.apply_proposal",
+                   return_value={"ok": True}):
+            result = apply_batch(self.db, library_path="")
+
+        self.assertEqual(result["applied"], 2)
+        self.assertEqual(result["errors"], [])
+
+
 class TestApplyManualMerge(unittest.TestCase):
     """apply_manual_merge: validation, staleness checks, dual-write, sibling resolution."""
 

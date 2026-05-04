@@ -544,8 +544,21 @@ async function bulkApprove(conflictType, btn) {
   });
   const d = await r.json();
   if (d.ok) {
-    toast(`Applied ${d.applied}, failed ${d.failed}`, d.failed ? 'err' : 'ok');
-    setTimeout(() => location.reload(), 1000);
+    if (d.errors && d.errors.length) {
+      console.warn('apply_batch failures:', d.errors);
+    }
+    if (d.applied === 0 && d.failed > 0) {
+      btn.disabled = false;
+      btn.textContent = orig;
+      const noun = d.failed === 1 ? 'proposal' : 'proposals';
+      toast(`${d.failed} ${noun} could not be applied — see log for details`, 'err');
+    } else if (d.failed > 0) {
+      toast(`Applied ${d.applied}, skipped ${d.failed} (could not apply)`, 'err');
+      setTimeout(() => location.reload(), 1000);
+    } else {
+      toast(`Applied ${d.applied}`, 'ok');
+      setTimeout(() => location.reload(), 1000);
+    }
   } else {
     btn.disabled = false;
     btn.textContent = orig;
