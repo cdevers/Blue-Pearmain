@@ -88,10 +88,16 @@ pip3 install requests requests-oauthlib pyyaml flask osxphotos
 
 # 2. Configure
 cp config/config.example.yml config/config.yml
-# Edit config/config.yml — add your Flickr API key and secret
+# Edit config/config.yml — add your Flickr API key, secret, and username
 
 # 3. Authorise with Flickr (one-time, opens browser)
 python flickr/flickr_auth.py --config config/config.yml
+
+# 4. (Optional) Install background daemons — poller (hourly), pipeline (6h), reviewer UI (always on)
+mkdir -p ~/Library/Logs/BluePearmain
+bp install-daemons
+# Output shows the launchctl bootstrap commands to load each agent.
+# To remove later: bp uninstall-daemons (then launchctl bootout each one if loaded)
 ```
 
 ## Running
