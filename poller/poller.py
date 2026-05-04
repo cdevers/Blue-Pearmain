@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import hashlib
+import html
 import json
 import logging
 import sys
@@ -132,14 +133,14 @@ def flickr_photo_to_db(photo: dict, info: dict | None = None) -> dict:
     if date_taken:
         row["date_taken"] = date_taken  # already a string from Flickr
 
-    # Title / description
-    row["flickr_title"] = photo.get("title", "")
+    # Title / description — HTML-decode: Flickr API returns entities like &amp; &quot;
+    row["flickr_title"] = html.unescape(photo.get("title", "") or "")
 
     desc = photo.get("description", {})
     if isinstance(desc, dict):
-        row["flickr_description"] = desc.get("_content", "")
+        row["flickr_description"] = html.unescape(desc.get("_content", "") or "")
     elif isinstance(desc, str):
-        row["flickr_description"] = desc
+        row["flickr_description"] = html.unescape(desc)
 
     # Last-update timestamp (present when last_update is in extras)
     last_update = photo.get("lastupdate")
@@ -184,7 +185,7 @@ def _enrich_from_info(row: dict, info: dict):
     photo = info.get("photo", {})
 
     # Title from getInfo is authoritative over the list response
-    title = (photo.get("title") or {}).get("_content", "")
+    title = html.unescape((photo.get("title") or {}).get("_content", "") or "")
     if title:
         row["flickr_title"] = title
 
@@ -231,7 +232,7 @@ def _enrich_from_info(row: dict, info: dict):
         ).isoformat()
 
     # Description
-    desc = (photo.get("description") or {}).get("_content", "")
+    desc = html.unescape((photo.get("description") or {}).get("_content", "") or "")
     if desc:
         row["flickr_description"] = desc
 

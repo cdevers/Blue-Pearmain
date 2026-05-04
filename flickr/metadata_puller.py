@@ -18,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import logging
 import subprocess
@@ -38,7 +39,7 @@ def _now_iso() -> str:
 
 
 def _field_hash(value: str) -> str:
-    return hashlib.sha256((value or "").strip().encode()).hexdigest()
+    return hashlib.sha256(html.unescape((value or "").strip()).encode()).hexdigest()
 
 
 def _classify_text_field(
@@ -49,7 +50,7 @@ def _classify_text_field(
     now: str,
 ) -> list[dict]:
     """Classify a title or description divergence and return proposal dicts."""
-    fval = (flickr_val or "").strip()
+    fval = html.unescape((flickr_val or "").strip())
     pval = (photos_val or "").strip()
 
     if not fval and not pval:
@@ -565,8 +566,8 @@ def _fetch_flickr_metadata(flickr: "FlickrClient", flickr_id: str) -> dict:
     """Fetch title, description, tags from Flickr. Raises FlickrError on failure."""
     info   = flickr.get_photo_info(flickr_id)
     photo  = info.get("photo", {})
-    title  = photo.get("title", {}).get("_content", "") or ""
-    desc   = photo.get("description", {}).get("_content", "") or ""
+    title  = html.unescape(photo.get("title", {}).get("_content", "") or "")
+    desc   = html.unescape(photo.get("description", {}).get("_content", "") or "")
     tags_raw = photo.get("tags", {})
     if isinstance(tags_raw, dict):
         tags = [t.get("raw", "") for t in tags_raw.get("tag", []) if t.get("raw")]

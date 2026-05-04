@@ -12,6 +12,7 @@ proposal is superseded rather than applied.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import logging
 import subprocess
@@ -41,7 +42,7 @@ def _compute_hash(tags: list[str]) -> str:
 
 
 def _compute_text_hash(value: str) -> str:
-    return hashlib.sha256((value or "").strip().encode()).hexdigest()
+    return hashlib.sha256(html.unescape((value or "").strip()).encode()).hexdigest()
 
 
 def apply_proposal(

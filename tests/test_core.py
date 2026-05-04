@@ -3948,6 +3948,64 @@ class TestClassifyTextField(unittest.TestCase):
         self.assertIsNone(props[0]["target_hash_at_creation"])  # target (photos) is empty → None
 
 
+class TestHtmlEntityNormalization(unittest.TestCase):
+    """HTML entity normalization: Flickr returns &amp; &quot; etc.; must not cause false collisions."""
+
+    def setUp(self):
+        from flickr.metadata_puller import _classify_text_field, _field_hash
+        self._fn = _classify_text_field
+        self._hash = _field_hash
+        self._now = "2026-01-01T00:00:00+00:00"
+
+    def test_amp_entity_equal_to_plain(self):
+        """Flickr &amp; should match Photos & — no proposal."""
+        result = self._fn(1, "description",
+                          'Belle &amp; Sebastian at the Orpheum',
+                          'Belle & Sebastian at the Orpheum',
+                          self._now)
+        self.assertEqual(result, [])
+
+    def test_quot_entity_equal_to_plain(self):
+        """Flickr &quot; should match Photos " — no proposal."""
+        result = self._fn(1, "description",
+                          '&quot;Piazza, New York Catcher&quot;',
+                          '"Piazza, New York Catcher"',
+                          self._now)
+        self.assertEqual(result, [])
+
+    def test_mixed_entities_equal_to_plain(self):
+        """Multiple entities in one string — no proposal."""
+        result = self._fn(1, "description",
+                          'Belle &amp; Sebastian perform &quot;Piazza, New York Catcher&quot;',
+                          'Belle & Sebastian perform "Piazza, New York Catcher"',
+                          self._now)
+        self.assertEqual(result, [])
+
+    def test_truly_different_still_produces_collision(self):
+        """Different after decoding should still produce a collision proposal."""
+        result = self._fn(1, "description",
+                          'Belle &amp; Sebastian', 'Belle and Sebastian',
+                          self._now)
+        self.assertEqual(len(result), 2)
+        self.assertTrue(all(p["conflict_type"] == "collision" for p in result))
+
+    def test_field_hash_consistent_for_encoded_and_plain(self):
+        """Same content encoded vs plain should hash to the same value."""
+        self.assertEqual(self._hash("Belle &amp; Sebastian"), self._hash("Belle & Sebastian"))
+
+    def test_proposed_value_is_decoded_text(self):
+        """proposed_value stored in the proposal should be the decoded (clean) text."""
+        result = self._fn(1, "title", "&lt;Photo Title&gt;", "", self._now)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["proposed_value"], "<Photo Title>")
+
+    def test_compute_text_hash_normalizes_entities(self):
+        """apply-time staleness check produces same hash for encoded and decoded equivalents."""
+        from flickr.proposal_applier import _compute_text_hash
+        self.assertEqual(_compute_text_hash("Belle &amp; Sebastian"),
+                         _compute_text_hash("Belle & Sebastian"))
+
+
 class TestUpsertProposal(unittest.TestCase):
     """db.upsert_proposal idempotency rules."""
 
