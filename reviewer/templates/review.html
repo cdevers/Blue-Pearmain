@@ -156,25 +156,25 @@
 
 <div class="toolbar" id="top">
   <select id="state-select" onchange="changeState(this.value)">
-    <option value="candidate_public" {% if state_filter=='candidate_public' %}selected{% endif %}>
+    <option value="candidate_public" data-label="Candidate public" {% if state_filter=='candidate_public' %}selected{% endif %}>
       Candidate public ({{ stats.by_state.get('candidate_public',0) }})
     </option>
-    <option value="needs_review" {% if state_filter=='needs_review' %}selected{% endif %}>
+    <option value="needs_review" data-label="Needs review" {% if state_filter=='needs_review' %}selected{% endif %}>
       Needs review ({{ stats.by_state.get('needs_review',0) }})
     </option>
-    <option value="already_public" {% if state_filter=='already_public' %}selected{% endif %}>
+    <option value="already_public" data-label="Already public" {% if state_filter=='already_public' %}selected{% endif %}>
       Already public ({{ stats.by_state.get('already_public',0) }})
     </option>
-    <option value="approved_public" {% if state_filter=='approved_public' %}selected{% endif %}>
+    <option value="approved_public" data-label="Approved" {% if state_filter=='approved_public' %}selected{% endif %}>
       Approved ({{ stats.by_state.get('approved_public',0) }})
     </option>
-    <option value="keep_private" {% if state_filter=='keep_private' %}selected{% endif %}>
+    <option value="keep_private" data-label="Kept private" {% if state_filter=='keep_private' %}selected{% endif %}>
       Kept private ({{ stats.by_state.get('keep_private',0) }})
     </option>
-    <option value="auto_private" {% if state_filter=='auto_private' %}selected{% endif %}>
+    <option value="auto_private" data-label="Auto private" {% if state_filter=='auto_private' %}selected{% endif %}>
       Auto private ({{ stats.by_state.get('auto_private',0) }})
     </option>
-    <option value="skipped" {% if state_filter=='skipped' %}selected{% endif %}>
+    <option value="skipped" data-label="Skipped" {% if state_filter=='skipped' %}selected{% endif %}>
       Skipped ({{ stats.by_state.get('skipped',0) }})
     </option>
   </select>
@@ -184,7 +184,7 @@
     <a href="{{ url_for('faces') }}" style="color:var(--muted)">← Faces</a>
     · <strong style="color:var(--text)">{{ person_filter }}</strong> ·
     {% endif %}
-    {{ total }} photos · page {{ page }}/{{ total_pages }}
+    <span id="review-count-text">{{ total }} photos · page {{ page }}/{{ total_pages }}</span>
   </span>
 
   <span class="spacer"></span>
@@ -288,6 +288,36 @@
 <script>
 let selected = null;
 
+// Live count tracking — updated after each quickDecide without a page reload
+const _stateFilter = {{ state_filter | tojson }};
+const _perPage     = {{ per_page }};
+let   _reviewPage  = {{ page }};
+let   _reviewTotal = {{ total }};
+const _stateMap = {{ stats.by_state | tojson }};
+const _decisionToState = {
+  make_public:  'approved_public',
+  keep_private: 'keep_private',
+  skip:         'skipped',
+};
+
+function _updateReviewCounts(decision) {
+  _stateMap[_stateFilter] = Math.max(0, (_stateMap[_stateFilter] || 0) - 1);
+  _reviewTotal            = Math.max(0, _reviewTotal - 1);
+  const dest = _decisionToState[decision];
+  if (dest) _stateMap[dest] = (_stateMap[dest] || 0) + 1;
+
+  // Update dropdown option text for changed states
+  for (const state of [_stateFilter, dest].filter(Boolean)) {
+    const opt = document.querySelector(`#state-select option[value="${state}"]`);
+    if (opt) opt.textContent = `${opt.dataset.label} (${_stateMap[state] || 0})`;
+  }
+
+  // Update count span: "N photos · page P/T"
+  const totalPages = Math.max(1, Math.ceil(_reviewTotal / _perPage));
+  const countEl = document.getElementById('review-count-text');
+  if (countEl) countEl.textContent = `${_reviewTotal} photos · page ${_reviewPage}/${totalPages}`;
+}
+
 function selectCard(card) {
   if (selected) selected.classList.remove('selected');
   selected = card;
@@ -313,6 +343,9 @@ async function quickDecide(id, decision, card) {
   if (decision === 'make_public') card.classList.add('decided-pub');
   else if (decision === 'keep_private') card.classList.add('decided-prv');
   else card.classList.add('decided-skp');
+
+  // Update live counts in toolbar
+  _updateReviewCounts(decision);
 
   // Auto-advance selection to next card
   const cards = [...document.querySelectorAll('.photo-card')];

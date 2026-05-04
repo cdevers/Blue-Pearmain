@@ -298,25 +298,24 @@
 
 {% block content %}
 <div class="toolbar">
-  <span class="count">{{ total }} pending proposal{{ 's' if total != 1 }}</span>
+  <span class="count" id="proposal-count-total">{{ total }} pending proposal{{ 's' if total != 1 }}</span>
   <div class="type-pills">
     {% if counts.collision %}
-    <span class="type-pill pill-collision">{{ counts.collision }} collision{{ 's' if counts.collision != 1 }}</span>
+    <span class="type-pill pill-collision" id="pill-collision">{{ counts.collision }} collision{{ 's' if counts.collision != 1 }}</span>
     {% endif %}
     {% if counts.divergence %}
-    <span class="type-pill pill-divergence">{{ counts.divergence }} divergence{{ 's' if counts.divergence != 1 }}</span>
+    <span class="type-pill pill-divergence" id="pill-divergence">{{ counts.divergence }} divergence{{ 's' if counts.divergence != 1 }}</span>
     {% endif %}
     {% if counts.non_conflict %}
-    <span class="type-pill pill-non-conflict">{{ counts.non_conflict }} non-conflict{{ 's' if counts.non_conflict != 1 }}</span>
+    <span class="type-pill pill-non-conflict" id="pill-non-conflict">{{ counts.non_conflict }} non-conflict{{ 's' if counts.non_conflict != 1 }}</span>
     {% endif %}
   </div>
   <span class="spacer"></span>
-  {% if counts.non_conflict %}
   <button class="btn-bulk" id="btn-bulk-approve"
-          onclick="bulkApprove('non_conflict', this)">
+          onclick="bulkApprove('non_conflict', this)"
+          style="{{ '' if counts.non_conflict else 'display:none' }}">
     Apply all {{ counts.non_conflict }} non-conflict{{ 's' if counts.non_conflict != 1 }} →
   </button>
-  {% endif %}
   <div class="kbd-hints">
     <span><kbd>j</kbd>/<kbd>k</kbd> navigate</span>
     <span><kbd>p</kbd> approve / use Photos</span>
@@ -491,14 +490,60 @@
 
 {% block scripts %}
 <script>
+// Live counts — updated as individual proposals are resolved
+const _counts = {
+  total:        {{ total }},
+  collision:    {{ counts.collision }},
+  divergence:   {{ counts.divergence }},
+  non_conflict: {{ counts.non_conflict }},
+};
+
+function _plural(n, word) { return n === 1 ? `${n} ${word}` : `${n} ${word}s`; }
+
+function _resolveCard(cardEl) {
+  const type = ['collision','divergence','non_conflict'].find(t => cardEl.classList.contains(t));
+  if (type) {
+    _counts[type] = Math.max(0, _counts[type] - 1);
+    _counts.total  = Math.max(0, _counts.total  - 1);
+  }
+
+  // Total count
+  const totalEl = document.getElementById('proposal-count-total');
+  if (totalEl) totalEl.textContent = _plural(_counts.total, 'pending proposal');
+
+  // Type pill
+  if (type) {
+    const pill = document.getElementById('pill-' + type.replace('_', '-'));
+    if (pill) {
+      if (_counts[type] <= 0) pill.style.display = 'none';
+      else pill.textContent = _plural(_counts[type], type.replace('_', '-'));
+    }
+  }
+
+  // Bulk-approve button (only for non_conflict)
+  if (type === 'non_conflict') {
+    const btn = document.getElementById('btn-bulk-approve');
+    if (btn) {
+      const n = _counts.non_conflict;
+      if (n <= 0) { btn.style.display = 'none'; }
+      else { btn.textContent = `Apply all ${_plural(n, 'non-conflict')} →`; }
+    }
+  }
+
+  // Refresh nav badges
+  if (typeof refreshStats === 'function') refreshStats();
+}
+
 async function approveProposal(id, btn) {
   btn.disabled = true;
   btn.textContent = '…';
   const r = await fetch('/api/proposals/' + id + '/approve', {method: 'POST'});
   const d = await r.json();
   if (d.ok) {
-    document.getElementById('card-' + id).style.opacity = '0.3';
+    const card = document.getElementById('card-' + id);
+    card.style.opacity = '0.3';
     btn.textContent = 'Applied ✓';
+    _resolveCard(card);
   } else {
     btn.disabled = false;
     btn.textContent = 'Approve ✓';
@@ -512,8 +557,10 @@ async function approveReverse(id, btn) {
   const r = await fetch('/api/proposals/' + id + '/approve-reverse', {method: 'POST'});
   const d = await r.json();
   if (d.ok) {
-    document.getElementById('card-' + id).style.opacity = '0.3';
+    const card = document.getElementById('card-' + id);
+    card.style.opacity = '0.3';
     btn.textContent = 'Applied ✓';
+    _resolveCard(card);
   } else {
     btn.disabled = false;
     btn.textContent = 'Use Photos ✓';
@@ -526,7 +573,9 @@ async function rejectProposal(id, btn) {
   const r = await fetch('/api/proposals/' + id + '/reject', {method: 'POST'});
   const d = await r.json();
   if (d.ok) {
-    document.getElementById('card-' + id).style.opacity = '0.3';
+    const card = document.getElementById('card-' + id);
+    card.style.opacity = '0.3';
+    _resolveCard(card);
   } else {
     btn.disabled = false;
     toast('Reject failed', 'err');
