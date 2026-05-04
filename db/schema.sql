@@ -103,6 +103,9 @@ CREATE TABLE IF NOT EXISTS photos (
     -- Thumbnail cache
     thumbnail_path          TEXT,                   -- absolute path on NAS to cached url_l JPEG
 
+    -- Display corrections (applied as CSS transform; does not affect stored file)
+    display_rotation        INTEGER NOT NULL DEFAULT 0,  -- cumulative CW degrees applied via rotate-flickr
+
     -- Review tracking
     reviewed_at             TEXT,                   -- ISO8601
     review_decision         TEXT,                   -- 'make_public' | 'keep_private' | 'skip'

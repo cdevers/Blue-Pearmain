@@ -911,9 +911,32 @@ def api_rotate_flickr(photo_id: int):
         return jsonify({"ok": False, "error": "Flickr client not available"}), 503
     try:
         c.rotate(photo["flickr_id"], degrees)
-        return jsonify({"ok": True})
     except FlickrError as e:
         return jsonify({"ok": False, "error": str(e)}), 502
+
+    # Accumulate rotation in DB so all views can apply the CSS correction
+    current = photo.get("display_rotation") or 0
+    new_rotation = (current + degrees) % 360
+    db().conn.execute(
+        "UPDATE photos SET display_rotation = ?, updated_at = datetime('now') WHERE id = ?",
+        (new_rotation, photo_id),
+    )
+    db().conn.commit()
+
+    # Bust the locally cached thumbnail so the next thumbnailer run re-fetches
+    # the corrected image from Flickr CDN
+    old_path = photo.get("thumbnail_path")
+    if old_path:
+        try:
+            Path(old_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+        db().conn.execute(
+            "UPDATE photos SET thumbnail_path = NULL WHERE id = ?", (photo_id,)
+        )
+        db().conn.commit()
+
+    return jsonify({"ok": True, "display_rotation": new_rotation})
 
 
 @app.route("/api/poll", methods=["POST"])

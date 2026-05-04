@@ -237,6 +237,13 @@ class Database:
             sql = schema_path.read_text()
             self.conn.executescript(sql)
             self.conn.commit()
+        # Additive columns for existing DBs (schema.sql handles fresh installs)
+        existing = {r[1] for r in self.conn.execute("PRAGMA table_info(photos)").fetchall()}
+        if "display_rotation" not in existing:
+            self.conn.execute(
+                "ALTER TABLE photos ADD COLUMN display_rotation INTEGER NOT NULL DEFAULT 0"
+            )
+            self.conn.commit()
 
     # -----------------------------------------------------------------------
     # Photo upsert — the main ingestion path
@@ -412,7 +419,8 @@ class Database:
         placeholders = ",".join("?" * len(states))
         rows = self.conn.execute(
             f"""SELECT id, flickr_id, original_filename,
-                       apple_unknown_faces, apple_named_faces, proposed_tags
+                       apple_unknown_faces, apple_named_faces, proposed_tags,
+                       display_rotation
                 FROM photos
                 WHERE privacy_state IN ({placeholders})
                 ORDER BY date_taken DESC, id DESC

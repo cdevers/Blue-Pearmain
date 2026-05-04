@@ -219,7 +219,8 @@
     <div class="thumb">
       <img src="{{ url_for('thumb', photo_id=photo.id) }}"
            alt="{{ photo.original_filename or '' }}"
-           loading="lazy">
+           loading="lazy"
+           {% if photo.display_rotation %}style="transform:rotate({{ photo.display_rotation }}deg)"{% endif %}>
       {% if photo.apple_unknown_faces > 0 or photo.apple_named_faces > 1 %}
       <span class="people-flag">
         {% if photo.apple_unknown_faces > 0 %}

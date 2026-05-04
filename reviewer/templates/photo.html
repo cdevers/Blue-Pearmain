@@ -208,7 +208,8 @@
     {% endif %}
     <img src="{{ url_for('thumb', photo_id=photo.id) }}"
          alt="{{ photo.original_filename or '' }}"
-         id="main-image">
+         id="main-image"
+         {% if photo.display_rotation %}style="transform:rotate({{ photo.display_rotation }}deg)"{% endif %}>
   </div>
 
   <!-- Right: metadata + actions -->
@@ -515,8 +516,8 @@ async function rotateFlickr(degrees) {
   if (d.ok) {
     const img = document.getElementById('main-image');
     if (img) {
-      img._rotationDeg = ((img._rotationDeg || 0) + degrees) % 360;
-      img.style.transform = `rotate(${img._rotationDeg}deg)`;
+      // Use server-returned value so JS and DB stay in sync
+      img.style.transform = `rotate(${d.display_rotation}deg)`;
     }
     toast(`Rotated ${degrees}° on Flickr`);
   } else {

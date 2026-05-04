@@ -101,7 +101,7 @@ def run_auth_flow(api_key: str, api_secret: str) -> tuple[str, str, str]:
     username            = resp.get("username", "")
 
     print(f"\nAuthorised as: {username} ({user_nsid})")
-    return access_token, access_token_secret, user_nsid
+    return access_token, access_token_secret, user_nsid, username
 
 
 def verify_token(api_key: str, api_secret: str, token: str, token_secret: str) -> bool:
@@ -177,7 +177,7 @@ def main():
             print("Existing token is invalid or expired. Re-authorising...")
 
     # Run the flow
-    token, token_secret, user_nsid = run_auth_flow(api_key, api_secret)
+    token, token_secret, user_nsid, username = run_auth_flow(api_key, api_secret)
 
     # Save back to config
     if "flickr" not in config:
@@ -185,6 +185,8 @@ def main():
     config["flickr"]["oauth_token"]        = token
     config["flickr"]["oauth_token_secret"] = token_secret
     config["flickr"]["user_nsid"]          = user_nsid
+    if username:
+        config["flickr"]["username"]       = username
     save_config(config_path, config)
 
     # Verify it works
