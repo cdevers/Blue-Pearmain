@@ -216,7 +216,9 @@ def main():
             else:
                 mismatch_count += 1
                 fid = result["flickr_id"]
-                url = f"https://www.flickr.com/photos/cdevers/{fid}"
+                flickr_username = config.get("flickr", {}).get("username") or \
+                                  config.get("flickr", {}).get("user_nsid", "")
+                url = f"https://www.flickr.com/photos/{flickr_username}/{fid}"
                 print(f"  [{result['status']}]  {fid}  {url}")
 
                 if result["perm_expected"] and result["perm_expected"] != result["perm_actual"]:

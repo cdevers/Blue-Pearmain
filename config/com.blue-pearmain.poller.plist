@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.blue-pearmain.poller.plist
+  launchd agent for Blue Pearmain Flickr poller
+
+  Install with bp (substitutes __REPO__, __UV__, __HOME__ automatically):
+    bp install-daemons
+
+  Or install manually after substituting tokens:
+    launchctl bootstrap gui/$(id -u) \
+       ~/Library/LaunchAgents/com.blue-pearmain.poller.plist
+
+  Run now (without waiting for interval):
+    launchctl start com.blue-pearmain.poller
+
+  Uninstall:
+    launchctl bootout gui/$(id -u) \
+       ~/Library/LaunchAgents/com.blue-pearmain.poller.plist
+    rm ~/Library/LaunchAgents/com.blue-pearmain.poller.plist
+
+  Logs:
+    tail -f __HOME__/Library/Logs/BluePearmain/poller.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.blue-pearmain.poller</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__UV__</string>
+        <string>run</string>
+        <string>python</string>
+        <string>__REPO__/bp</string>
+        <string>poll</string>
+        <string>--config</string>
+        <string>__REPO__/config/config.yml</string>
+    </array>
+
+    <!-- Run every 60 minutes -->
+    <key>StartInterval</key>
+    <integer>3600</integer>
+
+    <!-- Also run shortly after login, in case the Mac was asleep at the last interval -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- Stdout/stderr for debugging -->
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/BluePearmain/poller.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/BluePearmain/poller.log</string>
+
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+
+    <!-- Don't thrash if it keeps crashing -->
+    <key>ThrottleInterval</key>
+    <integer>300</integer>
+</dict>
+</plist>

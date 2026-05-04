@@ -214,7 +214,7 @@
             <div class="dup-meta-date">{{ photo.date_taken[:10] if photo.date_taken else '—' }}</div>
             {% if photo.flickr_id %}
             <div class="dup-meta-link">
-              <a href="https://www.flickr.com/photos/cdevers/{{ photo.flickr_id }}"
+              <a href="https://www.flickr.com/photos/{{ flickr_username }}/{{ photo.flickr_id }}"
                  target="_blank" rel="noopener">↗ Flickr</a>
             </div>
             {% endif %}

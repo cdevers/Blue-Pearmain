@@ -125,6 +125,10 @@ bp sync-metadata --force           # Process all photos, ignoring last-harmonize
 bp checkpoint                      # Checkpoint and truncate the WAL file
 bp checkpoint --mode passive       # Checkpoint without truncating (safe with active readers)
 bp all                             # Full maintenance run (scan --all, poll, thumbs, pipeline, reconcile --fix, sync-albums, checkpoint)
+bp install-daemons                 # Install launchd agents to ~/Library/LaunchAgents (substitutes paths automatically)
+bp install-daemons --dry-run       # Preview what would be installed without writing
+bp uninstall-daemons               # Remove installed launchd agents
+bp uninstall-daemons --dry-run     # Preview what would be removed without deleting
 bp ui                              # Start the review UI (http://localhost:5173)
 ```
 
@@ -141,20 +145,19 @@ bp ui                             # Open http://localhost:5173 and start reviewi
 
 The thumbnailer populates `thumbnail_path` for each photo using the best available source: a locally cached Photos derivative JPEG, a stored Flickr URL, or nothing. When serving thumbnails, the review UI falls back to fetching directly from Flickr's CDN for any matched photo that has a Flickr ID but no local file — so photos that haven't been downloaded from iCloud will still display if they've been uploaded to Flickr. Purely local photos with no Flickr match will show a "no preview" placeholder until iCloud downloads them.
 
-For ongoing use, both the poller and the review UI run as launchd agents — no terminal window required. Create the log directory first, then install both plists:
+For ongoing use, both the poller and the review UI run as launchd agents — no terminal window required. `bp install-daemons` writes the plists to `~/Library/LaunchAgents/` with all paths substituted for your install location:
 
 ```bash
 mkdir -p ~/Library/Logs/BluePearmain
+bp install-daemons
 
-cp config/com.cdevers.blue-pearmain.poller.plist ~/Library/LaunchAgents/
-cp config/com.cdevers.blue-pearmain.reviewer.plist ~/Library/LaunchAgents/
-cp config/com.cdevers.blue-pearmain.pipeline.plist ~/Library/LaunchAgents/
-
-# Edit paths in all plists to match your install location, then:
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.poller.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.pipeline.plist
+# Then load each agent (output from install-daemons shows the exact commands):
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.blue-pearmain.poller.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.blue-pearmain.reviewer.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.blue-pearmain.pipeline.plist
 ```
+
+To remove: `bp uninstall-daemons` removes the plist files; then `launchctl bootout` each one if it was loaded.
 
 The reviewer starts immediately and restarts automatically if it crashes. The poller runs hourly. The pipeline runs every 6 hours: it diffs cached metadata against both sides, generates proposals, and auto-applies any non-conflict proposals (collision proposals are left for manual review in the UI). Logs are written to `~/Library/Logs/BluePearmain/` and are visible in Console.app:
 
@@ -164,18 +167,18 @@ tail -f ~/Library/Logs/BluePearmain/poller.log
 tail -f ~/Library/Logs/BluePearmain/pipeline.log
 ```
 
-To restart either service:
+To restart a service:
 
 ```bash
-launchctl stop com.cdevers.blue-pearmain.reviewer
-launchctl start com.cdevers.blue-pearmain.reviewer
+launchctl stop com.blue-pearmain.reviewer
+launchctl start com.blue-pearmain.reviewer
 ```
 
 If you get "Input/output error" from launchctl (stale state after an unclean stop), use `bootout`/`bootstrap` instead of `unload`/`load`:
 
 ```bash
-launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.reviewer.plist
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.blue-pearmain.reviewer.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.blue-pearmain.reviewer.plist
 ```
 
 ## Review UI
@@ -508,7 +511,7 @@ All scripts are idempotent and safe to re-run.
 python -m pytest tests/ -q
 ```
 
-378 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, metadata-sync batch behaviour (PhotosDB caching, progress logging, flickr_deleted detection), Flickr metadata cache writes (flickr_title, flickr_tags JSON/hash, flickr_last_updated, meta_synced_flickr_at), DB-cache-first reads in sync-metadata (cache hit/miss logic, API call avoidance), scanner Photos metadata cache writes (photos_title/description/tags/hash, meta_synced_photos_at, skip-condition update), sync engine (classify_tags, classify_text_field, run_sync_engine, upsert_proposal, hash_match supersede), proposal applier (apply_proposal, apply_batch, staleness/drift re-checks, title/description apply), drift filter with --force bypass, WAL checkpoint (wal_autocheckpoint pragma, TRUNCATE and PASSIVE modes), `bp all` step sequencing and error isolation, and the reviewer "Open in Photos" API endpoint.
+385 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, metadata-sync batch behaviour (PhotosDB caching, progress logging, flickr_deleted detection), Flickr metadata cache writes (flickr_title, flickr_tags JSON/hash, flickr_last_updated, meta_synced_flickr_at), DB-cache-first reads in sync-metadata (cache hit/miss logic, API call avoidance), scanner Photos metadata cache writes (photos_title/description/tags/hash, meta_synced_photos_at, skip-condition update), sync engine (classify_tags, classify_text_field, run_sync_engine, upsert_proposal, hash_match supersede), proposal applier (apply_proposal, apply_batch, staleness/drift re-checks, title/description apply), drift filter with --force bypass, WAL checkpoint (wal_autocheckpoint pragma, TRUNCATE and PASSIVE modes), `bp all` step sequencing and error isolation, and the reviewer "Open in Photos" API endpoint.
 
 ## License
 

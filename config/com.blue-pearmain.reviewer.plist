@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.blue-pearmain.reviewer.plist
+  launchd agent for Blue Pearmain review UI (Flask)
+
+  Install with bp (substitutes __REPO__, __UV__, __HOME__ automatically):
+    bp install-daemons
+
+  Or install manually after substituting tokens:
+    launchctl bootstrap gui/$(id -u) \
+       ~/Library/LaunchAgents/com.blue-pearmain.reviewer.plist
+
+  The UI will then be available at http://localhost:5173 after login,
+  and launchd will restart it automatically if it crashes.
+
+  Stop temporarily (survives reboot):
+    launchctl stop com.blue-pearmain.reviewer
+
+  Restart:
+    launchctl stop com.blue-pearmain.reviewer
+    launchctl start com.blue-pearmain.reviewer
+
+  Uninstall:
+    launchctl bootout gui/$(id -u) \
+       ~/Library/LaunchAgents/com.blue-pearmain.reviewer.plist
+    rm ~/Library/LaunchAgents/com.blue-pearmain.reviewer.plist
+
+  Logs:
+    tail -f __HOME__/Library/Logs/BluePearmain/reviewer.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.blue-pearmain.reviewer</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__UV__</string>
+        <string>run</string>
+        <string>python</string>
+        <string>__REPO__/bp</string>
+        <string>ui</string>
+        <string>--config</string>
+        <string>__REPO__/config/config.yml</string>
+    </array>
+
+    <!-- Keep the UI running — restart automatically if it exits -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Start at login -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Stdout/stderr for debugging -->
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/BluePearmain/reviewer.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/BluePearmain/reviewer.log</string>
+
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+
+    <!-- Wait 5 seconds before restarting after a crash -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+</dict>
+</plist>

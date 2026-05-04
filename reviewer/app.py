@@ -184,7 +184,9 @@ def photo_detail(photo_id: int):
 
     flickr_url = None
     if photo.get("flickr_id"):
-        flickr_url = f"https://www.flickr.com/photos/cdevers/{photo['flickr_id']}"
+        flickr_username = _config.get("flickr", {}).get("username") or \
+                          _config.get("flickr", {}).get("user_nsid", "")
+        flickr_url = f"https://www.flickr.com/photos/{flickr_username}/{photo['flickr_id']}"
 
     albums = db().get_photo_albums(photo_id)
 
@@ -375,11 +377,14 @@ def duplicates():
             })
 
     total_unresolved = sum(len(s["groups"]) for s in sections)
+    flickr_username = _config.get("flickr", {}).get("username") or \
+                      _config.get("flickr", {}).get("user_nsid", "")
     return render_template(
         "duplicates.html",
         sections=sections,
         total_unresolved=total_unresolved,
         stats=db().stats(),
+        flickr_username=flickr_username,
     )
 
 

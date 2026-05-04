@@ -82,7 +82,7 @@ sequence: `scan --all` → `poll` → `thumbs` → `pipeline` → `reconcile --f
 `sync-albums` → `checkpoint`. Each step runs independently; a failure is logged and
 the sequence continues.
 
-**`config/com.cdevers.blue-pearmain.pipeline.plist`** updated to call `bp all` instead
+**`config/com.blue-pearmain.pipeline.plist`** (renamed from `com.cdevers.*`) updated to call `bp all` instead
 of `bp pipeline`. The 6h daemon now runs the full maintenance sequence.
 
 **Not yet automated:**

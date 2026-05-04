@@ -12,6 +12,8 @@ Usage:
     bp link-orphans [--dry-run]     Merge split Photos/Flickr records
     bp checkpoint [--mode MODE]     Checkpoint the WAL file (default: truncate)
     bp all                          Full maintenance run (scan, poll, thumbs, pipeline, reconcile, sync-albums, checkpoint)
+    bp install-daemons [--dry-run]  Install launchd agents to ~/Library/LaunchAgents
+    bp uninstall-daemons [--dry-run] Remove installed launchd agents
     bp ui                           Start the review UI (http://localhost:5173)
 
 Global options:
@@ -267,6 +269,81 @@ def cmd_link_orphans(args):
     ])
 
 
+def cmd_install_daemons(args):
+    """Install launchd plist files to ~/Library/LaunchAgents, substituting template tokens."""
+    import shutil
+
+    home = Path.home()
+    uv = shutil.which("uv")
+    if not uv:
+        print("Error: 'uv' not found on PATH.", file=sys.stderr)
+        sys.exit(1)
+
+    plists = [
+        "com.blue-pearmain.poller.plist",
+        "com.blue-pearmain.pipeline.plist",
+        "com.blue-pearmain.reviewer.plist",
+    ]
+    launch_agents = home / "Library" / "LaunchAgents"
+    if not args.dry_run:
+        launch_agents.mkdir(parents=True, exist_ok=True)
+
+    for plist_name in plists:
+        src = ROOT / "config" / plist_name
+        template = src.read_text()
+        content = (template
+                   .replace("__REPO__", str(ROOT))
+                   .replace("__UV__", uv)
+                   .replace("__HOME__", str(home)))
+        dest = launch_agents / plist_name
+        if args.dry_run:
+            print(f"  would install: {dest}")
+        else:
+            dest.write_text(content)
+            print(f"  installed: {dest}")
+
+    if not args.dry_run:
+        print()
+        print("To load the daemons, run:")
+        for plist_name in plists:
+            print(f"  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/{plist_name}")
+        print()
+        print("Or reload an already-loaded daemon:")
+        print("  launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/<name>.plist")
+        print("  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<name>.plist")
+
+
+def cmd_uninstall_daemons(args):
+    """Remove installed launchd plist files from ~/Library/LaunchAgents."""
+    home = Path.home()
+    plists = [
+        "com.blue-pearmain.poller.plist",
+        "com.blue-pearmain.pipeline.plist",
+        "com.blue-pearmain.reviewer.plist",
+    ]
+    launch_agents = home / "Library" / "LaunchAgents"
+    any_found = False
+    for plist_name in plists:
+        dest = launch_agents / plist_name
+        if dest.exists():
+            any_found = True
+            if args.dry_run:
+                print(f"  would remove: {dest}")
+            else:
+                dest.unlink()
+                print(f"  removed: {dest}")
+        else:
+            print(f"  not installed: {dest}")
+
+    if any_found and not args.dry_run:
+        print()
+        print("If the daemons were loaded, unload them with:")
+        for plist_name in plists:
+            print(f"  launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/{plist_name}")
+        print()
+        print("(Ignore 'No such process' errors for daemons that were not running.)")
+
+
 def cmd_checkpoint(args):
     """Run a WAL checkpoint and report results."""
     import yaml
@@ -450,6 +527,22 @@ def main():
         help="Full maintenance run: scan --all, poll, thumbs, pipeline, reconcile --fix, sync-albums, checkpoint",
     )
 
+    # install-daemons
+    p_install = sub.add_parser(
+        "install-daemons",
+        help="Install launchd agents to ~/Library/LaunchAgents",
+    )
+    p_install.add_argument("--dry-run", action="store_true",
+                           help="Show what would be installed without writing files")
+
+    # uninstall-daemons
+    p_uninstall = sub.add_parser(
+        "uninstall-daemons",
+        help="Remove installed launchd agents from ~/Library/LaunchAgents",
+    )
+    p_uninstall.add_argument("--dry-run", action="store_true",
+                             help="Show what would be removed without deleting files")
+
     # checkpoint
     p_ckpt = sub.add_parser("checkpoint", help="Run a WAL checkpoint to shrink the WAL file")
     p_ckpt.add_argument(
@@ -487,8 +580,10 @@ def main():
         "sync-albums":   cmd_sync_albums,
         "sync-metadata": cmd_sync_metadata,
         "link-orphans":  cmd_link_orphans,
-        "checkpoint":    cmd_checkpoint,
-        "all":           cmd_all,
+        "checkpoint":       cmd_checkpoint,
+        "all":              cmd_all,
+        "install-daemons":   cmd_install_daemons,
+        "uninstall-daemons": cmd_uninstall_daemons,
     }
     dispatch[args.command](args)
 

@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  com.cdevers.blue-pearmain.pipeline.plist
+  com.blue-pearmain.pipeline.plist
   launchd agent for Blue Pearmain full maintenance run
 
   Runs 'bp all' every 6 hours:
@@ -17,26 +17,23 @@
   Each step runs independently; a failure is logged and the sequence continues.
   Collision proposals are left pending for manual review in the UI.
 
-  Install:
-    cp config/com.cdevers.blue-pearmain.pipeline.plist \
-       ~/Library/LaunchAgents/com.cdevers.blue-pearmain.pipeline.plist
+  Install with bp (substitutes __REPO__, __UV__, __HOME__ automatically):
+    bp install-daemons
+
+  Or install manually after substituting tokens:
     launchctl bootstrap gui/$(id -u) \
-       ~/Library/LaunchAgents/com.cdevers.blue-pearmain.pipeline.plist
+       ~/Library/LaunchAgents/com.blue-pearmain.pipeline.plist
 
   Run now (without waiting for interval):
-    launchctl start com.cdevers.blue-pearmain.pipeline
+    launchctl start com.blue-pearmain.pipeline
 
   Uninstall:
     launchctl bootout gui/$(id -u) \
-       ~/Library/LaunchAgents/com.cdevers.blue-pearmain.pipeline.plist
-    rm ~/Library/LaunchAgents/com.cdevers.blue-pearmain.pipeline.plist
-
-  If load/unload give "Input/output error", use bootout/bootstrap instead:
-    launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.pipeline.plist
-    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cdevers.blue-pearmain.pipeline.plist
+       ~/Library/LaunchAgents/com.blue-pearmain.pipeline.plist
+    rm ~/Library/LaunchAgents/com.blue-pearmain.pipeline.plist
 
   Logs:
-    tail -f /Users/cdevers/Library/Logs/BluePearmain/pipeline.log
+    tail -f __HOME__/Library/Logs/BluePearmain/pipeline.log
 
   NOTE: Photos.app must be running for proposals targeting Apple Photos to apply.
   Proposals are left pending if Photos is not open; they will apply on the next run.
@@ -44,18 +41,17 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.cdevers.blue-pearmain.pipeline</string>
+    <string>com.blue-pearmain.pipeline</string>
 
     <key>ProgramArguments</key>
     <array>
-        <!-- Update these paths to match your actual install location -->
-        <string>/Users/cdevers/.local/bin/uv</string>
+        <string>__UV__</string>
         <string>run</string>
         <string>python</string>
-        <string>/Users/cdevers/Documents/GitHub/Blue Pearmain/bp</string>
+        <string>__REPO__/bp</string>
         <string>all</string>
         <string>--config</string>
-        <string>/Users/cdevers/Documents/GitHub/Blue Pearmain/config/config.yml</string>
+        <string>__REPO__/config/config.yml</string>
     </array>
 
     <!-- Run every 6 hours -->
@@ -68,13 +64,13 @@
 
     <!-- Stdout/stderr for debugging -->
     <key>StandardOutPath</key>
-    <string>/Users/cdevers/Library/Logs/BluePearmain/pipeline.log</string>
+    <string>__HOME__/Library/Logs/BluePearmain/pipeline.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/cdevers/Library/Logs/BluePearmain/pipeline.log</string>
+    <string>__HOME__/Library/Logs/BluePearmain/pipeline.log</string>
 
     <!-- Working directory -->
     <key>WorkingDirectory</key>
-    <string>/Users/cdevers/Documents/GitHub/Blue Pearmain</string>
+    <string>__REPO__</string>
 
     <!-- Don't thrash if it keeps crashing -->
     <key>ThrottleInterval</key>

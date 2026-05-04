@@ -4735,5 +4735,150 @@ class TestCheckpoint(unittest.TestCase):
         self.assertEqual(row[0], 500)
 
 
+class TestInstallDaemons(unittest.TestCase):
+    """bp install-daemons: template substitution, file placement, dry-run."""
+
+    @classmethod
+    def _import_bp(cls):
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+        bp_path = str(Path(__file__).parent.parent / "bp")
+        loader = SourceFileLoader("bp_module", bp_path)
+        spec = importlib.util.spec_from_loader("bp_module", loader)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _args(self, dry_run=False):
+        import argparse
+        return argparse.Namespace(dry_run=dry_run)
+
+    def test_tokens_substituted_in_installed_files(self):
+        import tempfile, shutil
+        bp = self._import_bp()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_home = Path(tmpdir) / "home"
+            fake_agents = fake_home / "Library" / "LaunchAgents"
+            fake_agents.mkdir(parents=True)
+            fake_uv = "/fake/uv"
+            with (
+                unittest.mock.patch("shutil.which", return_value=fake_uv),
+                unittest.mock.patch.object(Path, "home", return_value=fake_home),
+            ):
+                bp.cmd_install_daemons(self._args())
+            installed = list(fake_agents.glob("*.plist"))
+            self.assertEqual(len(installed), 3)
+            for f in installed:
+                text = f.read_text()
+                self.assertNotIn("__REPO__", text)
+                self.assertNotIn("__UV__",   text)
+                self.assertNotIn("__HOME__", text)
+                self.assertIn(fake_uv, text)
+                self.assertIn(str(fake_home), text)
+
+    def test_dry_run_writes_no_files(self):
+        import tempfile
+        bp = self._import_bp()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_home = Path(tmpdir) / "home"
+            fake_home.mkdir()
+            with (
+                unittest.mock.patch("shutil.which", return_value="/fake/uv"),
+                unittest.mock.patch.object(Path, "home", return_value=fake_home),
+            ):
+                bp.cmd_install_daemons(self._args(dry_run=True))
+            agents_dir = fake_home / "Library" / "LaunchAgents"
+            self.assertFalse(agents_dir.exists())
+
+    def test_missing_uv_exits(self):
+        bp = self._import_bp()
+        with unittest.mock.patch("shutil.which", return_value=None):
+            with self.assertRaises(SystemExit):
+                bp.cmd_install_daemons(self._args())
+
+    def test_label_uses_new_bundle_id(self):
+        """The installed plists use com.blue-pearmain.* labels, not the old com.cdevers.* form."""
+        import tempfile
+        bp = self._import_bp()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_home = Path(tmpdir) / "home"
+            fake_agents = fake_home / "Library" / "LaunchAgents"
+            fake_agents.mkdir(parents=True)
+            with (
+                unittest.mock.patch("shutil.which", return_value="/fake/uv"),
+                unittest.mock.patch.object(Path, "home", return_value=fake_home),
+            ):
+                bp.cmd_install_daemons(self._args())
+            for f in fake_agents.glob("*.plist"):
+                text = f.read_text()
+                self.assertNotIn("com.cdevers.blue-pearmain", text)
+
+
+class TestUninstallDaemons(unittest.TestCase):
+    """bp uninstall-daemons: removes installed plists, dry-run leaves them."""
+
+    @classmethod
+    def _import_bp(cls):
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+        bp_path = str(Path(__file__).parent.parent / "bp")
+        loader = SourceFileLoader("bp_module", bp_path)
+        spec = importlib.util.spec_from_loader("bp_module", loader)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _args(self, dry_run=False):
+        import argparse
+        return argparse.Namespace(dry_run=dry_run)
+
+    def _install_fake_plists(self, fake_agents: Path):
+        plists = [
+            "com.blue-pearmain.poller.plist",
+            "com.blue-pearmain.pipeline.plist",
+            "com.blue-pearmain.reviewer.plist",
+        ]
+        for name in plists:
+            (fake_agents / name).write_text("<plist/>")
+        return plists
+
+    def test_removes_installed_files(self):
+        import tempfile
+        bp = self._import_bp()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_home = Path(tmpdir) / "home"
+            fake_agents = fake_home / "Library" / "LaunchAgents"
+            fake_agents.mkdir(parents=True)
+            self._install_fake_plists(fake_agents)
+            with unittest.mock.patch.object(Path, "home", return_value=fake_home):
+                bp.cmd_uninstall_daemons(self._args())
+            self.assertEqual(list(fake_agents.glob("*.plist")), [])
+
+    def test_dry_run_leaves_files_intact(self):
+        import tempfile
+        bp = self._import_bp()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_home = Path(tmpdir) / "home"
+            fake_agents = fake_home / "Library" / "LaunchAgents"
+            fake_agents.mkdir(parents=True)
+            plists = self._install_fake_plists(fake_agents)
+            with unittest.mock.patch.object(Path, "home", return_value=fake_home):
+                bp.cmd_uninstall_daemons(self._args(dry_run=True))
+            self.assertEqual(
+                sorted(f.name for f in fake_agents.glob("*.plist")),
+                sorted(plists),
+            )
+
+    def test_tolerates_missing_files(self):
+        import tempfile
+        bp = self._import_bp()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_home = Path(tmpdir) / "home"
+            fake_agents = fake_home / "Library" / "LaunchAgents"
+            fake_agents.mkdir(parents=True)
+            with unittest.mock.patch.object(Path, "home", return_value=fake_home):
+                bp.cmd_uninstall_daemons(self._args())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1,15 +1,15 @@
-# flickr-curator config
-# Copy this to config.yaml and fill in your values.
-# config.yaml is gitignored — never commit credentials.
+# Blue Pearmain config
+# Copy this to config.yml and fill in your values.
+# config.yml is gitignored — never commit credentials.
 
 flickr:
-  # API key registered to cdevers — other users should register their own at
-  # https://www.flickr.com/services/apps/create/
-  api_key: "684a0bc07f822a45ec85d8506487d631"
-  api_secret: ""   # your secret key here — never commit this
-  oauth_token: ""             # filled in by flickr_auth.py
-  oauth_token_secret: ""      # filled in by flickr_auth.py
-  user_nsid: ""               # filled in by flickr_auth.py
+  # Register your own API key at https://www.flickr.com/services/apps/create/
+  api_key: ""
+  api_secret: ""        # your secret key — never commit this
+  oauth_token: ""       # filled in by flickr_auth.py
+  oauth_token_secret: "" # filled in by flickr_auth.py
+  user_nsid: ""         # filled in by flickr_auth.py
+  username: ""          # your Flickr username / path alias (the part in flickr.com/photos/<username>/)
 
 database:
   path: "/volume1/flickr-curator/curator.db"   # path on NAS (SMB mount or Docker volume)
