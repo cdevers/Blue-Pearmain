@@ -4735,6 +4735,140 @@ class TestCheckpoint(unittest.TestCase):
         self.assertEqual(row[0], 500)
 
 
+class TestFlickrClientRotate(unittest.TestCase):
+    """FlickrClient.rotate(): validates degrees, calls correct API method."""
+
+    def _make_client(self):
+        from flickr.flickr_client import FlickrClient
+        return FlickrClient("key", "secret", "token", "tsecret", rate_limit_delay=0)
+
+    def _mock_response(self, json_data=None):
+        from unittest.mock import MagicMock
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = json_data or {"stat": "ok"}
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    def test_valid_degrees_calls_api(self):
+        from unittest.mock import patch
+        c = self._make_client()
+        ok = self._mock_response({"stat": "ok"})
+        with patch.object(c._session, 'post', return_value=ok) as mock_post:
+            c.rotate("flickr123", 90)
+        args, kwargs = mock_post.call_args
+        body = kwargs.get("data") or (args[1] if len(args) > 1 else {})
+        self.assertIn("flickr.photos.transform.rotate", str(body))
+
+    def test_invalid_degrees_raises(self):
+        from flickr.flickr_client import FlickrClient
+        c = self._make_client()
+        with self.assertRaises(ValueError):
+            c.rotate("flickr123", 45)
+
+    def test_zero_degrees_raises(self):
+        c = self._make_client()
+        with self.assertRaises(ValueError):
+            c.rotate("flickr123", 0)
+
+    def test_360_raises(self):
+        c = self._make_client()
+        with self.assertRaises(ValueError):
+            c.rotate("flickr123", 360)
+
+
+class TestRotateFlickrApi(unittest.TestCase):
+    """POST /api/photos/<id>/rotate-flickr endpoint and template rendering."""
+
+    def setUp(self):
+        import reviewer.app as reviewer_app
+        self._tmp = tempfile.TemporaryDirectory()
+        db_path   = Path(self._tmp.name) / "test.db"
+        self._db  = Database(db_path)
+        reviewer_app._db     = self._db
+        reviewer_app._client = None
+        self._app    = reviewer_app.app
+        self._client = self._app.test_client()
+
+        self.photo_id = self._db.upsert_photo({
+            "flickr_id":         "flickr-rotate-001",
+            "original_filename": "rotate_test.JPG",
+            "privacy_state":     "candidate_public",
+            "proposed_tags":     [],
+            "apple_persons":     [],
+            "apple_labels":      [],
+        })
+        self.no_flickr_id = self._db.upsert_photo({
+            "uuid":              "BBBB-2222",
+            "original_filename": "local_only.JPG",
+            "privacy_state":     "candidate_public",
+            "proposed_tags":     [],
+            "apple_persons":     [],
+            "apple_labels":      [],
+        })
+
+    def tearDown(self):
+        import reviewer.app as reviewer_app
+        reviewer_app._client = None
+        self._db.close()
+        self._tmp.cleanup()
+
+    def _post(self, photo_id, degrees):
+        import json
+        with self._app.test_request_context():
+            return self._client.post(
+                f"/api/photos/{photo_id}/rotate-flickr",
+                data=json.dumps({"degrees": degrees}),
+                content_type="application/json",
+            )
+
+    def test_bad_degrees_returns_400(self):
+        resp = self._post(self.photo_id, 45)
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(resp.get_json()["ok"])
+
+    def test_missing_photo_returns_404(self):
+        resp = self._post(99999, 90)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_photo_without_flickr_id_returns_400(self):
+        resp = self._post(self.no_flickr_id, 90)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("no Flickr ID", resp.get_json()["error"])
+
+    def test_no_client_returns_503(self):
+        resp = self._post(self.photo_id, 90)
+        self.assertEqual(resp.status_code, 503)
+
+    def test_rotate_calls_client_and_returns_ok(self):
+        from unittest.mock import MagicMock
+        import reviewer.app as reviewer_app
+        mock_c = MagicMock()
+        mock_c.rotate.return_value = {"stat": "ok"}
+        reviewer_app._client = mock_c
+        try:
+            resp = self._post(self.photo_id, 180)
+            self.assertEqual(resp.status_code, 200)
+            self.assertTrue(resp.get_json()["ok"])
+            mock_c.rotate.assert_called_once_with("flickr-rotate-001", 180)
+        finally:
+            reviewer_app._client = None
+
+    def test_rotate_buttons_shown_when_flickr_id_set(self):
+        with self._app.test_request_context():
+            resp = self._client.get(f"/photo/{self.photo_id}")
+        body = resp.data.decode()
+        self.assertIn("rotateFlickr(90)", body)
+        self.assertIn("rotateFlickr(180)", body)
+        self.assertIn("rotateFlickr(270)", body)
+
+    def test_rotate_buttons_absent_when_no_flickr_id(self):
+        with self._app.test_request_context():
+            resp = self._client.get(f"/photo/{self.no_flickr_id}")
+        body = resp.data.decode()
+        self.assertNotIn("Rotate on Flickr", body)
+
+
 class TestInstallDaemons(unittest.TestCase):
     """bp install-daemons: template substitution, file placement, dry-run."""
 

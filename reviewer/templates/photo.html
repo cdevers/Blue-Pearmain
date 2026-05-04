@@ -348,6 +348,22 @@
       {% endif %}
     </div>
 
+    <!-- Flickr rotation — only shown when photo is on Flickr -->
+    {% if photo.flickr_id %}
+    <div class="meta-section">
+      <h3>Rotate on Flickr</h3>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:4px">
+        <button class="btn" style="font-size:12px; padding:4px 10px"
+                onclick="rotateFlickr(90)"  title="Rotate 90° clockwise">↻ 90° CW</button>
+        <button class="btn" style="font-size:12px; padding:4px 10px"
+                onclick="rotateFlickr(180)" title="Rotate 180°">↕ 180°</button>
+        <button class="btn" style="font-size:12px; padding:4px 10px"
+                onclick="rotateFlickr(270)" title="Rotate 90° counter-clockwise">↺ 90° CCW</button>
+      </div>
+      <div style="font-size:11px; color:var(--muted)">Irreversible — re-encodes the image on Flickr.</div>
+    </div>
+    {% endif %}
+
     <!-- Apple labels -->
     {% if photo.apple_labels %}
     <div class="meta-section">
@@ -485,6 +501,21 @@ async function doUndo() {
     window.location.href = '/review?state=' + {{ state | tojson }};
   } else {
     toast('Nothing to undo.', 'err');
+  }
+}
+
+async function rotateFlickr(degrees) {
+  if (!confirm(`Rotate ${degrees}° on Flickr? This is irreversible.`)) return;
+  const r = await fetch(`/api/photos/{{ photo.id }}/rotate-flickr`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({degrees}),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    toast(`Rotated ${degrees}° on Flickr`);
+  } else {
+    toast('Rotate failed: ' + (d.error || 'unknown'), 'err');
   }
 }
 

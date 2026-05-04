@@ -324,6 +324,17 @@ class FlickrClient:
             http_method="POST",
         )
 
+    def rotate(self, photo_id: str, degrees: int) -> dict:
+        """Rotate a photo on Flickr clockwise by 90, 180, or 270 degrees.
+        DESTRUCTIVE and irreversible — re-encodes the stored image."""
+        if degrees not in (90, 180, 270):
+            raise ValueError(f"degrees must be 90, 180, or 270; got {degrees}")
+        return self._call(
+            "flickr.photos.transform.rotate",
+            {"photo_id": photo_id, "degrees": degrees},
+            http_method="POST",
+        )
+
     def get_photosets(self) -> list[dict]:
         """Return all photosets for the authenticated user."""
         data = self._call(

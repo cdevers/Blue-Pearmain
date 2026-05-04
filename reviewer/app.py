@@ -893,6 +893,29 @@ def _json_loads_safe(value):
         return []
 
 
+@app.route("/api/photos/<int:photo_id>/rotate-flickr", methods=["POST"])
+def api_rotate_flickr(photo_id: int):
+    """Rotate a photo on Flickr clockwise by 90, 180, or 270 degrees.
+    Destructive and irreversible — re-encodes the image stored on Flickr."""
+    data = request.get_json(force=True, silent=True) or {}
+    degrees = data.get("degrees")
+    if degrees not in (90, 180, 270):
+        return jsonify({"ok": False, "error": "degrees must be 90, 180, or 270"}), 400
+    photo = db().get_photo(photo_id)
+    if not photo:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    if not photo.get("flickr_id"):
+        return jsonify({"ok": False, "error": "photo has no Flickr ID"}), 400
+    c = client()
+    if not c:
+        return jsonify({"ok": False, "error": "Flickr client not available"}), 503
+    try:
+        c.rotate(photo["flickr_id"], degrees)
+        return jsonify({"ok": True})
+    except FlickrError as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 @app.route("/api/poll", methods=["POST"])
 def api_poll():
     """Trigger a manual Flickr poll in-process (quick, last 24h only)."""
