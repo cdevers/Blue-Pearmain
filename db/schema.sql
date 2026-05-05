@@ -199,6 +199,21 @@ CREATE INDEX IF NOT EXISTS idx_photos_meta_harmonized    ON photos(meta_last_har
 
 
 -- ============================================================
+-- Folders: Apple Photos folder hierarchy mirrored as Flickr Collections
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS folders (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    apple_uuid           TEXT NOT NULL UNIQUE,
+    name                 TEXT NOT NULL,
+    parent_id            INTEGER REFERENCES folders(id) ON DELETE SET NULL,
+    flickr_collection_id TEXT,
+    created_at           TEXT,
+    updated_at           TEXT
+);
+
+
+-- ============================================================
 -- Albums: Apple Photos album membership mirrored as Flickr photosets
 -- ============================================================
 
@@ -206,6 +221,7 @@ CREATE TABLE IF NOT EXISTS albums (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     apple_uuid      TEXT NOT NULL UNIQUE,   -- Photos album UUID
     name            TEXT NOT NULL,
+    folder_id       INTEGER REFERENCES folders(id) ON DELETE SET NULL,
     flickr_set_id   TEXT,                   -- NULL until created on Flickr
     flickr_set_url  TEXT,
     created_at      TEXT,

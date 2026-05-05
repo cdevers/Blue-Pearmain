@@ -5572,5 +5572,69 @@ class TestStaleUuid(unittest.TestCase):
             conn.close()
 
 
+class TestMigration011(unittest.TestCase):
+
+    def _run_migration(self, db_path: str):
+        import importlib.util, sys
+        spec = importlib.util.spec_from_file_location(
+            "migrate_011",
+            Path(__file__).parent.parent / "db/migrations/migrate_011_folders.py",
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.run(db_path)
+
+    def test_migration_011_creates_folders_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "test.db")
+            from db.db import Database
+            db = Database(db_path)
+            db.close()
+            self._run_migration(db_path)
+            import sqlite3
+            conn = sqlite3.connect(db_path)
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()}
+            self.assertIn("folders", tables)
+            conn.close()
+
+    def test_migration_011_folders_has_parent_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "test.db")
+            from db.db import Database
+            db = Database(db_path)
+            db.close()
+            self._run_migration(db_path)
+            import sqlite3
+            conn = sqlite3.connect(db_path)
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(folders)").fetchall()}
+            self.assertIn("parent_id", cols)
+            self.assertIn("flickr_collection_id", cols)
+            conn.close()
+
+    def test_migration_011_albums_has_folder_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "test.db")
+            from db.db import Database
+            db = Database(db_path)
+            db.close()
+            self._run_migration(db_path)
+            import sqlite3
+            conn = sqlite3.connect(db_path)
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(albums)").fetchall()}
+            self.assertIn("folder_id", cols)
+            conn.close()
+
+    def test_migration_011_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "idempotent.db")
+            from db.db import Database
+            db = Database(db_path)
+            db.close()
+            self._run_migration(db_path)
+            self._run_migration(db_path)  # second run must not raise
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
