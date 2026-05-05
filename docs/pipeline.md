@@ -14,10 +14,11 @@ bp all
   4. pipeline          Diff DB caches    → proposals → apply non-conflicts
   5. reconcile --fix   Validate DB state → push corrections to Flickr
   6. sync-albums       Sync album memberships → Flickr
-  7. checkpoint        Trim WAL file
+  7. sync-album-collections  Group photosets → Flickr Collections
+  8. checkpoint        Trim WAL file
 ```
 
-The order matters because later stages depend on data written by earlier ones (`pipeline` needs the Flickr and Photos caches that `scan` and `poll` populate). Stages 5–7 are independent of each other once stage 4 has run.
+The order matters because later stages depend on data written by earlier ones (`pipeline` needs the Flickr and Photos caches that `scan` and `poll` populate). Stages 5–8 are independent of each other once stage 4 has run.
 
 ---
 
@@ -44,6 +45,7 @@ Partial failures are reported at the end: `all: completed with 2 error(s): poll,
 | `pipeline` | ✓ Safe to repeat | Proposals deduplicated by identity key; applied proposals skipped; staleness check supersedes stale ones |
 | `reconcile` | ✓ Safe to repeat | Reads current Flickr state and corrects; re-running on a corrected photo is a no-op |
 | `sync-albums` | ✓ Safe to repeat | Compares current Flickr membership against DB; pushes only differences |
+| `sync-album-collections` | ✓ Safe to repeat | Calls `editSets` for full collection replace; re-running produces same result |
 | `checkpoint` | ✓ Safe to repeat | WAL trim; harmless if WAL is already empty |
 
 ---
@@ -128,7 +130,21 @@ Without `--fix`, reconcile is read-only and reports mismatches without changing 
 
 ---
 
-### 7. `bp checkpoint`
+### 7. `bp sync-album-collections [--dry-run] [--remove [--force]]`
+
+**What it does:** Reads the folder tree from the `folders` table (populated by `bp scan`) and mirrors it as Flickr Collections. Creates a Flickr Collection for each DB folder, then calls `flickr.collections.editSets` to link the correct photosets and sub-collections into each collection. Requires a Flickr Pro account.
+
+**Reads:** `folders` and `albums` tables  
+**Writes:** Flickr Collections (create, update contents)  
+**External writes:** Yes  
+**Idempotent:** Yes — `editSets` is a full replace; re-running produces the same result  
+
+`--dry-run` logs what would be synced without making API calls.  
+`--remove [--force]` reads the live Photos library, finds DB folders no longer present, and deletes their Flickr Collections after confirmation. Never runs automatically from `bp all`.
+
+---
+
+### 8. `bp checkpoint`
 
 **What it does:** Runs `PRAGMA wal_checkpoint(TRUNCATE)` on the SQLite database. Moves committed WAL frames into the main DB file and truncates the WAL to zero bytes. Prevents the WAL file from growing without bound during long-running sessions.
 
@@ -148,6 +164,7 @@ Only these stages write outside the local DB:
 | `pipeline` | Flickr (tags, title, description) via API; Apple Photos (tags, title, description) via photoscript |
 | `reconcile --fix` | Flickr (permissions, tags) via API |
 | `sync-albums` | Flickr (photoset membership) via API |
+| `sync-album-collections` | Flickr (Collection create/update) via API |
 | `thumbs` | Flickr CDN read (download only, no write) |
 
 All writes are **logged** and **conditional** — a write only happens if the DB's proposal or authoritative state disagrees with the current live state. No stage writes blindly.

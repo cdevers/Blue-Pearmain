@@ -85,7 +85,7 @@ See [`docs/pipeline.md`](docs/pipeline.md) for the full pipeline reference: stag
 | `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at, indexes on push state and tags, schema_migrations table |
 | `db/migrate_003_dimensions_and_dedup.py` | DB migration: adds width/height columns and duplicate_groups table |
 | `bp` | Unified command-line entry point |
-| `tests/` | Unit tests (431 tests) |
+| `tests/` | Unit tests (466 tests) |
 
 ## Requirements
 
@@ -143,6 +143,9 @@ bp link-orphans --dry-run          # Count linkable pairs without writing
 bp sync-albums                     # Sync Apple Photos albums → Flickr photosets (backfill)
 bp sync-albums --dry-run           # Preview what would be pushed without writing
 bp sync-albums --album "Vacation"  # Sync a single named album only
+bp sync-album-collections          # Sync folder hierarchy → Flickr Collections
+bp sync-album-collections --dry-run # Preview without API calls
+bp sync-album-collections --remove  # Remove collections for deleted folders
 bp sync-metadata                   # Diff cached metadata, generate proposals
 bp sync-metadata --dry-run         # Detect differences without writing anything
 bp sync-metadata --conflicts-only  # Record conflicts only; skip Photos writes
@@ -551,7 +554,7 @@ All scripts are idempotent and safe to re-run.
 python -m pytest tests/ -q
 ```
 
-431 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, metadata-sync batch behaviour (PhotosDB caching, progress logging, flickr_deleted detection), Flickr metadata cache writes (flickr_title, flickr_tags JSON/hash, flickr_last_updated, meta_synced_flickr_at), DB-cache-first reads in sync-metadata (cache hit/miss logic, API call avoidance), scanner Photos metadata cache writes (photos_title/description/tags/hash, meta_synced_photos_at, skip-condition update), sync engine (classify_tags, classify_text_field, run_sync_engine, upsert_proposal, hash_match supersede), proposal applier (apply_proposal, apply_batch, _count_pending, apply_collision_reverse, set_photo_text, stale_uuid termination, staleness/drift re-checks, title/description apply), collision reverse (works even when the Photos→Flickr sibling has been superseded by a sync run), drift filter with --force bypass, WAL checkpoint (wal_autocheckpoint pragma, TRUNCATE and PASSIVE modes), `bp all` step sequencing and error isolation, the reviewer "Open in Photos" API endpoint, Flickr rotation API, and daemon install/uninstall.
+466 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, metadata-sync batch behaviour (PhotosDB caching, progress logging, flickr_deleted detection), Flickr metadata cache writes (flickr_title, flickr_tags JSON/hash, flickr_last_updated, meta_synced_flickr_at), DB-cache-first reads in sync-metadata (cache hit/miss logic, API call avoidance), scanner Photos metadata cache writes (photos_title/description/tags/hash, meta_synced_photos_at, skip-condition update), sync engine (classify_tags, classify_text_field, run_sync_engine, upsert_proposal, hash_match supersede), proposal applier (apply_proposal, apply_batch, _count_pending, apply_collision_reverse, set_photo_text, stale_uuid termination, staleness/drift re-checks, title/description apply), collision reverse (works even when the Photos→Flickr sibling has been superseded by a sync run), drift filter with --force bypass, WAL checkpoint (wal_autocheckpoint pragma, TRUNCATE and PASSIVE modes), `bp all` step sequencing and error isolation, the reviewer "Open in Photos" API endpoint, Flickr rotation API, daemon install/uninstall, and sync-album-collections (folder tree reading, Collection creation, editSets API calls, dry-run mode, --remove with confirmation).
 
 ## License
 
