@@ -970,7 +970,7 @@ def api_poll():
     config_path = _config.get("_config_path", "config/config.yml")
     proc = subprocess.Popen(
         [sys.executable, "poller/poller.py", "--config", config_path, "--no-thumbs"],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     return jsonify({"ok": True, "pid": proc.pid})
 
