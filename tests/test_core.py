@@ -1383,6 +1383,28 @@ class TestFlickrCollectionsClient(unittest.TestCase):
         )
 
 
+    def test_edit_photoset_meta_calls_correct_method(self):
+        from unittest.mock import patch
+        client = self._make_client()
+        with patch.object(client, "_call", return_value={}) as mock_call:
+            client.edit_photoset_meta("ps-123", "New Title")
+        mock_call.assert_called_once_with(
+            "flickr.photosets.editMeta",
+            {"photoset_id": "ps-123", "title": "New Title", "description": ""},
+            http_method="POST",
+        )
+
+    def test_edit_collection_meta_calls_correct_method(self):
+        from unittest.mock import patch
+        client = self._make_client()
+        with patch.object(client, "_call", return_value={}) as mock_call:
+            client.edit_collection_meta("col-456", "Updated Folder")
+        mock_call.assert_called_once_with(
+            "flickr.collections.editMeta",
+            {"collection_id": "col-456", "title": "Updated Folder"},
+            http_method="POST",
+        )
+
 # ---------------------------------------------------------------------------
 # Poller auto-push: approved Photos record matched to new Flickr upload
 # ---------------------------------------------------------------------------

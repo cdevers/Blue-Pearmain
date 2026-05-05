@@ -360,6 +360,14 @@ class FlickrClient:
             http_method="POST",
         )
 
+    def edit_photoset_meta(self, photoset_id: str, title: str) -> None:
+        """Update the title of an existing Flickr photoset."""
+        self._call(
+            "flickr.photosets.editMeta",
+            {"photoset_id": photoset_id, "title": title, "description": ""},
+            http_method="POST",
+        )
+
     # -----------------------------------------------------------------------
     # Collections (Flickr Pro only)
     # -----------------------------------------------------------------------
@@ -396,6 +404,14 @@ class FlickrClient:
         self._call(
             "flickr.collections.delete",
             {"collection_id": collection_id},
+            http_method="POST",
+        )
+
+    def edit_collection_meta(self, collection_id: str, title: str) -> None:
+        """Update the title of an existing Flickr Collection."""
+        self._call(
+            "flickr.collections.editMeta",
+            {"collection_id": collection_id, "title": title},
             http_method="POST",
         )
 
