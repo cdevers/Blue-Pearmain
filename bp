@@ -11,7 +11,8 @@ Usage:
     bp reconcile [--fix] [--limit N] Check DB state vs actual Flickr state
     bp link-orphans [--dry-run]     Merge split Photos/Flickr records
     bp checkpoint [--mode MODE]     Checkpoint the WAL file (default: truncate)
-    bp all [--dry-run]              Full maintenance run (scan, poll, thumbs, pipeline, reconcile, sync-albums, checkpoint)
+    bp sync-album-collections [--dry-run] [--remove [--force]]  Sync folder hierarchy → Flickr Collections
+    bp all [--dry-run]              Full maintenance run (scan, poll, thumbs, pipeline, reconcile, sync-albums, sync-album-collections, checkpoint)
     bp install-daemons [--dry-run]  Install launchd agents to ~/Library/LaunchAgents
     bp uninstall-daemons [--dry-run] Remove installed launchd agents
     bp ui                           Start the review UI (http://localhost:5173)
@@ -251,6 +252,17 @@ def cmd_sync_albums(args):
         ("--dry-run", args.dry_run),
         ("--album",   args.album),
         ("--limit",   str(args.limit) if args.limit is not None else None),
+        ("--verbose", args.verbose),
+    ])
+
+
+def cmd_sync_album_collections(args):
+    from flickr.sync_collections import main
+    _run(main, args, [
+        ("--config",  args.config),
+        ("--dry-run", args.dry_run),
+        ("--remove",  getattr(args, "remove", False)),
+        ("--force",   getattr(args, "force", False)),
         ("--verbose", args.verbose),
     ])
 
@@ -566,8 +578,9 @@ def cmd_all(args):
       3. thumbs           populate missing thumbnail paths
       4. pipeline         metadata sync + auto-apply non-conflict proposals
       5. reconcile --fix  repair DB/Flickr mismatches
-      6. sync-albums      push album memberships to Flickr
-      7. checkpoint       trim the WAL file
+      6. sync-albums               push album memberships to Flickr
+      7. sync-album-collections    sync folder hierarchy → Flickr Collections
+      8. checkpoint                trim the WAL file
     Each step runs independently; a failure is logged and the sequence continues.
     Not included: 'scan --all' can be skipped with --skip-scan; 'bp poll --backfill'
     and 'bp scan' incremental are intentionally excluded (manual operations).
@@ -589,7 +602,8 @@ def cmd_all(args):
         ("poll",            cmd_poll,        _step_args(args, backfill=False, dry_run=dry_run, days=None)),
         ("pipeline",        cmd_pipeline,    _step_args(args, limit=None,     dry_run=dry_run)),
         ("reconcile",       cmd_reconcile,   _step_args(args, fix=not dry_run, apply_proposals=False, limit=None)),
-        ("sync-albums",     cmd_sync_albums, _step_args(args, dry_run=dry_run, album=None,    limit=None)),
+        ("sync-albums",            cmd_sync_albums,            _step_args(args, dry_run=dry_run, album=None,    limit=None)),
+        ("sync-album-collections", cmd_sync_album_collections, _step_args(args, dry_run=dry_run, remove=False,   force=False)),
     ]
     if not dry_run:
         steps.insert(2, ("thumbs",     cmd_thumbs,     args))
@@ -671,6 +685,19 @@ def main():
     p_sync.add_argument("--limit",   type=int, default=None)
     p_sync.add_argument("--verbose", action="store_true")
 
+    # sync-album-collections
+    p_col = sub.add_parser(
+        "sync-album-collections",
+        help="Sync Apple Photos folder hierarchy → Flickr Collections (Pro account required)",
+    )
+    p_col.add_argument("--dry-run", action="store_true",
+                       help="Show what would be synced without making API calls")
+    p_col.add_argument("--remove",  action="store_true",
+                       help="Remove Flickr Collections for folders deleted from Photos")
+    p_col.add_argument("--force",   action="store_true",
+                       help="Skip confirmation prompts when used with --remove")
+    p_col.add_argument("--verbose", action="store_true")
+
     # sync-metadata
     p_meta = sub.add_parser("sync-metadata", help="Pull Flickr metadata → Apple Photos")
     p_meta.add_argument("--dry-run",        action="store_true",
@@ -697,7 +724,7 @@ def main():
     # all
     p_all = sub.add_parser(
         "all",
-        help="Full maintenance run: scan --all, poll, thumbs, pipeline, reconcile --fix, sync-albums, checkpoint",
+        help="Full maintenance run: scan --all, poll, thumbs, pipeline, reconcile --fix, sync-albums, sync-album-collections, checkpoint",
     )
     p_all.add_argument("--dry-run", action="store_true",
                        help="Run all stages read-only: no external writes. "
@@ -746,6 +773,8 @@ def main():
     if not hasattr(args, "port"):            args.port = 5173
     if not hasattr(args, "debug"):           args.debug = False
     if not hasattr(args, "album"):           args.album = None
+    if not hasattr(args, "remove"):          args.remove = False
+    if not hasattr(args, "force"):           args.force = False
     if not hasattr(args, "photo_id"):        args.photo_id = None
     if not hasattr(args, "conflicts_only"):  args.conflicts_only = False
     if not hasattr(args, "mode"):            args.mode = "truncate"
@@ -759,8 +788,9 @@ def main():
         "thumbs":        cmd_thumbs,
         "reconcile":     cmd_reconcile,
         "ui":            cmd_ui,
-        "sync-albums":   cmd_sync_albums,
-        "sync-metadata": cmd_sync_metadata,
+        "sync-albums":             cmd_sync_albums,
+        "sync-album-collections":  cmd_sync_album_collections,
+        "sync-metadata":           cmd_sync_metadata,
         "link-orphans":  cmd_link_orphans,
         "checkpoint":       cmd_checkpoint,
         "all":              cmd_all,

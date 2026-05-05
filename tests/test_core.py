@@ -1538,6 +1538,23 @@ class TestBpCli(unittest.TestCase):
                                     "sync-albums", "--verbose")
         self.assertNotIn("unrecognized", stderr.lower())
 
+    def test_sync_album_collections_help(self):
+        result = subprocess.run(
+            [sys.executable, "bp", "sync-album-collections", "--help"],
+            capture_output=True, text=True,
+            cwd=str(Path(__file__).parent.parent),
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("sync-album-collections", result.stdout + result.stderr)
+
+    def test_sync_album_collections_in_all_help(self):
+        result = subprocess.run(
+            [sys.executable, "bp", "all", "--help"],
+            capture_output=True, text=True,
+            cwd=str(Path(__file__).parent.parent),
+        )
+        self.assertEqual(result.returncode, 0)
+
 
 # ---------------------------------------------------------------------------
 # updated_at stamping
