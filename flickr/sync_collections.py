@@ -99,7 +99,7 @@ def sync_collections(db, flickr, dry_run: bool = False) -> dict:
                 name, len(photoset_ids), len(sub_collection_ids),
             )
         except FlickrError as e:
-            if "not found" in str(e).lower() or e.code == 2:
+            if "not found" in str(e).lower():
                 log.warning(
                     "collection %r (id=%s) not found on Flickr — recreating",
                     name, collection_id,
@@ -131,8 +131,19 @@ def remove_orphaned_collections(
 
     photo_lib = osxphotos.PhotosDB(dbfile=library_path)
 
-    # Collect all live folder UUIDs from the Photos library
+    # Collect all live folder UUIDs — both from folder_info (catches empty folders)
+    # and from album ancestry (belt-and-suspenders).
     live_uuids: set[str] = set()
+
+    # Primary source: folder_info includes all folders, even empty ones
+    for folder_info in getattr(photo_lib, "folder_info", []):
+        live_uuids.add(folder_info.uuid)
+        node = getattr(folder_info, "parent", None)
+        while node is not None:
+            live_uuids.add(node.uuid)
+            node = getattr(node, "parent", None)
+
+    # Secondary source: album ancestry (covers any edge cases)
     for album in photo_lib.album_info:
         node = getattr(album, "parent", None)
         while node is not None:
@@ -223,6 +234,10 @@ def main() -> int:
 
     if args.remove:
         library_path = str(Path(config.get("photos_library", {}).get("path", "")).expanduser())
+        if not library_path or library_path == ".":
+            log.error("--remove requires photos_library.path in config")
+            db.close()
+            return 2
         remove_orphaned_collections(db, flickr, library_path, force=args.force)
 
     db.close()
