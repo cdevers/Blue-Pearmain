@@ -1139,13 +1139,26 @@ def main():
     )
 
     if args.host not in ("127.0.0.1", "localhost"):
+        import socket
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            lan_ip = s.getsockname()[0]
+            s.close()
+        except OSError:
+            lan_ip = None
         log.warning(
-            "Binding to %s — the reviewer UI is designed for trusted local networks only "
-            "and is not hardened for internet-facing deployment.", args.host
+            "Binding to all interfaces — the reviewer UI is designed for trusted local "
+            "networks only and is not hardened for internet-facing deployment."
         )
+        if lan_ip:
+            log.warning("Accessible at http://%s:%s (LAN)", lan_ip, args.port)
+    else:
+        lan_ip = None
 
     create_app(args.config)
-    log.info(f"Starting review UI at http://{args.host}:{args.port}")
+    log.info(f"Starting review UI at http://localhost:{args.port}"
+             + (f"  (also http://{lan_ip}:{args.port} on LAN)" if lan_ip else ""))
     app.run(host=args.host, port=args.port, debug=args.debug)
 
 
