@@ -142,7 +142,10 @@ def sync_album_titles(db, flickr, dry_run: bool = False) -> dict:
         except Exception as e:
             log.warning("failed to update photoset title for album %r: %s", row["name"], e)
 
-    log.info("sync-album-titles: updated=%d", updated)
+    if dry_run:
+        log.info("sync-album-titles: [dry-run] would-update=%d", updated)
+    else:
+        log.info("sync-album-titles: updated=%d", updated)
     return {"updated": updated}
 
 
