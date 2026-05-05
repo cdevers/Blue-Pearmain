@@ -17,5 +17,6 @@ dist/
 
 # macOS
 .DS_Store
+._*
 *.swp
 *.lock

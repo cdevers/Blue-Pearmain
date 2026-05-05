@@ -1,5 +1,7 @@
 # Blue Pearmain — Claude instructions
 
+> **Note for contributors:** This file is a configuration file for [Claude Code](https://claude.ai/code) (Anthropic's AI coding assistant). It has no effect if you're not using Claude Code — you can safely ignore it.
+
 These instructions apply to every session in this project. Follow them without being asked.
 
 ---
