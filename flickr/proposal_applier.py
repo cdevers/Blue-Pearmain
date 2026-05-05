@@ -235,6 +235,7 @@ def apply_collision_reverse(
         except Exception as e:
             return {"ok": False, "reason": f"Flickr API error: {e}"}
         now = _now_iso()
+        assert field in ("title", "description", "tags"), f"unexpected field: {field!r}"
         db.conn.execute(
             f"UPDATE photos SET flickr_{field}=?, meta_synced_flickr_at=?, updated_at=? WHERE id=?",
             (photos_value, now, now, photo_id),
@@ -460,6 +461,7 @@ def _apply_text_to_photos(db: "Database", row, new_value: str) -> dict:
         written = new_value
 
     now = _now_iso()
+    assert field in ("title", "description", "tags"), f"unexpected field: {field!r}"
     col = f"photos_{field}"
     db.conn.execute(
         f"UPDATE photos SET {col}=?, meta_synced_photos_at=?, updated_at=? WHERE id=?",
@@ -494,6 +496,7 @@ def _apply_text_to_flickr(
         return {"ok": False, "reason": f"Flickr API error: {e}"}
 
     now = _now_iso()
+    assert field in ("title", "description", "tags"), f"unexpected field: {field!r}"
     col = f"flickr_{field}"
     db.conn.execute(
         f"UPDATE photos SET {col}=?, meta_synced_flickr_at=?, updated_at=? WHERE id=?",
