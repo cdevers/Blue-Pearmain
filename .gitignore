@@ -8,6 +8,9 @@ config/config.yml
 data/
 thumbs/
 
+# Release artifacts
+blue-pearmain-*.tar.gz
+
 # Python
 __pycache__/
 *.py[cod]
