@@ -6067,6 +6067,17 @@ class TestSyncCollections(unittest.TestCase):
 
         flickr.edit_collection_meta.assert_not_called()
 
+    def test_edit_collection_meta_error_is_logged_and_counter_still_increments(self):
+        from flickr.sync_collections import sync_collections
+        self._seed_folder("uuid-f1", "My Folder", collection_id="col-existing")
+        flickr = self._make_flickr()
+        flickr.edit_collection_meta.side_effect = Exception("API timeout")
+
+        result = sync_collections(self.db, flickr)
+
+        flickr.edit_collection_meta.assert_called_once()
+        self.assertEqual(result["updated"], 1)
+
 
 class TestSyncAlbumTitles(unittest.TestCase):
     """sync_album_titles: pushes current album names to Flickr photoset titles."""
