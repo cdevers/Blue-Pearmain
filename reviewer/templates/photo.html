@@ -262,6 +262,7 @@
     <div class="kbd-hints">
       <span><kbd>J</kbd><kbd>K</kbd> next/prev</span>
       <span><kbd>Esc</kbd> grid</span>
+      <span><kbd>D</kbd> title</span>
       <span><kbd>T</kbd> tags</span>
       <span><kbd>N</kbd> faces</span>
     </div>
@@ -398,6 +399,36 @@
     </div>
     {% endif %}
 
+    <!-- Title & Description editor -->
+    <div class="meta-section">
+      <h3>Title &amp; Description</h3>
+      {% set pt = photo.photos_title or '' %}
+      {% set ft = photo.flickr_title or '' %}
+      {% set pd = photo.photos_description or '' %}
+      {% set fd = photo.flickr_description or '' %}
+      {% if pt and ft and pt != ft %}
+      <div style="font-size:10px; color:var(--muted); margin-bottom:6px; line-height:1.6">
+        <span style="color:#6a9e6a">Photos:</span> {{ pt }}<br>
+        <span style="color:#6ab4f5">Flickr:</span> {{ ft }}
+      </div>
+      {% endif %}
+      <input type="text" id="text-title"
+             value="{{ pt or ft }}"
+             placeholder="Title…"
+             style="width:100%; box-sizing:border-box; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:5px 8px; border-radius:var(--radius); font-size:12px; margin-bottom:6px">
+      {% if pd and fd and pd != fd %}
+      <div style="font-size:10px; color:var(--muted); margin-bottom:6px; line-height:1.6">
+        <span style="color:#6a9e6a">Photos:</span> {{ pd[:120] }}{% if pd|length > 120 %}…{% endif %}<br>
+        <span style="color:#6ab4f5">Flickr:</span> {{ fd[:120] }}{% if fd|length > 120 %}…{% endif %}
+      </div>
+      {% endif %}
+      <textarea id="text-desc" rows="4" placeholder="Description…"
+                style="width:100%; box-sizing:border-box; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:5px 8px; border-radius:var(--radius); font-size:12px; resize:vertical">{{ pd or fd }}</textarea>
+      <button class="btn" onclick="saveText()" style="margin-top:4px; font-size:12px">
+        <span class="key-hint">D</span> Save to both
+      </button>
+    </div>
+
     <!-- Tag editor -->
     <div class="meta-section">
       <h3>Proposed tags <span style="font-weight:400;color:var(--muted)">(edit before pushing)</span></h3>
@@ -459,6 +490,22 @@ function handleTagInput(e) {
   } else if (e.key === 'Backspace' && e.target.value === '') {
     const tags = document.querySelectorAll('#tag-editor .tag');
     if (tags.length) tags[tags.length - 1].remove();
+  }
+}
+
+async function saveText() {
+  const title       = document.getElementById('text-title').value.trim();
+  const description = document.getElementById('text-desc').value.trim();
+  const r = await fetch(`/api/photos/${PHOTO_ID}/set-text`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({title, description}),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    toast(d.warnings?.length ? `Saved (${d.warnings.join('; ')})` : 'Saved to both', 'ok');
+  } else {
+    toast('Save failed: ' + (d.reason || 'unknown'), 'err');
   }
 }
 
@@ -526,7 +573,7 @@ async function rotateFlickr(degrees) {
 }
 
 document.addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   if ((e.key === 'z' || e.key === 'Z') && !e.target.matches('input, textarea, select')) {
     doUndo();
     return;
@@ -535,6 +582,10 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'a' || e.key === 'A') doDecide('make_public', false);
   else if (e.key === 'x' || e.key === 'X') doDecide('keep_private', true);
   else if (e.key === ' ') { e.preventDefault(); doDecide('skip', false); }
+  else if (e.key === 'd' || e.key === 'D') {
+    e.preventDefault();
+    document.getElementById('text-title').focus();
+  }
   else if (e.key === 't' || e.key === 'T') {
     e.preventDefault();
     document.getElementById('tag-input').focus();

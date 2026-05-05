@@ -505,6 +505,115 @@ def _mark_applied(db: "Database", proposal_id: int) -> None:
     )
 
 
+def set_photo_text(
+    db: "Database",
+    photo_id: int,
+    title: str,
+    description: str,
+    library_path: str,
+    flickr_client: "FlickrClient | None" = None,
+) -> dict:
+    """
+    Write title and description to both Apple Photos and Flickr simultaneously.
+    Updates the DB cache and supersedes any pending title/description proposals.
+    Partial success (one side fails) returns ok=True with warnings.
+    """
+    row = db.conn.execute(
+        "SELECT id, flickr_id, uuid FROM photos WHERE id = ?",
+        (photo_id,),
+    ).fetchone()
+    if not row:
+        return {"ok": False, "reason": "photo not found"}
+
+    flickr_id = row["flickr_id"]
+    uuid = row["uuid"]
+    warnings = []
+
+    if uuid:
+        r = _write_text_to_photos_both(db, photo_id, uuid, title, description)
+        if not r["ok"]:
+            warnings.append(f"Photos: {r['reason']}")
+    elif not flickr_id:
+        return {"ok": False, "reason": "photo has neither uuid nor flickr_id"}
+
+    if flickr_id:
+        if flickr_client is None:
+            warnings.append("Flickr: no client available")
+        else:
+            r = _write_text_to_flickr_both(db, photo_id, flickr_id, title, description, flickr_client)
+            if not r["ok"]:
+                warnings.append(f"Flickr: {r['reason']}")
+
+    now = _now_iso()
+    db.conn.execute(
+        """UPDATE metadata_proposals
+           SET status='superseded', resolved_at=?
+           WHERE photo_id=? AND field IN ('title','description') AND status='pending'""",
+        (now, photo_id),
+    )
+    db.conn.commit()
+
+    log.info("set_photo_text photo_id=%s title=%r desc_len=%d warnings=%s",
+             photo_id, title[:40], len(description), warnings)
+    if warnings:
+        return {"ok": True, "warnings": warnings}
+    return {"ok": True}
+
+
+def _write_text_to_photos_both(
+    db: "Database", photo_id: int, uuid: str, title: str, description: str
+) -> dict:
+    """Write both title and description to Photos.app and update the DB cache."""
+    if not _photos_is_running():
+        return {"ok": False, "reason": "Photos.app is not running"}
+    try:
+        import photoscript
+    except ImportError:
+        return {"ok": False, "reason": "photoscript not installed"}
+    try:
+        photo = photoscript.Photo(uuid)
+    except Exception as e:
+        return {"ok": False, "reason": f"photo not found in Photos: {e}"}
+    try:
+        photo.title = title
+        photo.description = description
+    except Exception as e:
+        return {"ok": False, "reason": f"write failed: {e}"}
+    try:
+        written_title = (photo.title or "").strip()
+        written_desc  = (photo.description or "").strip()
+    except Exception:
+        written_title = title
+        written_desc  = description
+    now = _now_iso()
+    db.conn.execute(
+        """UPDATE photos
+           SET photos_title=?, photos_description=?, meta_synced_photos_at=?, updated_at=?
+           WHERE id=?""",
+        (written_title, written_desc, now, now, photo_id),
+    )
+    return {"ok": True}
+
+
+def _write_text_to_flickr_both(
+    db: "Database", photo_id: int, flickr_id: str, title: str, description: str,
+    flickr_client: "FlickrClient",
+) -> dict:
+    """Write both title and description to Flickr and update the DB cache."""
+    try:
+        flickr_client.set_meta(flickr_id, title=title, description=description)
+    except Exception as e:
+        return {"ok": False, "reason": f"Flickr API error: {e}"}
+    now = _now_iso()
+    db.conn.execute(
+        """UPDATE photos
+           SET flickr_title=?, flickr_description=?, meta_synced_flickr_at=?, updated_at=?
+           WHERE id=?""",
+        (title, description, now, now, photo_id),
+    )
+    return {"ok": True}
+
+
 def _photos_is_running() -> bool:
     try:
         result = subprocess.run(

@@ -948,6 +948,21 @@ def api_rotate_flickr(photo_id: int):
     return jsonify({"ok": True, "display_rotation": new_rotation})
 
 
+@app.route("/api/photos/<int:photo_id>/set-text", methods=["POST"])
+def api_set_photo_text(photo_id: int):
+    """Write title and description to both Apple Photos and Flickr."""
+    data = request.get_json(force=True, silent=True) or {}
+    title       = (data.get("title") or "").strip()
+    description = (data.get("description") or "").strip()
+    from flickr.proposal_applier import set_photo_text
+    library_path = str(Path(_config.get("photos_library", {}).get("path", "")).expanduser())
+    result = set_photo_text(db(), photo_id, title, description, library_path, flickr_client=client())
+    if result.get("ok"):
+        return jsonify(result)
+    status = 404 if result.get("reason") == "photo not found" else 502
+    return jsonify(result), status
+
+
 @app.route("/api/poll", methods=["POST"])
 def api_poll():
     """Trigger a manual Flickr poll in-process (quick, last 24h only)."""

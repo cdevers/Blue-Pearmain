@@ -5301,5 +5301,108 @@ class TestUninstallDaemons(unittest.TestCase):
                 bp.cmd_uninstall_daemons(self._args())
 
 
+class TestSetPhotoText(unittest.TestCase):
+    """set_photo_text: writes title+description to both Photos and Flickr."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        self.db.upsert_photo({
+            "flickr_id": "F1", "uuid": "U1",
+            "privacy_state": "candidate_public",
+            "flickr_title": "Old Flickr", "photos_title": "Old Photos",
+            "flickr_description": "Old F desc", "photos_description": "Old P desc",
+        })
+        self.photo_id = self.db.get_photo_by_flickr_id("F1")["id"]
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def test_writes_to_flickr_via_set_meta(self):
+        from unittest.mock import MagicMock
+        from flickr.proposal_applier import set_photo_text
+        mock_client = MagicMock()
+        with unittest.mock.patch("flickr.proposal_applier._photos_is_running", return_value=False):
+            result = set_photo_text(self.db, self.photo_id, "New Title", "New Desc",
+                                    "/fake/lib", flickr_client=mock_client)
+        self.assertTrue(result["ok"], result)
+        mock_client.set_meta.assert_called_once_with("F1", title="New Title", description="New Desc")
+
+    def test_updates_flickr_cache_in_db(self):
+        from unittest.mock import MagicMock
+        from flickr.proposal_applier import set_photo_text
+        with unittest.mock.patch("flickr.proposal_applier._photos_is_running", return_value=False):
+            set_photo_text(self.db, self.photo_id, "T2", "D2", "/fake/lib",
+                           flickr_client=MagicMock())
+        row = self.db.get_photo(self.photo_id)
+        self.assertEqual(row["flickr_title"], "T2")
+        self.assertEqual(row["flickr_description"], "D2")
+
+    def test_supersedes_pending_title_proposals(self):
+        from unittest.mock import MagicMock
+        from flickr.proposal_applier import set_photo_text
+        for src, tgt in (("flickr", "photos"), ("photos", "flickr")):
+            self.db.upsert_proposal({
+                "photo_id": self.photo_id, "field": "title",
+                "proposed_value": "v", "source": src, "target": tgt,
+                "conflict_type": "collision",
+                "source_hash_at_creation": "h1", "target_hash_at_creation": "h2",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            })
+        self.db.conn.commit()
+        with unittest.mock.patch("flickr.proposal_applier._photos_is_running", return_value=False):
+            set_photo_text(self.db, self.photo_id, "T", "D", "/fake/lib",
+                           flickr_client=MagicMock())
+        statuses = [r["status"] for r in self.db.conn.execute(
+            "SELECT status FROM metadata_proposals WHERE photo_id=? AND field='title'",
+            (self.photo_id,),
+        ).fetchall()]
+        self.assertTrue(all(s == "superseded" for s in statuses), statuses)
+
+    def test_photo_not_found_returns_error(self):
+        from unittest.mock import MagicMock
+        from flickr.proposal_applier import set_photo_text
+        result = set_photo_text(self.db, 9999, "T", "D", "/fake/lib", flickr_client=MagicMock())
+        self.assertFalse(result["ok"])
+        self.assertIn("not found", result["reason"])
+
+    def test_no_flickr_client_produces_warning(self):
+        from flickr.proposal_applier import set_photo_text
+        with unittest.mock.patch("flickr.proposal_applier._photos_is_running", return_value=False):
+            result = set_photo_text(self.db, self.photo_id, "T", "D", "/fake/lib",
+                                    flickr_client=None)
+        self.assertTrue(result["ok"], result)
+        self.assertIn("Flickr", " ".join(result.get("warnings", [])))
+
+    def test_flickr_api_error_produces_warning(self):
+        from unittest.mock import MagicMock
+        from flickr.proposal_applier import set_photo_text
+        mock_client = MagicMock()
+        mock_client.set_meta.side_effect = Exception("API down")
+        with unittest.mock.patch("flickr.proposal_applier._photos_is_running", return_value=False):
+            result = set_photo_text(self.db, self.photo_id, "T", "D", "/fake/lib",
+                                    flickr_client=mock_client)
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(any("Flickr" in w for w in result.get("warnings", [])))
+
+    def test_writes_to_photos_via_photoscript(self):
+        from unittest.mock import MagicMock, patch
+        from flickr.proposal_applier import set_photo_text
+        mock_photo = MagicMock()
+        mock_photo.title = ""
+        mock_photo.description = ""
+        mock_ps = MagicMock()
+        mock_ps.Photo.return_value = mock_photo
+        with patch("flickr.proposal_applier._photos_is_running", return_value=True), \
+             patch.dict("sys.modules", {"photoscript": mock_ps}):
+            result = set_photo_text(self.db, self.photo_id, "T3", "D3", "/fake/lib",
+                                    flickr_client=MagicMock())
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(mock_photo.title, "T3")
+        self.assertEqual(mock_photo.description, "D3")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
