@@ -27,7 +27,7 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def run(db_path: str) -> None:
+def run(db_path: str, dry_run: bool = False) -> None:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
@@ -41,6 +41,14 @@ def run(db_path: str) -> None:
             return
     except Exception:
         pass
+
+    if dry_run:
+        print("  [dry-run] Would create folders table")
+        print("  [dry-run] Would add albums.folder_id column")
+        conn.close()
+        return
+
+    conn.execute("BEGIN")
 
     # 1. Create folders table
     conn.execute("""
@@ -74,7 +82,8 @@ def run(db_path: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Blue Pearmain DB migration 011")
-    parser.add_argument("--config", default="config/config.yml")
+    parser.add_argument("--config",  default="config/config.yml")
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -82,7 +91,7 @@ def main():
 
     db_path = str(Path(config["database"]["path"]).expanduser())
     print(f"Database: {db_path}")
-    run(db_path)
+    run(db_path, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":
