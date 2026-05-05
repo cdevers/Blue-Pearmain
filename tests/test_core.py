@@ -5918,6 +5918,7 @@ class TestSyncCollections(unittest.TestCase):
         m = MagicMock()
         m.create_collection.return_value = "col-new"
         m.edit_collection_sets.return_value = None
+        m.edit_collection_meta.return_value = None
         m.delete_collection.return_value = None
         for attr, val in side_effects.items():
             setattr(m, attr, val)
@@ -6047,6 +6048,24 @@ class TestSyncCollections(unittest.TestCase):
         flickr.create_collection.assert_called_once()
         row = self.db.conn.execute("SELECT flickr_collection_id FROM folders WHERE id=?", (fid,)).fetchone()
         self.assertEqual(row["flickr_collection_id"], "col-new")
+
+    def test_updates_collection_title_for_existing_collection(self):
+        from flickr.sync_collections import sync_collections
+        self._seed_folder("uuid-f1", "New Name", collection_id="col-existing")
+        flickr = self._make_flickr()
+
+        sync_collections(self.db, flickr)
+
+        flickr.edit_collection_meta.assert_called_once_with("col-existing", "New Name")
+
+    def test_dry_run_does_not_call_edit_collection_meta(self):
+        from flickr.sync_collections import sync_collections
+        self._seed_folder("uuid-f1", "Travel", collection_id="col-existing")
+        flickr = self._make_flickr()
+
+        sync_collections(self.db, flickr, dry_run=True)
+
+        flickr.edit_collection_meta.assert_not_called()
 
 
 class TestSyncAlbumTitles(unittest.TestCase):

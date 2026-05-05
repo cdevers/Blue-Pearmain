@@ -72,6 +72,10 @@ def sync_collections(db, flickr, dry_run: bool = False) -> dict:
             log.info("created collection %r (id=%s)", folder["name"], collection_id)
             totals["created"] += 1
         else:
+            try:
+                flickr.edit_collection_meta(folder["flickr_collection_id"], folder["name"])
+            except Exception as e:
+                log.warning("failed to update collection title for %r: %s", folder["name"], e)
             totals["updated"] += 1
 
     # Pass 2: set memberships (all collection IDs now known)
