@@ -2062,6 +2062,82 @@ class TestAlbumDB(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Folder DB
+# ---------------------------------------------------------------------------
+
+class TestFolderDB(unittest.TestCase):
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = _make_db(self._tmp.name)
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def test_upsert_folder_creates_and_returns_id(self):
+        fid = self.db.upsert_folder("uuid-f1", "Travel")
+        self.assertIsInstance(fid, int)
+        self.assertGreater(fid, 0)
+
+    def test_upsert_folder_idempotent(self):
+        fid1 = self.db.upsert_folder("uuid-f1", "Travel")
+        fid2 = self.db.upsert_folder("uuid-f1", "Travel")
+        self.assertEqual(fid1, fid2)
+
+    def test_upsert_folder_updates_name(self):
+        fid = self.db.upsert_folder("uuid-f1", "Old Name")
+        self.db.upsert_folder("uuid-f1", "New Name")
+        row = self.db.conn.execute("SELECT name FROM folders WHERE id=?", (fid,)).fetchone()
+        self.assertEqual(row["name"], "New Name")
+
+    def test_upsert_folder_with_parent(self):
+        parent_id = self.db.upsert_folder("uuid-parent", "Europe")
+        child_id  = self.db.upsert_folder("uuid-child", "France", parent_id=parent_id)
+        row = self.db.conn.execute("SELECT parent_id FROM folders WHERE id=?", (child_id,)).fetchone()
+        self.assertEqual(row["parent_id"], parent_id)
+
+    def test_upsert_album_accepts_folder_id(self):
+        fid = self.db.upsert_folder("uuid-f1", "Travel")
+        aid = self.db.upsert_album("uuid-a1", "Paris Trip", folder_id=fid)
+        row = self.db.conn.execute("SELECT folder_id FROM albums WHERE id=?", (aid,)).fetchone()
+        self.assertEqual(row["folder_id"], fid)
+
+    def test_upsert_album_folder_id_defaults_none(self):
+        aid = self.db.upsert_album("uuid-a1", "Standalone Album")
+        row = self.db.conn.execute("SELECT folder_id FROM albums WHERE id=?", (aid,)).fetchone()
+        self.assertIsNone(row["folder_id"])
+
+    def test_get_all_folders_returns_rows(self):
+        self.db.upsert_folder("uuid-f1", "Travel")
+        self.db.upsert_folder("uuid-f2", "Work")
+        folders = self.db.get_all_folders()
+        self.assertEqual(len(folders), 2)
+        names = {f["name"] for f in folders}
+        self.assertEqual(names, {"Travel", "Work"})
+
+    def test_get_all_folders_empty(self):
+        self.assertEqual(self.db.get_all_folders(), [])
+
+    def test_set_folder_flickr_collection_id(self):
+        fid = self.db.upsert_folder("uuid-f1", "Travel")
+        self.db.set_folder_flickr_collection_id(fid, "col-123")
+        row = self.db.conn.execute(
+            "SELECT flickr_collection_id FROM folders WHERE id=?", (fid,)
+        ).fetchone()
+        self.assertEqual(row["flickr_collection_id"], "col-123")
+
+    def test_clear_folder_flickr_collection_id(self):
+        fid = self.db.upsert_folder("uuid-f1", "Travel")
+        self.db.set_folder_flickr_collection_id(fid, "col-123")
+        self.db.clear_folder_flickr_collection_id(fid)
+        row = self.db.conn.execute(
+            "SELECT flickr_collection_id FROM folders WHERE id=?", (fid,)
+        ).fetchone()
+        self.assertIsNone(row["flickr_collection_id"])
+
+
+# ---------------------------------------------------------------------------
 # Album pusher
 # ---------------------------------------------------------------------------
 

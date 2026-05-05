@@ -628,15 +628,15 @@ class Database:
     # Album sync
     # -----------------------------------------------------------------------
 
-    def upsert_album(self, apple_uuid: str, name: str) -> int:
+    def upsert_album(self, apple_uuid: str, name: str, folder_id: int | None = None) -> int:
         """Insert or update an album record. Returns the album row id."""
         self.conn.execute(
-            "INSERT OR IGNORE INTO albums (apple_uuid, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            (apple_uuid, name, _now_iso(), _now_iso()),
+            "INSERT OR IGNORE INTO albums (apple_uuid, name, folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (apple_uuid, name, folder_id, _now_iso(), _now_iso()),
         )
         self.conn.execute(
-            "UPDATE albums SET name = ?, updated_at = ? WHERE apple_uuid = ?",
-            (name, _now_iso(), apple_uuid),
+            "UPDATE albums SET name = ?, folder_id = ?, updated_at = ? WHERE apple_uuid = ?",
+            (name, folder_id, _now_iso(), apple_uuid),
         )
         self.conn.commit()
         row = self.conn.execute(
@@ -687,6 +687,49 @@ class Database:
         self.conn.execute(
             "UPDATE albums SET flickr_set_id = ?, flickr_set_url = ?, updated_at = ? WHERE id = ?",
             (flickr_set_id, flickr_set_url, _now_iso(), album_id),
+        )
+        self.conn.commit()
+
+    # ------------------------------------------------------------------
+    # Folder methods
+    # ------------------------------------------------------------------
+
+    def upsert_folder(self, apple_uuid: str, name: str, parent_id: int | None = None) -> int:
+        """Insert or update a folder record. Returns the folder row id."""
+        self.conn.execute(
+            "INSERT OR IGNORE INTO folders (apple_uuid, name, parent_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (apple_uuid, name, parent_id, _now_iso(), _now_iso()),
+        )
+        self.conn.execute(
+            "UPDATE folders SET name = ?, parent_id = ?, updated_at = ? WHERE apple_uuid = ?",
+            (name, parent_id, _now_iso(), apple_uuid),
+        )
+        self.conn.commit()
+        row = self.conn.execute(
+            "SELECT id FROM folders WHERE apple_uuid = ?", (apple_uuid,)
+        ).fetchone()
+        return row["id"]
+
+    def get_all_folders(self) -> list[dict]:
+        """Return all folder rows as dicts."""
+        rows = self.conn.execute(
+            "SELECT id, apple_uuid, name, parent_id, flickr_collection_id FROM folders"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def set_folder_flickr_collection_id(self, folder_id: int, collection_id: str) -> None:
+        """Store the Flickr Collection ID after creating a collection."""
+        self.conn.execute(
+            "UPDATE folders SET flickr_collection_id = ?, updated_at = ? WHERE id = ?",
+            (collection_id, _now_iso(), folder_id),
+        )
+        self.conn.commit()
+
+    def clear_folder_flickr_collection_id(self, folder_id: int) -> None:
+        """Clear a stale Flickr Collection ID (e.g. collection deleted externally)."""
+        self.conn.execute(
+            "UPDATE folders SET flickr_collection_id = NULL, updated_at = ? WHERE id = ?",
+            (_now_iso(), folder_id),
         )
         self.conn.commit()
 
