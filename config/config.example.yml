@@ -19,7 +19,7 @@ thumbnails:
 
 photos_library:
   path: "~/Pictures/Photos Library.photoslibrary"
-  self_name: "Chris Devers"   # your name as it appears in Apple's People album
+  self_name: "Your Name"   # your name as it appears in Apple's People album
 
 poller:
   interval_minutes: 60        # how often to check Flickr for new uploads

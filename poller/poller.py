@@ -258,7 +258,7 @@ def classify_flickr_record(row: dict, zones: list[dict]) -> tuple[str, str]:
     (no people signals) or geofence matches. Face/people signals
     come later once the scanner matches to Apple Photos.
     """
-    return classify(row, zones)
+    return classify(row, zones, self_name="")
 
 
 # ---------------------------------------------------------------------------

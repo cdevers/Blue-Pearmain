@@ -28,7 +28,7 @@ HUMAN_CONFIDENCE_THRESHOLD = 0.35
 FACE_QUALITY_THRESHOLD = 0.0
 
 
-def classify(photo: dict, zones: list[dict], self_name: str = "Chris Devers") -> tuple[str, str]:
+def classify(photo: dict, zones: list[dict], self_name: str = "") -> tuple[str, str]:
     """
     Classify a photo into a privacy state.
 
