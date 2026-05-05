@@ -5404,5 +5404,133 @@ class TestSetPhotoText(unittest.TestCase):
         self.assertEqual(mock_photo.description, "D3")
 
 
+class TestStaleUuid(unittest.TestCase):
+    """Proposals that fail with 'invalid photo ID' are marked failed; photo gets uuid_stale=1."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        # Migration must be applied so uuid_stale column and 'failed' status exist
+        from db.migrations.migrate_010_stale_uuid import run as run_migration
+        run_migration(str(Path(self._tmp.name) / "test.db"))
+        # Seed a photo with both uuid and flickr_id
+        self.db.upsert_photo({
+            "flickr_id": "F1", "uuid": "U1",
+            "privacy_state": "candidate_public",
+            "photos_tags": '["nature"]', "photos_tags_hash": "PH1",
+            "flickr_tags": '[]',          "flickr_tags_hash": "FH0",
+        })
+        self.photo_id = self.db.get_photo_by_flickr_id("F1")["id"]
+        # Seed a pending non_conflict proposal: flickr→photos tags
+        self.db.upsert_proposal({
+            "photo_id": self.photo_id, "field": "tags",
+            "proposed_value": '["nature"]',
+            "source": "flickr", "target": "photos",
+            "conflict_type": "non_conflict",
+            "source_hash_at_creation": "FH0",
+            "target_hash_at_creation": "PH1",
+            "created_at": "2026-01-01T00:00:00+00:00",
+        })
+        self.db.conn.commit()
+        self.proposal_id = self.db.conn.execute(
+            "SELECT id FROM metadata_proposals WHERE photo_id=? AND status='pending'",
+            (self.photo_id,),
+        ).fetchone()["id"]
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _mock_stale_uuid(self):
+        """Return a context manager that makes photoscript.Photo raise 'invalid photo ID: U1'."""
+        from unittest.mock import patch, MagicMock
+        mock_ps = MagicMock()
+        mock_ps.Photo.side_effect = Exception("invalid photo ID: U1")
+        return patch.dict("sys.modules", {"photoscript": mock_ps})
+
+    def test_stale_uuid_marks_proposal_failed(self):
+        from unittest.mock import patch
+        from flickr.proposal_applier import apply_proposal
+        with patch("flickr.proposal_applier._photos_is_running", return_value=True), \
+             self._mock_stale_uuid():
+            result = apply_proposal(self.db, self.proposal_id, "/fake/lib")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason"], "stale_uuid")
+        row = self.db.conn.execute(
+            "SELECT status, resolution_note FROM metadata_proposals WHERE id=?",
+            (self.proposal_id,),
+        ).fetchone()
+        self.assertEqual(row["status"], "failed")
+        self.assertEqual(row["resolution_note"], "stale_uuid")
+
+    def test_stale_uuid_sets_flag_on_photo(self):
+        from unittest.mock import patch
+        from flickr.proposal_applier import apply_proposal
+        with patch("flickr.proposal_applier._photos_is_running", return_value=True), \
+             self._mock_stale_uuid():
+            apply_proposal(self.db, self.proposal_id, "/fake/lib")
+        flag = self.db.conn.execute(
+            "SELECT uuid_stale FROM photos WHERE id=?", (self.photo_id,)
+        ).fetchone()["uuid_stale"]
+        self.assertEqual(flag, 1)
+
+    def test_stale_uuid_in_apply_batch_counted_as_failed_not_error(self):
+        from unittest.mock import patch
+        from flickr.proposal_applier import apply_batch
+        with patch("flickr.proposal_applier._photos_is_running", return_value=True), \
+             self._mock_stale_uuid():
+            totals = apply_batch(self.db, "/fake/lib")
+        self.assertEqual(totals["failed"], 1)
+        self.assertEqual(totals["errors"], [])
+
+    def test_non_uuid_error_leaves_proposal_pending(self):
+        from unittest.mock import patch, MagicMock
+        from flickr.proposal_applier import apply_proposal
+        mock_ps = MagicMock()
+        mock_ps.Photo.side_effect = Exception("permission denied")
+        with patch("flickr.proposal_applier._photos_is_running", return_value=True), \
+             patch.dict("sys.modules", {"photoscript": mock_ps}):
+            result = apply_proposal(self.db, self.proposal_id, "/fake/lib")
+        self.assertFalse(result["ok"])
+        self.assertNotEqual(result["reason"], "stale_uuid")
+        status = self.db.conn.execute(
+            "SELECT status FROM metadata_proposals WHERE id=?", (self.proposal_id,)
+        ).fetchone()["status"]
+        self.assertEqual(status, "pending")
+        flag = self.db.conn.execute(
+            "SELECT uuid_stale FROM photos WHERE id=?", (self.photo_id,)
+        ).fetchone()["uuid_stale"]
+        self.assertEqual(flag, 0)
+
+    def test_migration_010_idempotent(self):
+        import tempfile
+        from db.db import Database
+        from db.migrations.migrate_010_stale_uuid import run as run_migration
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = str(Path(tmpdir) / "idempotent.db")
+            db = Database(db_path)
+            db.close()
+            run_migration(db_path)  # first run
+            run_migration(db_path)  # second run — must not raise
+            import sqlite3
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            # uuid_stale column must exist
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(photos)").fetchall()}
+            self.assertIn("uuid_stale", cols)
+            # 'failed' must be a valid status (insert and delete to verify CHECK passes)
+            conn.execute(
+                """INSERT INTO metadata_proposals
+                   (photo_id, field, proposed_value, source, target, conflict_type,
+                    source_hash_at_creation, target_hash_at_creation, status, created_at)
+                   SELECT id, 'tags', '[]', 'flickr', 'photos', 'non_conflict',
+                          'h', 'h', 'failed', '2026-01-01T00:00:00+00:00'
+                   FROM photos LIMIT 1"""
+            )
+            conn.commit()
+            conn.close()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

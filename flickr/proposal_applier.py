@@ -96,7 +96,11 @@ def apply_proposal(
     if field == "tags":
         new_tags = json.loads(row["proposed_value"]) if row["proposed_value"] else []
         if row["target"] == "photos":
-            return _apply_to_photos(db, row, new_tags, library_path)
+            result = _apply_to_photos(db, row, new_tags, library_path)
+            if not result["ok"] and result.get("stale_uuid"):
+                _handle_stale_uuid(db, row["id"], row["photo_id"])
+                return {"ok": False, "reason": "stale_uuid"}
+            return result
         if row["target"] == "flickr":
             if flickr_client is None:
                 return {"ok": False, "reason": "no flickr_client provided"}
@@ -104,7 +108,11 @@ def apply_proposal(
     else:
         new_value = row["proposed_value"] or ""
         if row["target"] == "photos":
-            return _apply_text_to_photos(db, row, new_value)
+            result = _apply_text_to_photos(db, row, new_value)
+            if not result["ok"] and result.get("stale_uuid"):
+                _handle_stale_uuid(db, row["id"], row["photo_id"])
+                return {"ok": False, "reason": "stale_uuid"}
+            return result
         if row["target"] == "flickr":
             if flickr_client is None:
                 return {"ok": False, "reason": "no flickr_client provided"}
@@ -157,8 +165,11 @@ def apply_batch(
         else:
             reason = result.get("reason", "unknown")
             totals["failed"] += 1
-            totals["errors"].append({"proposal_id": r["id"], "reason": reason})
-            log.warning("apply_batch: proposal %s failed: %s", r["id"], reason)
+            if reason == "stale_uuid":
+                log.info("apply_batch: proposal %s permanently failed (stale UUID)", r["id"])
+            else:
+                totals["errors"].append({"proposal_id": r["id"], "reason": reason})
+                log.warning("apply_batch: proposal %s failed: %s", r["id"], reason)
     return totals
 
 
@@ -297,6 +308,9 @@ def apply_manual_merge(
     if row["uuid"]:
         r = _write_tags_to_photos(db, row["photo_id"], row["uuid"], custom_tags, library_path)
         if not r["ok"]:
+            if r.get("stale_uuid"):
+                _handle_stale_uuid(db, proposal_id, row["photo_id"])
+                return {"ok": False, "reason": "stale_uuid"}
             errors.append(f"Photos: {r['reason']}")
 
     if row["flickr_id"]:
@@ -336,6 +350,8 @@ def _write_tags_to_photos(
     try:
         photo = photoscript.Photo(uuid)
     except Exception as e:
+        if "invalid photo id" in str(e).lower():
+            return {"ok": False, "reason": "stale_uuid", "stale_uuid": True}
         return {"ok": False, "reason": f"photo not found in Photos: {e}"}
     try:
         photo.keywords = new_tags
@@ -425,6 +441,8 @@ def _apply_text_to_photos(db: "Database", row, new_value: str) -> dict:
     try:
         photo = photoscript.Photo(uuid)
     except Exception as e:
+        if "invalid photo id" in str(e).lower():
+            return {"ok": False, "reason": "stale_uuid", "stale_uuid": True}
         return {"ok": False, "reason": f"photo not found in Photos: {e}"}
 
     try:
@@ -490,6 +508,23 @@ def _apply_text_to_flickr(
     return {"ok": True}
 
 
+def _handle_stale_uuid(db: "Database", proposal_id: int, photo_id: int) -> None:
+    """Mark a proposal failed and flag the photo row when Photos rejects the UUID."""
+    now = _now_iso()
+    db.conn.execute(
+        "UPDATE photos SET uuid_stale=1, updated_at=? WHERE id=?",
+        (now, photo_id),
+    )
+    db.conn.execute(
+        """UPDATE metadata_proposals
+           SET status='failed', resolved_at=?, resolution_note='stale_uuid'
+           WHERE id=?""",
+        (now, proposal_id),
+    )
+    db.conn.commit()
+    log.warning("stale UUID: photo_id=%s proposal %s marked failed", photo_id, proposal_id)
+
+
 def _supersede(db: "Database", proposal_id: int) -> None:
     db.conn.execute(
         "UPDATE metadata_proposals SET status='superseded', resolved_at=? WHERE id=?",
@@ -532,7 +567,14 @@ def set_photo_text(
     if uuid:
         r = _write_text_to_photos_both(db, photo_id, uuid, title, description)
         if not r["ok"]:
-            warnings.append(f"Photos: {r['reason']}")
+            if r.get("stale_uuid"):
+                db.conn.execute(
+                    "UPDATE photos SET uuid_stale=1, updated_at=? WHERE id=?",
+                    (_now_iso(), photo_id),
+                )
+                warnings.append("Photos: stale UUID — photo no longer in library")
+            else:
+                warnings.append(f"Photos: {r['reason']}")
     elif not flickr_id:
         return {"ok": False, "reason": "photo has neither uuid nor flickr_id"}
 
@@ -573,6 +615,8 @@ def _write_text_to_photos_both(
     try:
         photo = photoscript.Photo(uuid)
     except Exception as e:
+        if "invalid photo id" in str(e).lower():
+            return {"ok": False, "reason": "stale_uuid", "stale_uuid": True}
         return {"ok": False, "reason": f"photo not found in Photos: {e}"}
     try:
         photo.title = title

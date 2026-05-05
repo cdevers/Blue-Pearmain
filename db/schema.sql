@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS photos (
     reviewed_at             TEXT,                   -- ISO8601
     review_decision         TEXT,                   -- 'make_public' | 'keep_private' | 'skip'
     review_notes            TEXT,                   -- optional freeform notes
+    uuid_stale              INTEGER NOT NULL DEFAULT 0, -- 1 if Photos.app rejected UUID as invalid
     updated_at              TEXT                    -- ISO8601, last time this row was written
 );
 
@@ -271,7 +272,7 @@ CREATE TABLE IF NOT EXISTS metadata_proposals (
     source_hash_at_creation TEXT,                   -- source field hash when proposal was created
     target_hash_at_creation TEXT,                   -- target field hash when proposal was created
     status                  TEXT NOT NULL DEFAULT 'pending'
-                                CHECK(status IN ('pending', 'applied', 'rejected', 'superseded')),
+                                CHECK(status IN ('pending', 'applied', 'rejected', 'superseded', 'failed')),
     created_at              TEXT NOT NULL,
     resolved_at             TEXT,
     resolution_note         TEXT

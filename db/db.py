@@ -913,7 +913,7 @@ class Database:
     def resolve_proposal(
         self, proposal_id: int, status: str, note: str | None = None
     ) -> None:
-        assert status in ("rejected", "applied", "superseded")
+        assert status in ("rejected", "applied", "superseded", "failed")
         self.conn.execute(
             """UPDATE metadata_proposals
                SET status=?, resolved_at=?, resolution_note=? WHERE id=?""",
