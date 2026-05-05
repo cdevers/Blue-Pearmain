@@ -1112,12 +1112,24 @@ def create_app(config_path: str) -> Flask:
 
 def main():
     import argparse
+    # Pre-parse --config so we can read reviewer defaults from the config file.
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--config", default="config/config.yml")
+    pre_args, _ = pre.parse_known_args()
+    try:
+        with open(pre_args.config) as _f:
+            _pre_cfg = yaml.safe_load(_f) or {}
+    except (OSError, yaml.YAMLError):
+        _pre_cfg = {}
+    _review_cfg = _pre_cfg.get("review", {})
+
     parser = argparse.ArgumentParser(description="Blue Pearmain review UI")
-    parser.add_argument("--config", default="config/config.yml")
-    parser.add_argument("--port",   type=int, default=5173)
-    parser.add_argument("--host",   default="127.0.0.1",
-                        help="Interface to bind (default: 127.0.0.1). Use 0.0.0.0 for LAN access, "
-                             "but note the UI is not hardened for internet-facing deployment.")
+    parser.add_argument("--config", default=pre_args.config)
+    parser.add_argument("--port",   type=int, default=_review_cfg.get("port", 5173))
+    parser.add_argument("--host",   default=_review_cfg.get("host", "127.0.0.1"),
+                        help="Interface to bind (default: 127.0.0.1, or review.host from config). "
+                             "Use 0.0.0.0 for LAN access, but note the UI is not hardened for "
+                             "internet-facing deployment.")
     parser.add_argument("--debug",  action="store_true")
     args = parser.parse_args()
 
