@@ -197,6 +197,7 @@ def photos_record_to_db(photo) -> dict:
 def sync_photo_albums(photo, photo_db_id: int, db: Database, dry_run: bool) -> None:
     """
     Upsert album membership rows for one osxphotos PhotoInfo object.
+    Also upserts folder ancestry from album.parent, root-first.
 
     Uses photo.album_info (list of AlbumInfo objects with .title and .uuid).
     photo.albums returns plain strings and must not be used here.
@@ -206,16 +207,36 @@ def sync_photo_albums(photo, photo_db_id: int, db: Database, dry_run: bool) -> N
     album_info already excludes smart/system albums so all entries are accepted.
     """
     album_infos = getattr(photo, "album_info", []) or []
+    seen_folder_uuids: set[str] = set()
+
     for album in album_infos:
-        # album_type is only present in newer osxphotos versions.
-        # Default to "Album" (pass through) when missing.
         album_type = getattr(album, "album_type", "Album")
         if album_type != "Album":
             continue
+
         if dry_run:
             log.debug("  [dry-run] album: %r (%s)", album.title, album.uuid)
             continue
-        album_id = db.upsert_album(album.uuid, album.title)
+
+        # Walk folder ancestry from root to immediate parent.
+        ancestors: list = []
+        node = getattr(album, "parent", None)
+        while node is not None:
+            ancestors.append(node)
+            node = getattr(node, "parent", None)
+        ancestors.reverse()  # root first
+
+        parent_db_id: int | None = None
+        for folder in ancestors:
+            if folder.uuid not in seen_folder_uuids:
+                db.upsert_folder(folder.uuid, folder.title, parent_id=parent_db_id)
+                seen_folder_uuids.add(folder.uuid)
+            row = db.conn.execute(
+                "SELECT id FROM folders WHERE apple_uuid = ?", (folder.uuid,)
+            ).fetchone()
+            parent_db_id = row["id"]
+
+        album_id = db.upsert_album(album.uuid, album.title, folder_id=parent_db_id)
         db.upsert_photo_album(photo_db_id, album_id)
 
 

@@ -1784,13 +1784,18 @@ class TestSyncPhotoAlbums(unittest.TestCase):
         self.db.close()
         self._tmp.cleanup()
 
-    def _make_album_info(self, title, uuid, album_type=None):
+    def _make_album_info(self, title, uuid, album_type=None, parent=None):
         """Return a simple namespace mimicking an osxphotos AlbumInfo object."""
         from types import SimpleNamespace
-        obj = SimpleNamespace(title=title, uuid=uuid)
+        obj = SimpleNamespace(title=title, uuid=uuid, parent=parent)
         if album_type is not None:
             obj.album_type = album_type
         return obj
+
+    def _make_folder_info(self, title, uuid, parent=None):
+        """Return a simple namespace mimicking an osxphotos FolderInfo object."""
+        from types import SimpleNamespace
+        return SimpleNamespace(title=title, uuid=uuid, parent=parent)
 
     def test_uses_album_info_not_albums(self):
         """sync_photo_albums must read photo.album_info, not photo.albums."""
@@ -1870,6 +1875,78 @@ class TestSyncPhotoAlbums(unittest.TestCase):
 
         photo = SimpleNamespace()  # no album_info attribute
         sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)  # must not raise
+
+    def test_album_with_folder_creates_folder_row(self):
+        from poller.scanner import sync_photo_albums
+        from types import SimpleNamespace
+
+        folder = self._make_folder_info("Travel", "folder-uuid-1")
+        album  = self._make_album_info("Paris Trip", "album-uuid-1", parent=folder)
+        photo  = SimpleNamespace(album_info=[album])
+
+        sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)
+
+        folder_row = self.db.conn.execute("SELECT * FROM folders WHERE apple_uuid='folder-uuid-1'").fetchone()
+        self.assertIsNotNone(folder_row)
+        self.assertEqual(folder_row["name"], "Travel")
+
+        album_row = self.db.conn.execute("SELECT folder_id FROM albums WHERE apple_uuid='album-uuid-1'").fetchone()
+        self.assertEqual(album_row["folder_id"], folder_row["id"])
+
+    def test_album_with_nested_folders_creates_all_rows(self):
+        from poller.scanner import sync_photo_albums
+        from types import SimpleNamespace
+
+        grandparent = self._make_folder_info("Europe", "uuid-gp")
+        parent      = self._make_folder_info("France", "uuid-p", parent=grandparent)
+        album       = self._make_album_info("Paris", "uuid-album", parent=parent)
+        photo       = SimpleNamespace(album_info=[album])
+
+        sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)
+
+        gp_row = self.db.conn.execute("SELECT id, parent_id FROM folders WHERE apple_uuid='uuid-gp'").fetchone()
+        p_row  = self.db.conn.execute("SELECT id, parent_id FROM folders WHERE apple_uuid='uuid-p'").fetchone()
+        self.assertIsNone(gp_row["parent_id"])
+        self.assertEqual(p_row["parent_id"], gp_row["id"])
+
+    def test_album_without_folder_has_null_folder_id(self):
+        from poller.scanner import sync_photo_albums
+        from types import SimpleNamespace
+
+        album = self._make_album_info("No Folder Album", "uuid-nf")  # parent=None by default
+        photo = SimpleNamespace(album_info=[album])
+
+        sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)
+
+        row = self.db.conn.execute("SELECT folder_id FROM albums WHERE apple_uuid='uuid-nf'").fetchone()
+        self.assertIsNone(row["folder_id"])
+
+    def test_shared_folder_deduplicated_across_albums(self):
+        from poller.scanner import sync_photo_albums
+        from types import SimpleNamespace
+
+        folder = self._make_folder_info("Travel", "folder-uuid-shared")
+        album1 = self._make_album_info("Paris", "uuid-album-1", parent=folder)
+        album2 = self._make_album_info("Rome",  "uuid-album-2", parent=folder)
+        photo  = SimpleNamespace(album_info=[album1, album2])
+
+        sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)
+
+        count = self.db.conn.execute("SELECT COUNT(*) AS n FROM folders").fetchone()["n"]
+        self.assertEqual(count, 1, "same folder via two albums must produce only one row")
+
+    def test_dry_run_does_not_write_folders(self):
+        from poller.scanner import sync_photo_albums
+        from types import SimpleNamespace
+
+        folder = self._make_folder_info("Travel", "folder-uuid-dry")
+        album  = self._make_album_info("Paris", "uuid-album-dry", parent=folder)
+        photo  = SimpleNamespace(album_info=[album])
+
+        sync_photo_albums(photo, self.photo_id, self.db, dry_run=True)
+
+        count = self.db.conn.execute("SELECT COUNT(*) AS n FROM folders").fetchone()["n"]
+        self.assertEqual(count, 0, "dry_run must not write folders")
 
 
 # ---------------------------------------------------------------------------
