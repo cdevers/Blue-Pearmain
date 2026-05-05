@@ -1315,6 +1315,75 @@ class TestFlickrClientRetry(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Flickr client: Collections API methods
+# ---------------------------------------------------------------------------
+
+class TestFlickrCollectionsClient(unittest.TestCase):
+    """FlickrClient Collections API methods call the correct Flickr endpoints."""
+
+    def _make_client(self):
+        from flickr.flickr_client import FlickrClient
+        c = FlickrClient.__new__(FlickrClient)
+        c._rate_delay = 0
+        c.user_nsid = "me"
+        return c
+
+    def test_create_collection_calls_correct_method(self):
+        from unittest.mock import patch
+        client = self._make_client()
+        with patch.object(client, "_call", return_value={"collection": {"id": "col-999"}}) as mock_call:
+            result = client.create_collection("My Folder")
+        mock_call.assert_called_once_with(
+            "flickr.collections.create",
+            {"title": "My Folder", "description": ""},
+            http_method="POST",
+        )
+        self.assertEqual(result, "col-999")
+
+    def test_create_collection_passes_description(self):
+        from unittest.mock import patch
+        client = self._make_client()
+        with patch.object(client, "_call", return_value={"collection": {"id": "col-42"}}) as mock_call:
+            client.create_collection("Folder", description="desc")
+        self.assertEqual(mock_call.call_args[0][1]["description"], "desc")
+
+    def test_edit_collection_sets_calls_correct_method(self):
+        from unittest.mock import patch
+        client = self._make_client()
+        with patch.object(client, "_call", return_value={}) as mock_call:
+            client.edit_collection_sets("col-1", ["ps-1", "ps-2"], ["col-2"])
+        mock_call.assert_called_once_with(
+            "flickr.collections.editSets",
+            {
+                "collection_id":  "col-1",
+                "photoset_ids":   "ps-1 ps-2",
+                "collection_ids": "col-2",
+            },
+            http_method="POST",
+        )
+
+    def test_edit_collection_sets_empty_lists(self):
+        from unittest.mock import patch
+        client = self._make_client()
+        with patch.object(client, "_call", return_value={}) as mock_call:
+            client.edit_collection_sets("col-1", [], [])
+        call_params = mock_call.call_args[0][1]
+        self.assertEqual(call_params["photoset_ids"], "")
+        self.assertEqual(call_params["collection_ids"], "")
+
+    def test_delete_collection_calls_correct_method(self):
+        from unittest.mock import patch
+        client = self._make_client()
+        with patch.object(client, "_call", return_value={}) as mock_call:
+            client.delete_collection("col-99")
+        mock_call.assert_called_once_with(
+            "flickr.collections.delete",
+            {"collection_id": "col-99"},
+            http_method="POST",
+        )
+
+
+# ---------------------------------------------------------------------------
 # Poller auto-push: approved Photos record matched to new Flickr upload
 # ---------------------------------------------------------------------------
 

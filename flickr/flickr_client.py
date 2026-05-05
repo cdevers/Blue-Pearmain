@@ -361,6 +361,45 @@ class FlickrClient:
         )
 
     # -----------------------------------------------------------------------
+    # Collections (Flickr Pro only)
+    # -----------------------------------------------------------------------
+
+    def create_collection(self, title: str, description: str = "") -> str:
+        """Create a Flickr Collection. Returns the collection_id string."""
+        data = self._call(
+            "flickr.collections.create",
+            {"title": title, "description": description},
+            http_method="POST",
+        )
+        return data["collection"]["id"]
+
+    def edit_collection_sets(
+        self,
+        collection_id: str,
+        photoset_ids: list[str],
+        sub_collection_ids: list[str],
+    ) -> None:
+        """Full replace of a collection's photosets and sub-collections.
+        Flickr's editSets is a complete overwrite, not additive."""
+        self._call(
+            "flickr.collections.editSets",
+            {
+                "collection_id":  collection_id,
+                "photoset_ids":   " ".join(photoset_ids),
+                "collection_ids": " ".join(sub_collection_ids),
+            },
+            http_method="POST",
+        )
+
+    def delete_collection(self, collection_id: str) -> None:
+        """Delete a Flickr Collection."""
+        self._call(
+            "flickr.collections.delete",
+            {"collection_id": collection_id},
+            http_method="POST",
+        )
+
+    # -----------------------------------------------------------------------
     # Thumbnail download
     # -----------------------------------------------------------------------
 
