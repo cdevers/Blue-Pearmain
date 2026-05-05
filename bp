@@ -3,7 +3,7 @@
 bp — Blue Pearmain command-line interface
 
 Usage:
-    bp pipeline [--limit N]         Sync-metadata then auto-apply non-conflict proposals
+    bp pipeline [--dry-run] [--limit N]  Sync-metadata then auto-apply non-conflict proposals
     bp stats                        Show photo counts by privacy state
     bp poll [--backfill] [--days N] Poll Flickr for new/updated photos
     bp scan [--all] [--days N]      Scan Apple Photos library
@@ -11,7 +11,7 @@ Usage:
     bp reconcile [--fix] [--limit N] Check DB state vs actual Flickr state
     bp link-orphans [--dry-run]     Merge split Photos/Flickr records
     bp checkpoint [--mode MODE]     Checkpoint the WAL file (default: truncate)
-    bp all                          Full maintenance run (scan, poll, thumbs, pipeline, reconcile, sync-albums, checkpoint)
+    bp all [--dry-run]              Full maintenance run (scan, poll, thumbs, pipeline, reconcile, sync-albums, checkpoint)
     bp install-daemons [--dry-run]  Install launchd agents to ~/Library/LaunchAgents
     bp uninstall-daemons [--dry-run] Remove installed launchd agents
     bp ui                           Start the review UI (http://localhost:5173)
@@ -187,31 +187,39 @@ def cmd_pipeline(args):
     from flickr.sync_metadata import _select_drift_filtered
     from flickr.metadata_puller import run_sync_engine
 
+    dry_run = getattr(args, "dry_run", False)
+
     photo_ids = _select_drift_filtered(db, limit=0)
     if photo_ids:
-        log.info("pipeline: sync-metadata — %d photos to harmonise", len(photo_ids))
-        sync_totals = run_sync_engine(db, photo_ids, verbose=args.verbose)
+        log.info("pipeline: sync-metadata — %d photos to harmonise%s",
+                 len(photo_ids), "  (dry-run)" if dry_run else "")
+        sync_totals = run_sync_engine(db, photo_ids, dry_run=dry_run, verbose=args.verbose)
         log.info(
-            "pipeline: sync-metadata done — proposals=%d  hash_matches=%d  skipped=%d  failed=%d",
+            "pipeline: sync-metadata done — proposals=%d  hash_matches=%d  skipped=%d  failed=%d%s",
             sync_totals["proposals"], sync_totals["hash_matches"],
             sync_totals["skipped"],   sync_totals["failed"],
+            "  (dry-run: not written)" if dry_run else "",
         )
     else:
         log.info("pipeline: sync-metadata — nothing to harmonise (all in sync)")
         sync_totals = {}
 
     # Step 2: auto-apply non-conflict proposals (both tags and title/description)
-    from flickr.proposal_applier import apply_batch
-
-    apply_totals = apply_batch(
-        db, library_path,
-        conflict_types=["non_conflict"],
-        limit=args.limit or 0,
-    )
-    log.info(
-        "pipeline: apply done — applied=%d  failed=%d  superseded=%d",
-        apply_totals["applied"], apply_totals["failed"], apply_totals["superseded"],
-    )
+    if dry_run:
+        from flickr.proposal_applier import _count_pending
+        pending = _count_pending(db, conflict_types=["non_conflict"])
+        log.info("pipeline: apply skipped (dry-run) — %d pending non-conflict proposal(s) would be applied", pending)
+    else:
+        from flickr.proposal_applier import apply_batch
+        apply_totals = apply_batch(
+            db, library_path,
+            conflict_types=["non_conflict"],
+            limit=args.limit or 0,
+        )
+        log.info(
+            "pipeline: apply done — applied=%d  failed=%d  superseded=%d",
+            apply_totals["applied"], apply_totals["failed"], apply_totals["superseded"],
+        )
 
     db.close()
 
@@ -572,15 +580,20 @@ def cmd_all(args):
     )
     log = logging.getLogger("blue-pearmain.all")
 
+    dry_run = getattr(args, "dry_run", False)
+    if dry_run:
+        log.info("all: dry-run mode — no external writes will be made")
+
     steps = [
-        ("scan --all",      cmd_scan,        _step_args(args, all=True,       dry_run=False, days=None)),
-        ("poll",            cmd_poll,        _step_args(args, backfill=False, dry_run=False, days=None)),
-        ("thumbs",          cmd_thumbs,      args),
-        ("pipeline",        cmd_pipeline,    _step_args(args, limit=None)),
-        ("reconcile --fix", cmd_reconcile,   _step_args(args, fix=True,       apply_proposals=False, limit=None)),
-        ("sync-albums",     cmd_sync_albums, _step_args(args, dry_run=False,  album=None,    limit=None)),
-        ("checkpoint",      cmd_checkpoint,  _step_args(args, mode="truncate")),
+        ("scan --all",      cmd_scan,        _step_args(args, all=True,       dry_run=dry_run, days=None)),
+        ("poll",            cmd_poll,        _step_args(args, backfill=False, dry_run=dry_run, days=None)),
+        ("pipeline",        cmd_pipeline,    _step_args(args, limit=None,     dry_run=dry_run)),
+        ("reconcile",       cmd_reconcile,   _step_args(args, fix=not dry_run, apply_proposals=False, limit=None)),
+        ("sync-albums",     cmd_sync_albums, _step_args(args, dry_run=dry_run, album=None,    limit=None)),
     ]
+    if not dry_run:
+        steps.insert(2, ("thumbs",     cmd_thumbs,     args))
+        steps.append(   ("checkpoint", cmd_checkpoint, _step_args(args, mode="truncate")))
 
     errors = []
     for name, fn, step_args in steps:
@@ -635,6 +648,8 @@ def main():
 
     # pipeline
     p_pipe = sub.add_parser("pipeline", help="Sync-metadata then auto-apply non-conflict proposals")
+    p_pipe.add_argument("--dry-run", action="store_true",
+                        help="Classify drift and count proposals; do not write or apply")
     p_pipe.add_argument("--limit", type=int, default=None,
                         help="Cap number of proposals applied (default: unlimited)")
 
@@ -680,10 +695,13 @@ def main():
                         help="Max pairs to process (default: all)")
 
     # all
-    sub.add_parser(
+    p_all = sub.add_parser(
         "all",
         help="Full maintenance run: scan --all, poll, thumbs, pipeline, reconcile --fix, sync-albums, checkpoint",
     )
+    p_all.add_argument("--dry-run", action="store_true",
+                       help="Run all stages read-only: no external writes. "
+                            "Thumbs and checkpoint are skipped; reconcile runs without --fix.")
 
     # install-daemons
     p_install = sub.add_parser(

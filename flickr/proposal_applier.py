@@ -120,6 +120,18 @@ def apply_proposal(
     return {"ok": False, "reason": f"unknown target '{row['target']}'"}
 
 
+def _count_pending(db: "Database", conflict_types: list[str] | None = None) -> int:
+    """Return number of pending proposals matching the given conflict types."""
+    if conflict_types is None:
+        conflict_types = ["non_conflict"]
+    placeholders = ",".join("?" * len(conflict_types))
+    row = db.conn.execute(
+        f"SELECT COUNT(*) FROM metadata_proposals WHERE status='pending' AND conflict_type IN ({placeholders})",
+        conflict_types,
+    ).fetchone()
+    return row[0] if row else 0
+
+
 def apply_batch(
     db: "Database",
     library_path: str,

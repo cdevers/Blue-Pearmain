@@ -4461,6 +4461,25 @@ class TestApplyBatch(unittest.TestCase):
         self.assertEqual(result["applied"], 2)
         self.assertEqual(result["errors"], [])
 
+    def test_count_pending_returns_correct_count(self):
+        from flickr.proposal_applier import _count_pending
+        self.assertEqual(_count_pending(self.db), 2)
+
+    def test_count_pending_empty_db(self):
+        import tempfile
+        from pathlib import Path
+        from db.db import Database
+        from flickr.proposal_applier import _count_pending
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(Path(tmp) / "empty.db")
+            self.assertEqual(_count_pending(db), 0)
+            db.close()
+
+    def test_count_pending_filters_by_conflict_type(self):
+        from flickr.proposal_applier import _count_pending
+        self.assertEqual(_count_pending(self.db, conflict_types=["collision"]), 0)
+        self.assertEqual(_count_pending(self.db, conflict_types=["non_conflict"]), 2)
+
 
 class TestApplyManualMerge(unittest.TestCase):
     """apply_manual_merge: validation, staleness checks, dual-write, sibling resolution."""
