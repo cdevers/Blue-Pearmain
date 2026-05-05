@@ -544,6 +544,12 @@ async function approveProposal(id, btn) {
     card.style.opacity = '0.3';
     btn.textContent = 'Applied ✓';
     _resolveCard(card);
+  } else if (d.reason === 'stale_uuid') {
+    const card = document.getElementById('card-' + id);
+    card.style.opacity = '0.3';
+    btn.textContent = 'Stale UUID';
+    _resolveCard(card);
+    toast('Photo no longer in Photos library — proposal marked failed', 'err');
   } else {
     btn.disabled = false;
     btn.textContent = 'Approve ✓';
