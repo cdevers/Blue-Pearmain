@@ -1,6 +1,6 @@
 # Blue Pearmain
 
-A privacy-aware tool for reviewing, tagging, and managing a large Flickr photo library, with integration into Apple Photos.
+A bidirectional sync and curation tool for photo libraries that span both Apple Photos and Flickr. It keeps metadata (titles, descriptions, tags) in sync between the two, automates privacy triage using Apple's ML analysis and geofencing, and serves a local web UI for reviewing photos, resolving metadata conflicts, and managing duplicates and albums.
 
 Named for the [Blue Pearmain apple](https://en.wikipedia.org/wiki/Blue_Pearmain), an American variety mentioned by Henry David Thoreau in his 1862 essay *Wild Apples*.
 
@@ -8,40 +8,51 @@ Named for the [Blue Pearmain apple](https://en.wikipedia.org/wiki/Blue_Pearmain)
 
 ## The problem
 
-Flickr's iOS app syncs your entire camera roll automatically — which is convenient for backup, but means a large backlog of private photos accumulates over time. Manually reviewing tens of thousands of photos to decide what to make public, what to tag, and what to keep private is impractical.
+**Review backlog.** Flickr's iOS app syncs your entire camera roll automatically — convenient for backup, but it means a large accumulation of private photos that you never chose to share. Manually reviewing tens of thousands of photos to decide what to make public, what to tag, and what to keep private is impractical. Auto-upload from multiple devices (iPhone and iPad) also produces duplicates, and Nikon's Snapbridge feature compounds this by uploading a low-resolution preview immediately and the full-resolution original later — resulting in two Flickr IDs for the same shot.
 
-Auto-upload from multiple devices (iPhone and iPad, for instance) also produces duplicates: the same photo uploaded twice, each with a separate Flickr ID, wasting storage and cluttering the library. Nikon's Snapbridge feature compounds this by streaming low-resolution previews to the phone immediately after capture, then receiving the full-resolution original from the card reader later — resulting in two Apple Photos entries, and eventually two Flickr uploads, for the same shot.
+**Metadata drift.** Flickr and Apple Photos are independent libraries with no built-in sync. After editing titles, descriptions, or tags in one but not the other over months or years, the two sides diverge silently. Getting them back in agreement — and keeping them that way — requires a tool that can diff the two caches, auto-apply clear cases, and surface genuine conflicts for human judgment.
 
-Blue Pearmain automates the triage:
+Blue Pearmain addresses both:
 
-- Polls Flickr for newly uploaded photos
-- Cross-references them against your Apple Photos library to harvest Apple's existing AI analysis (scene labels, face detection, captions, GPS)
-- Applies geofence rules to automatically keep photos from home and other private locations out of the review queue
+- Polls Flickr for newly uploaded photos and cross-references them against your Apple Photos library
+- Harvests Apple's AI analysis (scene labels, face detection, GPS) to drive automatic privacy classification
+- Applies geofence rules to keep photos from home and other private locations out of the review queue
 - Flags photos containing unidentified people for manual review
 - Proposes tags derived from Apple's ML labels and location data
-- Detects duplicate photos (Snapbridge low/high-res pairs, dual-device uploads) and queues them for review
-- Serves a local web UI for working through the review queue — approving tags, setting photos public, keeping them private, and resolving duplicates
+- Detects and queues duplicates (Snapbridge pairs, dual-device uploads) for review
+- Keeps Flickr and Apple Photos metadata in sync: auto-applies non-conflicts, queues collisions for human resolution
+- Serves a local web UI for the review queue, metadata proposals, duplicates, and album management
 
-Nothing is pushed to Flickr without explicit human confirmation.
+Nothing is written to Flickr or Apple Photos without explicit human confirmation or auto-apply rules you've opted into.
 
 ## Architecture
 
 ```
-Apple Photos Library          Flickr (cloud)
-      ↓  osxphotos                  ↓  API poll (hourly)
-      └──────────── Matcher ────────┘
-                       ↓
-           Geofence filter  →  auto-private
-                       ↓
-           Face / people detection
-                       ↓
-           Tag proposals (from Apple ML labels + location)
-                       ↓
-           Duplicate detection (Snapbridge pairs, device uploads)
-                       ↓
-           SQLite database + thumbnail cache
-                       ↓
-           Review UI  →  Flickr API (setPerms, addTags, delete)
+     Apple Photos                       Flickr (cloud)
+          │  bp scan (osxphotos)             │  bp poll (API, hourly)
+          │                                  │
+          └─────────── SQLite cache ─────────┘
+                            │
+                 bp pipeline (every 6 hours)
+                 Diffs metadata caches per field
+                 Classifies each difference:
+                   non-conflict → auto-applied to the empty side
+                   divergence   → auto-applied (superset wins, tags only)
+                   collision    → queued in /proposals for human review
+                       ↙                          ↘
+          Writes to Apple Photos           Writes to Flickr
+          (photoscript / AppleScript)      (setMeta, setTags API)
+
+     Privacy classifier (on ingest)
+       geofence match   → auto-private (never enters queue)
+       faces detected   → needs_review
+       clean            → candidate_public (tags proposed, quick confirm)
+
+     Review UI  (bp ui · localhost:5173)
+       Review grid · photo detail · metadata proposals
+       Duplicates · faces · albums · geofence zones
+            │
+     Flickr API  (setPerms · addTags · setMeta · photosets · delete)
 ```
 
 ## Components
@@ -200,7 +211,8 @@ The grid view shows photos with proposed tags and action buttons. Keyboard short
 | `3` | Faces |
 | `4` | Zones |
 | `5` | Duplicates |
-| `6` | Conflicts |
+| `6` | Conflicts (legacy metadata conflicts) |
+| `7` | Proposals (metadata sync proposals) |
 | `R` | Reload current page |
 
 **Review grid:**
@@ -247,7 +259,7 @@ The grid view shows photos with proposed tags and action buttons. Keyboard short
 | `Enter` | Confirm resolution for selected group |
 | `N` | Mark selected group as not a duplicate |
 
-**Conflicts page:**
+**Proposals page** (`/proposals` — metadata sync, key `7`)**:**
 
 | Key | Action |
 |---|---|
