@@ -155,6 +155,7 @@ bp install-daemons --dry-run       # Preview what would be installed without wri
 bp uninstall-daemons               # Remove installed launchd agents
 bp uninstall-daemons --dry-run     # Preview what would be removed without deleting
 bp ui                              # Start the review UI (http://localhost:5173)
+bp ui --host 0.0.0.0               # Also bind to LAN interfaces (e.g. for iPad access)
 ```
 
 All commands accept `--config PATH` (default: `config/config.yml`) and `--verbose`.

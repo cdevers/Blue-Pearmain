@@ -1115,7 +1115,9 @@ def main():
     parser = argparse.ArgumentParser(description="Blue Pearmain review UI")
     parser.add_argument("--config", default="config/config.yml")
     parser.add_argument("--port",   type=int, default=5173)
-    parser.add_argument("--host",   default="0.0.0.0")
+    parser.add_argument("--host",   default="127.0.0.1",
+                        help="Interface to bind (default: 127.0.0.1). Use 0.0.0.0 for LAN access, "
+                             "but note the UI is not hardened for internet-facing deployment.")
     parser.add_argument("--debug",  action="store_true")
     args = parser.parse_args()
 
@@ -1123,6 +1125,12 @@ def main():
         level=logging.DEBUG if args.debug else logging.INFO,
         format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
     )
+
+    if args.host not in ("127.0.0.1", "localhost"):
+        log.warning(
+            "Binding to %s — the reviewer UI is designed for trusted local networks only "
+            "and is not hardened for internet-facing deployment.", args.host
+        )
 
     create_app(args.config)
     log.info(f"Starting review UI at http://{args.host}:{args.port}")
