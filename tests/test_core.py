@@ -5949,6 +5949,26 @@ class TestSyncCollections(unittest.TestCase):
         parent_call = next(c for c in calls if c[0][0] == "col-parent")
         self.assertIn("col-child", parent_call[0][2])  # sub_collection_ids
 
+    def test_nested_new_folders_parent_gets_child_collection_on_first_sync(self):
+        """First-time sync: parent AND child both new — parent collection must include child."""
+        from flickr.sync_collections import sync_collections
+        from unittest.mock import MagicMock, call
+
+        # Both folders have no collection_id (first time sync)
+        parent_fid = self._seed_folder("uuid-parent", "Europe")   # no collection_id
+        child_fid  = self._seed_folder("uuid-child", "France", parent_id=parent_fid)  # no collection_id
+
+        # create_collection returns unique IDs per call
+        flickr = self._make_flickr()
+        flickr.create_collection.side_effect = ["col-europe", "col-france"]
+
+        sync_collections(self.db, flickr)
+
+        # edit_collection_sets on the parent must include col-france as a sub-collection
+        calls = flickr.edit_collection_sets.call_args_list
+        parent_call = next(c for c in calls if c[0][0] == "col-europe")
+        self.assertIn("col-france", parent_call[0][2], "parent collection must include child on first sync")
+
     def test_no_folders_is_noop(self):
         from flickr.sync_collections import sync_collections
         flickr = self._make_flickr()

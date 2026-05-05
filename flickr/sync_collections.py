@@ -56,34 +56,36 @@ def sync_collections(db, flickr, dry_run: bool = False) -> dict:
     ordered = _topological_order(folders)
     totals = {"created": 0, "updated": 0, "skipped": 0}
 
+    if dry_run:
+        for folder in ordered:
+            action = "would create" if not folder["flickr_collection_id"] else "would update"
+            log.info("[dry-run] %s collection for folder %r", action, folder["name"])
+            totals["updated" if folder["flickr_collection_id"] else "created"] += 1
+        return totals
+
+    # Pass 1: ensure every folder has a Flickr collection ID
     for folder in ordered:
-        folder_id     = folder["id"]
-        name          = folder["name"]
-        collection_id = folder["flickr_collection_id"]
-
-        if dry_run:
-            action = "would create" if not collection_id else "would update"
-            log.info("[dry-run] %s collection for folder %r", action, name)
-            totals["updated" if collection_id else "created"] += 1
-            continue
-
-        # Ensure this folder has a Flickr Collection
-        if not collection_id:
-            collection_id = flickr.create_collection(name, description="")
-            db.set_folder_flickr_collection_id(folder_id, collection_id)
-            log.info("created collection %r (id=%s)", name, collection_id)
+        if not folder["flickr_collection_id"]:
+            collection_id = flickr.create_collection(folder["name"], description="")
+            db.set_folder_flickr_collection_id(folder["id"], collection_id)
+            folder["flickr_collection_id"] = collection_id  # update in-memory for pass 2
+            log.info("created collection %r (id=%s)", folder["name"], collection_id)
             totals["created"] += 1
         else:
             totals["updated"] += 1
 
-        # Collect direct child photosets (albums in this folder with a pushed set)
+    # Pass 2: set memberships (all collection IDs now known)
+    for folder in ordered:
+        folder_id     = folder["id"]
+        collection_id = folder["flickr_collection_id"]
+        name          = folder["name"]
+
         photoset_rows = db.conn.execute(
             "SELECT flickr_set_id FROM albums WHERE folder_id = ? AND flickr_set_id IS NOT NULL",
             (folder_id,),
         ).fetchall()
         photoset_ids = [r["flickr_set_id"] for r in photoset_rows]
 
-        # Collect direct child sub-collections (child folders with a collection ID)
         sub_col_rows = db.conn.execute(
             "SELECT flickr_collection_id FROM folders WHERE parent_id = ? AND flickr_collection_id IS NOT NULL",
             (folder_id,),
