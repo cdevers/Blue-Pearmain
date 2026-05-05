@@ -106,7 +106,11 @@ cp config/config.example.yml config/config.yml
 # 3. Authorise with Flickr (one-time, opens browser)
 python flickr/flickr_auth.py --config config/config.yml
 
-# 4. (Optional) Install background daemons — poller (hourly), pipeline (6h), reviewer UI (always on)
+# 4. Verify your setup
+bp doctor                          # Checks config, DB, Photos library, photoscript
+bp doctor --check-flickr           # Also makes a live Flickr API call
+
+# 5. (Optional) Install background daemons — poller (hourly), pipeline (6h), reviewer UI (always on)
 mkdir -p ~/Library/Logs/BluePearmain
 bp install-daemons
 # Output shows the launchctl bootstrap commands to load each agent.

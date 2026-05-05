@@ -15,6 +15,7 @@ Usage:
     bp install-daemons [--dry-run]  Install launchd agents to ~/Library/LaunchAgents
     bp uninstall-daemons [--dry-run] Remove installed launchd agents
     bp ui                           Start the review UI (http://localhost:5173)
+    bp doctor [--check-flickr]      Validate config, environment, and DB state
 
 Global options:
     --config PATH   Path to config.yml (default: config/config.yml)
@@ -392,6 +393,163 @@ def _step_args(base, **overrides):
     return _ap.Namespace(**d)
 
 
+def cmd_doctor(args):
+    """
+    Validate config, environment, and DB state before running the pipeline.
+    Prints a pass/fail checklist and exits non-zero if any required check fails.
+    """
+    import re
+    import sqlite3
+    import yaml
+
+    OK   = "✓"
+    FAIL = "✗"
+    WARN = "!"
+    issues = []
+
+    def check(symbol, label, detail=""):
+        line = f"  {symbol}  {label}"
+        if detail:
+            line += f"\n       → {detail}"
+        print(line)
+        if symbol == FAIL:
+            issues.append(label)
+
+    print()
+    print("Blue Pearmain — environment check")
+    print("─" * 40)
+
+    # ── 1. Config file ────────────────────────────────────────────────────────
+    config_path = Path(args.config)
+    if not config_path.exists():
+        check(FAIL, f"Config file: {config_path}", "File not found — copy config/config.example.yml to config/config.yml and fill in your values")
+        print()
+        print("Cannot continue: config file is required for all other checks.")
+        sys.exit(1)
+
+    try:
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+        check(OK, f"Config file: {config_path}")
+    except Exception as e:
+        check(FAIL, f"Config file: {config_path}", f"YAML parse error: {e}")
+        sys.exit(1)
+
+    # ── 2. Required config keys ───────────────────────────────────────────────
+    def _cfg(*keys, label=None):
+        val = config
+        for k in keys:
+            val = (val or {}).get(k)
+        display = label or ".".join(keys)
+        if not val:
+            check(FAIL, f"Config key {display}", "Missing or empty — check config.yml")
+        else:
+            check(OK, f"Config key {display}")
+
+    _cfg("database", "path")
+    _cfg("photos_library", "path")
+    _cfg("flickr", "api_key")
+    _cfg("flickr", "api_secret")
+    _cfg("flickr", "oauth_token")
+    _cfg("flickr", "oauth_token_secret")
+    _cfg("photos_library", "self_name", label="photos_library.self_name")
+
+    if "photos_library" in config and not config["photos_library"].get("self_name"):
+        check(WARN, "photos_library.self_name is empty — photos of named people will not be filtered as self")
+
+    # ── 3. Photos library path ────────────────────────────────────────────────
+    photos_path_raw = (config.get("photos_library") or {}).get("path", "")
+    if photos_path_raw:
+        photos_path = Path(photos_path_raw).expanduser()
+        if photos_path.exists():
+            check(OK, f"Photos library: {photos_path}")
+        else:
+            check(FAIL, f"Photos library: {photos_path}", "Path not found — check photos_library.path in config.yml")
+
+    # ── 4. Database ───────────────────────────────────────────────────────────
+    db_path_raw = (config.get("database") or {}).get("path", "")
+    db_ok = False
+    if db_path_raw:
+        db_path = Path(db_path_raw).expanduser()
+        if not db_path.exists():
+            check(WARN, f"Database: {db_path}", "File not found — will be created on first run")
+            db_ok = False
+        else:
+            try:
+                conn = sqlite3.connect(str(db_path))
+                conn.execute("SELECT 1")
+                conn.close()
+                check(OK, f"Database: {db_path}")
+                db_ok = True
+            except Exception as e:
+                check(FAIL, f"Database: {db_path}", f"Cannot open: {e}")
+
+    # ── 5. Migrations ─────────────────────────────────────────────────────────
+    if db_ok:
+        try:
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            applied = {r["name"] for r in conn.execute("SELECT name FROM schema_migrations").fetchall()}
+
+            # Discover expected migrations by scanning migration files for MIGRATION_NAME
+            migrations_dir = ROOT / "db" / "migrations"
+            name_re = re.compile(r'^MIGRATION_NAME\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
+            expected = {}
+            for mf in sorted(migrations_dir.glob("migrate_*.py")):
+                text = mf.read_text()
+                m = name_re.search(text)
+                if m:
+                    expected[m.group(1)] = mf.name
+
+            missing = {name: fname for name, fname in expected.items() if name not in applied}
+            if missing:
+                for name, fname in sorted(missing.items()):
+                    check(WARN, f"Migration not applied: {name}",
+                          f"Run: python db/migrations/{fname} --config {args.config}")
+            else:
+                last = sorted(applied)[-1] if applied else "(none)"
+                check(OK, f"Migrations: all applied (latest: {last})")
+            conn.close()
+        except Exception as e:
+            check(WARN, "Migrations: could not check", str(e))
+
+    # ── 6. photoscript importable ─────────────────────────────────────────────
+    try:
+        import photoscript  # noqa: F401
+        check(OK, "photoscript: importable")
+    except ImportError:
+        check(FAIL, "photoscript: not found", "Run: uv add photoscript")
+
+    # ── 7. Flickr credentials ping (opt-in) ───────────────────────────────────
+    if args.check_flickr:
+        try:
+            from flickr.flickr_client import FlickrClient
+            fc = config.get("flickr", {})
+            client = FlickrClient(
+                api_key=fc.get("api_key", ""),
+                api_secret=fc.get("api_secret", ""),
+                oauth_token=fc.get("oauth_token", ""),
+                oauth_token_secret=fc.get("oauth_token_secret", ""),
+            )
+            result = client._call("flickr.test.login")
+            username = result.get("user", {}).get("username", {}).get("_content", "?")
+            check(OK, f"Flickr credentials: authenticated as {username}")
+        except Exception as e:
+            check(FAIL, "Flickr credentials: API call failed", str(e))
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    print()
+    if issues:
+        print(f"  {len(issues)} problem(s) found:")
+        for i in issues:
+            print(f"    {FAIL}  {i}")
+        print()
+        sys.exit(1)
+    else:
+        print("  All checks passed.")
+        print()
+
+
 def cmd_all(args):
     """
     Run the full periodic maintenance sequence:
@@ -543,6 +701,11 @@ def main():
     p_uninstall.add_argument("--dry-run", action="store_true",
                              help="Show what would be removed without deleting files")
 
+    # doctor
+    p_doc = sub.add_parser("doctor", help="Validate config, environment, and DB before running")
+    p_doc.add_argument("--check-flickr", action="store_true",
+                       help="Make a live Flickr API call to verify credentials (requires network)")
+
     # checkpoint
     p_ckpt = sub.add_parser("checkpoint", help="Run a WAL checkpoint to shrink the WAL file")
     p_ckpt.add_argument(
@@ -568,6 +731,7 @@ def main():
     if not hasattr(args, "photo_id"):        args.photo_id = None
     if not hasattr(args, "conflicts_only"):  args.conflicts_only = False
     if not hasattr(args, "mode"):            args.mode = "truncate"
+    if not hasattr(args, "check_flickr"):   args.check_flickr = False
 
     dispatch = {
         "pipeline":      cmd_pipeline,
@@ -584,6 +748,7 @@ def main():
         "all":              cmd_all,
         "install-daemons":   cmd_install_daemons,
         "uninstall-daemons": cmd_uninstall_daemons,
+        "doctor":            cmd_doctor,
     }
     dispatch[args.command](args)
 
