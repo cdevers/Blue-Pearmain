@@ -418,13 +418,13 @@
         <div class="tag-side flickr">
           <div class="side-label">Flickr {{ p.field }}</div>
           <div style="font-size:12px; color:var(--text); line-height:1.4; padding-top:2px">
-            {{ flickr_text_val if flickr_text_val else '<span class="tag-empty">empty</span>' | safe }}
+            {% if flickr_text_val %}{{ flickr_text_val }}{% else %}<span class="tag-empty">empty</span>{% endif %}
           </div>
         </div>
         <div class="tag-side photos">
           <div class="side-label">Photos {{ p.field }}</div>
           <div style="font-size:12px; color:var(--text); line-height:1.4; padding-top:2px">
-            {{ photos_text_val if photos_text_val else '<span class="tag-empty">empty</span>' | safe }}
+            {% if photos_text_val %}{{ photos_text_val }}{% else %}<span class="tag-empty">empty</span>{% endif %}
           </div>
         </div>
       </div>
