@@ -55,6 +55,8 @@ Nothing is written to Flickr or Apple Photos without explicit human confirmation
      Flickr API  (setPerms · addTags · setMeta · photosets · delete)
 ```
 
+See [`docs/pipeline.md`](docs/pipeline.md) for the full pipeline reference: stage contracts, idempotency guarantees, what writes to external systems, and partial failure recovery.
+
 ## Components
 
 | Path | Purpose |
