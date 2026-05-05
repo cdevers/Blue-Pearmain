@@ -231,7 +231,7 @@ function closeConfirm() {
 
 async function doConfirm() {
   closeConfirm();
-  const r = await fetch('/api/batch_person', {
+  const r = await apiFetch('/api/batch_person', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({person: _pendingPerson, decision: _pendingDecision}),

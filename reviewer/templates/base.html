@@ -204,6 +204,11 @@
 {% block content %}{% endblock %}
 
 <script>
+function apiFetch(url, opts = {}) {
+  opts.headers = Object.assign({'X-Requested-With': 'XMLHttpRequest'}, opts.headers || {});
+  return fetch(url, opts);
+}
+
 function toast(msg, kind='ok') {
   const el = document.getElementById('toast');
   el.textContent = msg;
@@ -215,7 +220,7 @@ function toast(msg, kind='ok') {
 async function decide(photoId, decision, push=false, tags=null) {
   const body = { photo_id: photoId, decision, push };
   if (tags !== null) body.tags = tags;
-  const r = await fetch('/api/decide', {
+  const r = await apiFetch('/api/decide', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body),
@@ -231,7 +236,7 @@ async function decide(photoId, decision, push=false, tags=null) {
 
 // Update nav stats
 async function refreshStats() {
-  const r = await fetch('/api/stats');
+  const r = await apiFetch('/api/stats');
   const s = await r.json();
   const el = document.getElementById('nav-stats');
   const review = (s.by_state?.needs_review || 0) + (s.by_state?.candidate_public || 0);

@@ -158,7 +158,7 @@ async function addZone() {
     return;
   }
 
-  const r = await fetch('/api/zone', {
+  const r = await apiFetch('/api/zone', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({name, label: label || name, latitude: lat,
@@ -175,7 +175,7 @@ async function addZone() {
 
 async function deleteZone(id, name) {
   if (!confirm(`Remove zone "${name}"?`)) return;
-  const r = await fetch('/api/zone/' + id, {method: 'DELETE'});
+  const r = await apiFetch('/api/zone/' + id, {method: 'DELETE'});
   const d = await r.json();
   if (d.ok) { toast('Zone removed'); location.reload(); }
   else toast('Error', 'err');

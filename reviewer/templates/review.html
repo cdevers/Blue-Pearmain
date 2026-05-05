@@ -389,7 +389,7 @@ const _undoCount = {{ session.get('undo_history', [])|length }};
 if (_undoCount > 0) document.getElementById('undoBtn').style.display = '';
 
 async function doUndo() {
-  const r = await fetch('/api/undo', { method: 'POST' });
+  const r = await apiFetch('/api/undo', { method: 'POST' });
   const d = await r.json();
   if (d.ok) {
     location.reload();

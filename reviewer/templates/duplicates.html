@@ -257,7 +257,7 @@
 <script>
 async function resolveGroup(groupId, btn) {
   btn.disabled = true;
-  const r = await fetch(`/api/duplicates/${groupId}/resolve`, {method: 'POST'});
+  const r = await apiFetch(`/api/duplicates/${groupId}/resolve`, {method: 'POST'});
   const d = await r.json();
   if (d.ok) {
     toast('Group resolved');
@@ -273,7 +273,7 @@ async function resolveGroup(groupId, btn) {
 
 async function assignKeeper(groupId, photoId, btn) {
   btn.disabled = true;
-  const r = await fetch(`/api/duplicates/${groupId}/assign`, {
+  const r = await apiFetch(`/api/duplicates/${groupId}/assign`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({action: 'set_keeper', photo_id: photoId}),
@@ -322,7 +322,7 @@ document.addEventListener('keydown', e => {
 
 async function notDuplicate(groupId, btn) {
   btn.disabled = true;
-  const r = await fetch(`/api/duplicates/${groupId}/assign`, {
+  const r = await apiFetch(`/api/duplicates/${groupId}/assign`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({action: 'not_duplicate'}),

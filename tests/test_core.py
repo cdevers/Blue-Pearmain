@@ -4791,6 +4791,7 @@ class TestPhotoDetailTemplate(unittest.TestCase):
         reviewer_app._db = self._db
 
         self._app    = reviewer_app.app
+        self._app.config["TESTING"] = True
         self._client = self._app.test_client()
 
         # Photo with uuid (Photos-matched)
@@ -5071,6 +5072,7 @@ class TestRotateFlickrApi(unittest.TestCase):
         reviewer_app._db     = self._db
         reviewer_app._client = None
         self._app    = reviewer_app.app
+        self._app.config["TESTING"] = True
         self._client = self._app.test_client()
 
         self.photo_id = self._db.upsert_photo({

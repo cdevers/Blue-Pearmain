@@ -454,7 +454,7 @@
 const PHOTO_ID = {{ photo.id }};
 
 async function openInPhotos(photoId) {
-  const r = await fetch('/api/open-in-photos/' + photoId, {method: 'POST'});
+  const r = await apiFetch('/api/open-in-photos/' + photoId, {method: 'POST'});
   const d = await r.json();
   if (!d.ok) toast('Could not open in Photos: ' + (d.error || 'unknown error'), 'err');
 }
@@ -496,7 +496,7 @@ function handleTagInput(e) {
 async function saveText() {
   const title       = document.getElementById('text-title').value.trim();
   const description = document.getElementById('text-desc').value.trim();
-  const r = await fetch(`/api/photos/${PHOTO_ID}/set-text`, {
+  const r = await apiFetch(`/api/photos/${PHOTO_ID}/set-text`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({title, description}),
@@ -511,7 +511,7 @@ async function saveText() {
 
 async function saveTags() {
   const tags = currentTags();
-  const r = await fetch('/api/tags', {
+  const r = await apiFetch('/api/tags', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({photo_id: PHOTO_ID, tags}),
@@ -543,7 +543,7 @@ const _undoCount = {{ session.get('undo_history', [])|length }};
 if (_undoCount > 0) document.getElementById('undoBtn').style.display = '';
 
 async function doUndo() {
-  const r = await fetch('/api/undo', { method: 'POST' });
+  const r = await apiFetch('/api/undo', { method: 'POST' });
   const d = await r.json();
   if (d.ok) {
     window.location.href = '/review?state=' + {{ state | tojson }};
@@ -554,7 +554,7 @@ async function doUndo() {
 
 async function rotateFlickr(degrees) {
   if (!confirm(`Rotate ${degrees}° on Flickr? This is irreversible.`)) return;
-  const r = await fetch(`/api/photos/{{ photo.id }}/rotate-flickr`, {
+  const r = await apiFetch(`/api/photos/{{ photo.id }}/rotate-flickr`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({degrees}),

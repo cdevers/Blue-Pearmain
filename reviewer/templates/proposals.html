@@ -537,7 +537,7 @@ function _resolveCard(cardEl) {
 async function approveProposal(id, btn) {
   btn.disabled = true;
   btn.textContent = '…';
-  const r = await fetch('/api/proposals/' + id + '/approve', {method: 'POST'});
+  const r = await apiFetch('/api/proposals/' + id + '/approve', {method: 'POST'});
   const d = await r.json();
   if (d.ok) {
     const card = document.getElementById('card-' + id);
@@ -560,7 +560,7 @@ async function approveProposal(id, btn) {
 async function approveReverse(id, btn) {
   btn.disabled = true;
   btn.textContent = '…';
-  const r = await fetch('/api/proposals/' + id + '/approve-reverse', {method: 'POST'});
+  const r = await apiFetch('/api/proposals/' + id + '/approve-reverse', {method: 'POST'});
   const d = await r.json();
   if (d.ok) {
     const card = document.getElementById('card-' + id);
@@ -576,7 +576,7 @@ async function approveReverse(id, btn) {
 
 async function rejectProposal(id, btn) {
   btn.disabled = true;
-  const r = await fetch('/api/proposals/' + id + '/reject', {method: 'POST'});
+  const r = await apiFetch('/api/proposals/' + id + '/reject', {method: 'POST'});
   const d = await r.json();
   if (d.ok) {
     const card = document.getElementById('card-' + id);
@@ -592,7 +592,7 @@ async function bulkApprove(conflictType, btn) {
   btn.disabled = true;
   const orig = btn.textContent;
   btn.textContent = 'Applying…';
-  const r = await fetch('/api/proposals/bulk-approve', {
+  const r = await apiFetch('/api/proposals/bulk-approve', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({conflict_type: conflictType}),
@@ -719,7 +719,7 @@ async function applyMerged(id, btn) {
   btn.disabled = true;
   const orig = btn.textContent;
   btn.textContent = 'Applying…';
-  const r = await fetch('/api/proposals/' + id + '/apply-manual', {
+  const r = await apiFetch('/api/proposals/' + id + '/apply-manual', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({value: selectedTags}),

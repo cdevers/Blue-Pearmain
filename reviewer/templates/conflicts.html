@@ -201,7 +201,7 @@ document.addEventListener('keydown', e => {
 
 async function resolve(conflictId, resolution) {
   const row = document.getElementById('field-' + conflictId);
-  const r = await fetch('/api/conflict/' + conflictId + '/resolve', {
+  const r = await apiFetch('/api/conflict/' + conflictId + '/resolve', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({resolution}),

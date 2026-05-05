@@ -191,7 +191,7 @@
 {% block scripts %}
 <script>
 async function triggerPoll() {
-  const r = await fetch('/api/poll', {method:'POST'});
+  const r = await apiFetch('/api/poll', {method:'POST'});
   const d = await r.json();
   if (d.ok) toast('Poll started (PID ' + d.pid + ')');
   else toast('Poll failed', 'err');
@@ -201,7 +201,7 @@ async function pushApproved() {
   const btn = event.target;
   btn.disabled = true;
   btn.textContent = 'Pushing…';
-  const r = await fetch('/api/push_approved', {method:'POST'});
+  const r = await apiFetch('/api/push_approved', {method:'POST'});
   const d = await r.json();
   btn.disabled = false;
   if (d.ok) {

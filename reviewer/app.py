@@ -53,6 +53,15 @@ def db() -> Database:
     return _db
 
 
+@app.before_request
+def _require_xhr_for_api():
+    if app.config.get("TESTING"):
+        return
+    if request.path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS"):
+        if request.headers.get("X-Requested-With") != "XMLHttpRequest":
+            return jsonify({"ok": False, "error": "CSRF check failed"}), 403
+
+
 def client() -> FlickrClient | None:
     return _client
 
