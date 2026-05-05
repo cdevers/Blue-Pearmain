@@ -67,10 +67,6 @@ def main() -> int:
     if args.album:
         pending = [r for r in pending if r["album_name"] == args.album]
 
-    if not pending:
-        print("albums created=0  photos added=0  skipped=0  failed=0")
-        return 0
-
     # Deduplicate by photo_id so we call push_photo_to_albums once per photo
     seen_photo_ids: set[int] = set()
     unique_photos: list[int] = []
@@ -81,7 +77,6 @@ def main() -> int:
             unique_photos.append(pid)
 
     from flickr.album_pusher import push_photo_to_albums
-    from flickr.flickr_client import FlickrError
 
     albums_before = _count_created_sets(db)
     added   = 0
@@ -116,6 +111,8 @@ def main() -> int:
         f"failed={failed}"
     )
 
+    sync_album_titles(db, flickr, dry_run=args.dry_run)
+
     db.close()
     return 1 if failed else 0
 
@@ -125,6 +122,28 @@ def _count_created_sets(db) -> int:
         "SELECT COUNT(*) AS n FROM albums WHERE flickr_set_id IS NOT NULL"
     ).fetchone()
     return row["n"] if row else 0
+
+
+def sync_album_titles(db, flickr, dry_run: bool = False) -> dict:
+    """Push current album names to Flickr photoset titles for all pushed albums."""
+    rows = db.conn.execute(
+        "SELECT name, flickr_set_id FROM albums WHERE flickr_set_id IS NOT NULL"
+    ).fetchall()
+
+    updated = 0
+    for row in rows:
+        if dry_run:
+            log.info("[dry-run] would update photoset title %r → %r", row["flickr_set_id"], row["name"])
+            updated += 1
+            continue
+        try:
+            flickr.edit_photoset_meta(row["flickr_set_id"], row["name"])
+            updated += 1
+        except Exception as e:
+            log.warning("failed to update photoset title for album %r: %s", row["name"], e)
+
+    log.info("sync-album-titles: updated=%d", updated)
+    return {"updated": updated}
 
 
 if __name__ == "__main__":

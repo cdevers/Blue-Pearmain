@@ -6049,5 +6049,82 @@ class TestSyncCollections(unittest.TestCase):
         self.assertEqual(row["flickr_collection_id"], "col-new")
 
 
+class TestSyncAlbumTitles(unittest.TestCase):
+    """sync_album_titles: pushes current album names to Flickr photoset titles."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+        self.db = Database(Path(self._tmp.name) / "test.db")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _make_flickr(self):
+        from unittest.mock import MagicMock
+        m = MagicMock()
+        m.edit_photoset_meta.return_value = None
+        return m
+
+    def _seed_album(self, uuid, name, flickr_set_id=None):
+        aid = self.db.upsert_album(uuid, name)
+        if flickr_set_id:
+            self.db.set_album_flickr_set_id(aid, flickr_set_id)
+        return aid
+
+    def test_calls_edit_meta_for_each_pushed_album(self):
+        from flickr.sync_albums import sync_album_titles
+        self._seed_album("uuid-1", "Paris Trip", flickr_set_id="ps-111")
+        self._seed_album("uuid-2", "Rome Pics",  flickr_set_id="ps-222")
+        flickr = self._make_flickr()
+
+        result = sync_album_titles(self.db, flickr)
+
+        self.assertEqual(flickr.edit_photoset_meta.call_count, 2)
+        calls = {c[0] for c in flickr.edit_photoset_meta.call_args_list}
+        self.assertIn(("ps-111", "Paris Trip"), calls)
+        self.assertIn(("ps-222", "Rome Pics"), calls)
+        self.assertEqual(result["updated"], 2)
+
+    def test_skips_albums_without_flickr_set_id(self):
+        from flickr.sync_albums import sync_album_titles
+        self._seed_album("uuid-1", "Not Pushed Yet")  # no flickr_set_id
+        flickr = self._make_flickr()
+
+        sync_album_titles(self.db, flickr)
+
+        flickr.edit_photoset_meta.assert_not_called()
+
+    def test_dry_run_makes_no_api_calls(self):
+        from flickr.sync_albums import sync_album_titles
+        self._seed_album("uuid-1", "Paris Trip", flickr_set_id="ps-111")
+        flickr = self._make_flickr()
+
+        result = sync_album_titles(self.db, flickr, dry_run=True)
+
+        flickr.edit_photoset_meta.assert_not_called()
+        self.assertEqual(result["updated"], 1)
+
+    def test_continues_on_api_error(self):
+        from flickr.sync_albums import sync_album_titles
+        self._seed_album("uuid-1", "Album A", flickr_set_id="ps-111")
+        self._seed_album("uuid-2", "Album B", flickr_set_id="ps-222")
+        flickr = self._make_flickr()
+        flickr.edit_photoset_meta.side_effect = [Exception("timeout"), None]
+
+        result = sync_album_titles(self.db, flickr)
+
+        self.assertEqual(flickr.edit_photoset_meta.call_count, 2)
+        self.assertEqual(result["updated"], 1)
+
+    def test_no_albums_is_noop(self):
+        from flickr.sync_albums import sync_album_titles
+        flickr = self._make_flickr()
+        result = sync_album_titles(self.db, flickr)
+        flickr.edit_photoset_meta.assert_not_called()
+        self.assertEqual(result["updated"], 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
