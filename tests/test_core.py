@@ -5858,5 +5858,133 @@ class TestMigration011(unittest.TestCase):
             self._run_migration(db_path)  # second run must not raise
 
 
+class TestSyncCollections(unittest.TestCase):
+    """sync_collections: creates/updates Flickr Collections from DB folder tree."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+        self.db = Database(Path(self._tmp.name) / "test.db")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _make_flickr(self, **side_effects):
+        from unittest.mock import MagicMock
+        m = MagicMock()
+        m.create_collection.return_value = "col-new"
+        m.edit_collection_sets.return_value = None
+        m.delete_collection.return_value = None
+        for attr, val in side_effects.items():
+            setattr(m, attr, val)
+        return m
+
+    def _seed_folder(self, uuid, name, parent_id=None, collection_id=None):
+        fid = self.db.upsert_folder(uuid, name, parent_id=parent_id)
+        if collection_id:
+            self.db.set_folder_flickr_collection_id(fid, collection_id)
+        return fid
+
+    def _seed_album(self, uuid, name, folder_id=None, flickr_set_id=None):
+        aid = self.db.upsert_album(uuid, name, folder_id=folder_id)
+        if flickr_set_id:
+            self.db.set_album_flickr_set_id(aid, flickr_set_id)
+        return aid
+
+    def test_creates_collection_for_new_folder(self):
+        from flickr.sync_collections import sync_collections
+        self._seed_folder("uuid-f1", "Travel")
+        flickr = self._make_flickr()
+
+        result = sync_collections(self.db, flickr)
+
+        flickr.create_collection.assert_called_once_with("Travel", description="")
+        self.assertEqual(result["created"], 1)
+        row = self.db.conn.execute("SELECT flickr_collection_id FROM folders WHERE apple_uuid='uuid-f1'").fetchone()
+        self.assertEqual(row["flickr_collection_id"], "col-new")
+
+    def test_skips_create_for_existing_collection(self):
+        from flickr.sync_collections import sync_collections
+        self._seed_folder("uuid-f1", "Travel", collection_id="col-existing")
+        flickr = self._make_flickr()
+
+        sync_collections(self.db, flickr)
+
+        flickr.create_collection.assert_not_called()
+
+    def test_edit_sets_called_with_album_photoset_ids(self):
+        from flickr.sync_collections import sync_collections
+        fid = self._seed_folder("uuid-f1", "Travel", collection_id="col-1")
+        self._seed_album("uuid-a1", "Paris", folder_id=fid, flickr_set_id="ps-111")
+        self._seed_album("uuid-a2", "Rome",  folder_id=fid, flickr_set_id="ps-222")
+        flickr = self._make_flickr()
+
+        sync_collections(self.db, flickr)
+
+        call_args = flickr.edit_collection_sets.call_args
+        self.assertEqual(call_args[0][0], "col-1")
+        self.assertCountEqual(call_args[0][1], ["ps-111", "ps-222"])
+
+    def test_skips_albums_without_flickr_set_id(self):
+        from flickr.sync_collections import sync_collections
+        fid = self._seed_folder("uuid-f1", "Travel", collection_id="col-1")
+        self._seed_album("uuid-a1", "Not Pushed Yet", folder_id=fid, flickr_set_id=None)
+        flickr = self._make_flickr()
+
+        sync_collections(self.db, flickr)
+
+        call_args = flickr.edit_collection_sets.call_args
+        self.assertEqual(call_args[0][1], [])  # no photosets
+
+    def test_parent_collection_includes_child_collection_id(self):
+        from flickr.sync_collections import sync_collections
+        parent_id = self._seed_folder("uuid-parent", "Europe", collection_id="col-parent")
+        self._seed_folder("uuid-child", "France", parent_id=parent_id, collection_id="col-child")
+        flickr = self._make_flickr()
+
+        sync_collections(self.db, flickr)
+
+        calls = flickr.edit_collection_sets.call_args_list
+        parent_call = next(c for c in calls if c[0][0] == "col-parent")
+        self.assertIn("col-child", parent_call[0][2])  # sub_collection_ids
+
+    def test_no_folders_is_noop(self):
+        from flickr.sync_collections import sync_collections
+        flickr = self._make_flickr()
+        result = sync_collections(self.db, flickr)
+        flickr.create_collection.assert_not_called()
+        flickr.edit_collection_sets.assert_not_called()
+        self.assertEqual(result["created"], 0)
+        self.assertEqual(result["updated"], 0)
+
+    def test_dry_run_makes_no_api_calls(self):
+        from flickr.sync_collections import sync_collections
+        self._seed_folder("uuid-f1", "Travel")
+        flickr = self._make_flickr()
+
+        sync_collections(self.db, flickr, dry_run=True)
+
+        flickr.create_collection.assert_not_called()
+        flickr.edit_collection_sets.assert_not_called()
+
+    def test_stale_collection_id_cleared_and_recreated(self):
+        from flickr.sync_collections import sync_collections
+        from flickr.flickr_client import FlickrError
+        fid = self._seed_folder("uuid-f1", "Travel", collection_id="col-stale")
+        flickr = self._make_flickr()
+        flickr.edit_collection_sets.side_effect = [
+            FlickrError(2, "Collection not found"),  # first call fails
+            None,                                     # second call succeeds
+        ]
+        flickr.create_collection.return_value = "col-new"
+
+        sync_collections(self.db, flickr)
+
+        flickr.create_collection.assert_called_once()
+        row = self.db.conn.execute("SELECT flickr_collection_id FROM folders WHERE id=?", (fid,)).fetchone()
+        self.assertEqual(row["flickr_collection_id"], "col-new")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
