@@ -336,7 +336,7 @@ def _find_approved_photos_record(db, flickr_row: dict):
             for field in ("apple_labels", "apple_persons", "proposed_tags"):
                 if isinstance(d.get(field), str):
                     try:    d[field] = _json.loads(d[field])
-                    except: d[field] = []
+                    except (json.JSONDecodeError, TypeError, ValueError): d[field] = []
             return d
     return None
 

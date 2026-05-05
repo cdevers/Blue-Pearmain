@@ -64,7 +64,7 @@ def check_photo(
     db_tags         = row["proposed_tags"] or []
     if isinstance(db_tags, str):
         try:    db_tags = json.loads(db_tags)
-        except: db_tags = []
+        except (json.JSONDecodeError, TypeError, ValueError): db_tags = []
 
     result = {
         "flickr_id":    flickr_id,

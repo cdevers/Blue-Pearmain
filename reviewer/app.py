@@ -130,7 +130,7 @@ def review():
             for field in ("apple_labels", "apple_persons", "proposed_tags"):
                 if isinstance(d.get(field), str):
                     try: d[field] = _json.loads(d[field])
-                    except: d[field] = []
+                    except (json.JSONDecodeError, TypeError, ValueError): d[field] = []
             photos.append(d)
 
         total_row = db().conn.execute(
