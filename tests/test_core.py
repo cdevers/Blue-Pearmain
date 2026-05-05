@@ -1390,7 +1390,7 @@ class TestFlickrCollectionsClient(unittest.TestCase):
             client.edit_photoset_meta("ps-123", "New Title")
         mock_call.assert_called_once_with(
             "flickr.photosets.editMeta",
-            {"photoset_id": "ps-123", "title": "New Title", "description": ""},
+            {"photoset_id": "ps-123", "title": "New Title"},
             http_method="POST",
         )
 

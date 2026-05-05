@@ -364,7 +364,7 @@ class FlickrClient:
         """Update the title of an existing Flickr photoset."""
         self._call(
             "flickr.photosets.editMeta",
-            {"photoset_id": photoset_id, "title": title, "description": ""},
+            {"photoset_id": photoset_id, "title": title},
             http_method="POST",
         )
 
