@@ -5503,6 +5503,25 @@ class TestStaleUuid(unittest.TestCase):
         ).fetchone()["uuid_stale"]
         self.assertEqual(flag, 0)
 
+    def test_migration_009_placeholder_idempotent(self):
+        import tempfile
+        from db.db import Database
+        from db.migrations.migrate_009_placeholder import run as run_migration
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = str(Path(tmpdir) / "idempotent.db")
+            db = Database(db_path)
+            db.close()
+            run_migration(db_path)  # first run
+            run_migration(db_path)  # second run — must not raise
+            import sqlite3
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT name FROM schema_migrations WHERE name='migrate_009_placeholder'"
+            ).fetchone()
+            self.assertIsNotNone(row, "migration 009 should be recorded in schema_migrations")
+            conn.close()
+
     def test_migration_010_idempotent(self):
         import tempfile
         from db.db import Database
