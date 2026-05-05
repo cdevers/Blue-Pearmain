@@ -4,6 +4,13 @@ These instructions apply to every session in this project. Follow them without b
 
 ---
 
+## Before starting any feature or bug fix
+
+1. **Brainstorm** — invoke `/superpowers:brainstorming` before writing any code for a new feature or non-trivial change. Explore design options and agree on the approach with the user before touching files.
+2. **File a GitHub issue** — once the approach is agreed, create or identify the issue. Do this before making any code changes.
+
+---
+
 ## GitHub issue lifecycle
 
 Every non-trivial piece of work must be tracked in a GitHub issue:
@@ -17,7 +24,7 @@ Every non-trivial piece of work must be tracked in a GitHub issue:
 
 For each meaningful change (bug fix, feature, refactor):
 
-1. **Tests** — add or update tests in `tests/` covering the changed behaviour. Run `python -m pytest tests/ -q` and confirm all tests pass before committing.
+1. **Tests (TDD)** — invoke `/superpowers:test-driven-development` before writing implementation code. Write the tests first, confirm they fail for the right reason, then implement. Run `python -m pytest tests/ -q` and confirm all tests pass before committing.
 2. **README** — update `README.md` to reflect any user-visible change: new commands, changed behaviour, updated test count.
 3. **Docs** — if a `docs/` file describes work that was just completed, mark it done (e.g. `✓ done`) or update its status line.
 4. **GitHub issue** — reference the issue in the commit message (e.g. `Closes #1`). After the commit, update the issue with a status comment or close it with a summary of what was done.
