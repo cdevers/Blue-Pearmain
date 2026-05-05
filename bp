@@ -702,7 +702,7 @@ def main():
                              help="Show what would be removed without deleting files")
 
     # doctor
-    p_doc = sub.add_parser("doctor", help="Validate config, environment, and DB before running")
+    p_doc = sub.add_parser("doctor", help="Preflight check: config, environment, and DB. Passing means startup is likely to succeed; it is not a guarantee of successful execution.")
     p_doc.add_argument("--check-flickr", action="store_true",
                        help="Make a live Flickr API call to verify credentials (requires network)")
 

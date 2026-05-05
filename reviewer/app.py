@@ -55,6 +55,11 @@ def db() -> Database:
 
 @app.before_request
 def _require_xhr_for_api():
+    # Require X-Requested-With on all state-changing /api/ routes.
+    # This blocks casual cross-origin POST requests from other pages on the same network
+    # because browsers cannot set custom headers cross-origin without a CORS preflight
+    # (which this server never grants). It is not a substitute for a synchronizer token
+    # against a targeted attack. The reviewer UI is designed for trusted local networks only.
     if app.config.get("TESTING"):
         return
     if request.path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS"):

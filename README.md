@@ -25,6 +25,8 @@ Blue Pearmain addresses both:
 
 Nothing is written to Flickr or Apple Photos without explicit human confirmation or auto-apply rules you've opted into.
 
+**Scope and trust model** — Blue Pearmain is a personal tool designed for a single-user local environment. The reviewer UI binds to localhost by default and is intended for use on a trusted local network (e.g. LAN access from a personal device). It is not hardened for multi-user or internet-facing deployment, and the network-level protections in the reviewer UI reflect that assumption.
+
 ## Architecture
 
 ```
@@ -529,6 +531,18 @@ python db/migrate_003_dimensions_and_dedup.py --config config/config.yml
 All scripts are idempotent and safe to re-run.
 
 > **Note (migration 001):** If any photos have an unrecognised `privacy_state` value (e.g. from manual DB edits or a future code change), the migration will reset them to `needs_review` before adding the constraint. Check the output for any rows that are reset.
+
+## Operational guarantees
+
+| Guarantee | Status |
+|-----------|--------|
+| Safe to re-run | ✓ All stages are idempotent — re-running `bp all` is always safe |
+| Safe after interruption | ✓ Resume by re-running `bp all`; applied work is skipped, remaining work continues |
+| Partial failures isolated | ✓ A failure in any stage is logged and the sequence continues |
+| Consistency after partial failure | ✓ `bp reconcile --fix` repairs Flickr drift caused by incomplete pushes |
+| Requires trusted local environment | Yes — not designed for multi-user or internet-facing deployment |
+
+`bp doctor` performs a preflight check on config, DB, and environment. A passing doctor check means startup is likely to succeed — it does not guarantee that all runtime operations (network calls, Photos access, Flickr API) will complete without error.
 
 ## Tests
 

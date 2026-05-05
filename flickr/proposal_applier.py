@@ -235,7 +235,8 @@ def apply_collision_reverse(
         except Exception as e:
             return {"ok": False, "reason": f"Flickr API error: {e}"}
         now = _now_iso()
-        assert field in ("title", "description", "tags"), f"unexpected field: {field!r}"
+        if field not in ("title", "description", "tags"):
+            raise ValueError(f"unexpected field: {field!r}")
         db.conn.execute(
             f"UPDATE photos SET flickr_{field}=?, meta_synced_flickr_at=?, updated_at=? WHERE id=?",
             (photos_value, now, now, photo_id),

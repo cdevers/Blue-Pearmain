@@ -97,7 +97,8 @@ class Database:
         but leaves the WAL file in place.
         If busy > 0, some WAL frames couldn't be moved (readers still active).
         """
-        assert mode in ("PASSIVE", "FULL", "RESTART", "TRUNCATE"), f"invalid checkpoint mode: {mode!r}"
+        if mode not in ("PASSIVE", "FULL", "RESTART", "TRUNCATE"):
+            raise ValueError(f"invalid checkpoint mode: {mode!r}")
         row = self.conn.execute(f"PRAGMA wal_checkpoint({mode})").fetchone()
         if row:
             return {"busy": row[0], "log": row[1], "checkpointed": row[2]}
