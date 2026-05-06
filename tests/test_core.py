@@ -1421,6 +1421,44 @@ class TestFlickrCollectionsClient(unittest.TestCase):
             http_method="POST",
         )
 
+    def test_get_photosets_titled_returns_id_title_dict(self):
+        from unittest.mock import patch
+        client = self._make_client()
+        api_response = {
+            "stat": "ok",
+            "photosets": {
+                "photoset": [
+                    {"id": "ps-1", "title": {"_content": "Paris"}},
+                    {"id": "ps-2", "title": {"_content": "Rome"}},
+                ]
+            },
+        }
+        with patch.object(client, "_call", return_value=api_response):
+            result = client.get_photosets_titled()
+        self.assertEqual(result, {"ps-1": "Paris", "ps-2": "Rome"})
+
+    def test_get_collections_flat_returns_id_title_dict(self):
+        from unittest.mock import patch
+        client = self._make_client()
+        api_response = {
+            "stat": "ok",
+            "collections": {
+                "collection": [
+                    {
+                        "id": "col-1",
+                        "title": "Top",
+                        "collection": [
+                            {"id": "col-2", "title": "Nested", "collection": [], "set": []}
+                        ],
+                        "set": [],
+                    }
+                ]
+            },
+        }
+        with patch.object(client, "_call", return_value=api_response):
+            result = client.get_collections_flat()
+        self.assertEqual(result, {"col-1": "Top", "col-2": "Nested"})
+
 # ---------------------------------------------------------------------------
 # Poller auto-push: approved Photos record matched to new Flickr upload
 # ---------------------------------------------------------------------------

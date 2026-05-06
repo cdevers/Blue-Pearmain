@@ -343,6 +343,20 @@ class FlickrClient:
         )
         return data.get("photosets", {}).get("photoset", [])
 
+    def get_photosets_titled(self) -> dict[str, str]:
+        """Return {photoset_id: title} for all the user's photosets."""
+        data = self._call(
+            "flickr.photosets.getList",
+            {"user_id": self.user_nsid or "me"},
+        )
+        result = {}
+        for ps in data.get("photosets", {}).get("photoset", []):
+            title = ps.get("title", {})
+            if isinstance(title, dict):
+                title = title.get("_content", "")
+            result[ps["id"]] = title
+        return result
+
     def create_photoset(self, title: str, primary_photo_id: str) -> str:
         """Create a Flickr photoset. Returns the new photoset ID."""
         data = self._call(
@@ -414,6 +428,21 @@ class FlickrClient:
             {"collection_id": collection_id, "title": title},
             http_method="POST",
         )
+
+    def get_collections_flat(self) -> dict[str, str]:
+        """Return {collection_id: title} by flattening flickr.collections.getTree.
+        Raises FlickrError on non-Pro accounts."""
+        data = self._call("flickr.collections.getTree")
+
+        result: dict[str, str] = {}
+
+        def _walk(nodes: list[dict]) -> None:
+            for node in nodes:
+                result[node["id"]] = node.get("title", "")
+                _walk(node.get("collection", []))
+
+        _walk(data.get("collections", {}).get("collection", []))
+        return result
 
     # -----------------------------------------------------------------------
     # Thumbnail download
