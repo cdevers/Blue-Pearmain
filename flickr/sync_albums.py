@@ -127,7 +127,7 @@ def _count_created_sets(db) -> int:
 def sync_album_titles(db, flickr, dry_run: bool = False) -> dict:
     """Push current album names to Flickr photoset titles for all pushed albums."""
     rows = db.conn.execute(
-        "SELECT name, flickr_set_id FROM albums WHERE flickr_set_id IS NOT NULL"
+        "SELECT id, name, flickr_set_id FROM albums WHERE flickr_set_id IS NOT NULL"
     ).fetchall()
 
     updated = 0
@@ -138,6 +138,7 @@ def sync_album_titles(db, flickr, dry_run: bool = False) -> dict:
             continue
         try:
             flickr.edit_photoset_meta(row["flickr_set_id"], row["name"])
+            db.set_album_flickr_name(row["id"], row["name"])
             updated += 1
         except Exception as e:
             log.warning("failed to update photoset title for album %r: %s", row["name"], e)

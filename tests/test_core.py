@@ -6131,6 +6131,18 @@ class TestSyncCollections(unittest.TestCase):
         flickr.edit_collection_meta.assert_called_once()
         self.assertEqual(result["updated"], 1)
 
+    def test_writes_flickr_name_for_existing_collection(self):
+        from flickr.sync_collections import sync_collections
+        fid = self._seed_folder("uuid-f1", "Travel", collection_id="col-existing")
+        flickr = self._make_flickr()
+
+        sync_collections(self.db, flickr)
+
+        row = self.db.conn.execute(
+            "SELECT flickr_name FROM folders WHERE id = ?", (fid,)
+        ).fetchone()
+        self.assertEqual(row["flickr_name"], "Travel")
+
 
 class TestSyncAlbumTitles(unittest.TestCase):
     """sync_album_titles: pushes current album names to Flickr photoset titles."""
@@ -6207,6 +6219,31 @@ class TestSyncAlbumTitles(unittest.TestCase):
         result = sync_album_titles(self.db, flickr)
         flickr.edit_photoset_meta.assert_not_called()
         self.assertEqual(result["updated"], 0)
+
+    def test_writes_flickr_name_after_successful_push(self):
+        from flickr.sync_albums import sync_album_titles
+        aid = self._seed_album("uuid-1", "Paris Trip", flickr_set_id="ps-111")
+        flickr = self._make_flickr()
+
+        sync_album_titles(self.db, flickr)
+
+        row = self.db.conn.execute(
+            "SELECT flickr_name FROM albums WHERE id = ?", (aid,)
+        ).fetchone()
+        self.assertEqual(row["flickr_name"], "Paris Trip")
+
+    def test_does_not_write_flickr_name_on_api_error(self):
+        from flickr.sync_albums import sync_album_titles
+        aid = self._seed_album("uuid-1", "Paris Trip", flickr_set_id="ps-111")
+        flickr = self._make_flickr()
+        flickr.edit_photoset_meta.side_effect = Exception("timeout")
+
+        sync_album_titles(self.db, flickr)
+
+        row = self.db.conn.execute(
+            "SELECT flickr_name FROM albums WHERE id = ?", (aid,)
+        ).fetchone()
+        self.assertIsNone(row["flickr_name"])
 
 
 if __name__ == "__main__":

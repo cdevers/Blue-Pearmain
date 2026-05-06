@@ -50,6 +50,7 @@ def push_photo_to_albums(db, flickr, photo_id: int) -> int:
                 # First photo in this album to be pushed — create the photoset
                 flickr_set_id = flickr.create_photoset(album_name, flickr_id)
                 db.set_album_flickr_set_id(album_id, flickr_set_id)
+                db.set_album_flickr_name(album_id, album_name)
                 log.info(
                     "created photoset %r (id=%s) for album %r",
                     album_name, flickr_set_id, album_name,
