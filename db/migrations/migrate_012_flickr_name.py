@@ -59,7 +59,7 @@ def run(db_path: str, dry_run: bool = False) -> None:
         conn.execute("ALTER TABLE folders ADD COLUMN flickr_name TEXT")
 
     conn.execute(
-        "INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)",
+        "INSERT OR IGNORE INTO schema_migrations (name, applied_at) VALUES (?, ?)",
         (MIGRATION_NAME, now_iso()),
     )
     conn.commit()
