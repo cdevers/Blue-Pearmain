@@ -2471,6 +2471,24 @@ class TestAlbumPusher(unittest.TestCase):
         # One failed, one succeeded
         self.assertEqual(result, 1)
 
+    def test_already_in_set_error_treated_as_success(self):
+        from flickr.album_pusher import push_photo_to_albums
+        from flickr.flickr_client import FlickrError
+        from unittest.mock import MagicMock
+
+        self.db.set_album_flickr_set_id(self.album_id, "EXISTING_SET")
+        flickr = MagicMock()
+        flickr.add_photo_to_photoset.side_effect = FlickrError(3, "Photo already in set")
+
+        result = push_photo_to_albums(self.db, flickr, self.photo_id)
+
+        self.assertEqual(result, 1)
+        row = self.db.conn.execute(
+            "SELECT flickr_pushed FROM photo_albums WHERE photo_id = ? AND album_id = ?",
+            (self.photo_id, self.album_id),
+        ).fetchone()
+        self.assertEqual(row["flickr_pushed"], 1)
+
     def test_returns_zero_when_no_pending(self):
         from flickr.album_pusher import push_photo_to_albums
         flickr = self._mock_flickr()

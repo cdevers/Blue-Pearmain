@@ -39,8 +39,9 @@ _TRANSIENT_FLICKR_CODES = {
 }
 
 # Specific Flickr error codes with special handling
-FLICKR_ERR_NOT_FOUND = 1  # Photo not found (e.g. manually deleted on Flickr)
-FLICKR_ERR_MAX_TAGS = 2   # Maximum number of tags reached (75 tag limit)
+FLICKR_ERR_NOT_FOUND    = 1  # Photo not found (e.g. manually deleted on Flickr)
+FLICKR_ERR_MAX_TAGS     = 2  # Maximum number of tags reached (75 tag limit)
+FLICKR_ERR_ALREADY_IN_SET = 3  # Photo already in photoset — idempotent success
 
 
 class FlickrError(Exception):

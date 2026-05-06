@@ -37,7 +37,7 @@ def push_photo_to_albums(db, flickr, photo_id: int) -> int:
     if not pending:
         return 0
 
-    from flickr.flickr_client import FlickrError
+    from flickr.flickr_client import FlickrError, FLICKR_ERR_ALREADY_IN_SET
 
     updated = 0
     for row in pending:
@@ -66,9 +66,18 @@ def push_photo_to_albums(db, flickr, photo_id: int) -> int:
             )
 
         except FlickrError as e:
-            log.error(
-                "album push failed photo_id=%s album_id=%s (%r): %s",
-                photo_id, album_id, album_name, e,
-            )
+            if e.code == FLICKR_ERR_ALREADY_IN_SET:
+                # Photo is already in the set — desired state achieved; mark done
+                db.mark_album_pushed(photo_id, album_id)
+                updated += 1
+                log.debug(
+                    "flickr_id=%s already in photoset %s (%r) — marking pushed",
+                    flickr_id, flickr_set_id, album_name,
+                )
+            else:
+                log.error(
+                    "album push failed photo_id=%s album_id=%s (%r): %s",
+                    photo_id, album_id, album_name, e,
+                )
 
     return updated
