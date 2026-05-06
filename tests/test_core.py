@@ -5232,7 +5232,7 @@ class TestCmdAll(unittest.TestCase):
         """Replace all cmd_* steps with no-ops; apply per-name overrides."""
         names = ("cmd_scan", "cmd_poll", "cmd_thumbs", "cmd_pipeline",
                  "cmd_reconcile", "cmd_sync_albums", "cmd_sync_album_collections",
-                 "cmd_checkpoint")
+                 "cmd_sync_names_from_flickr", "cmd_checkpoint")
         originals = {n: getattr(bp, n) for n in names}
         for n in names:
             setattr(bp, n, (overrides or {}).get(n, lambda a: None))
@@ -5242,18 +5242,19 @@ class TestCmdAll(unittest.TestCase):
         for n, orig in originals.items():
             setattr(bp, n, orig)
 
-    def test_all_eight_steps_called_in_order(self):
+    def test_all_nine_steps_called_in_order(self):
         bp = self._import_bp()
         called = []
         labels = {
-            "cmd_scan":                    "scan",
-            "cmd_poll":                    "poll",
-            "cmd_thumbs":                  "thumbs",
-            "cmd_pipeline":                "pipeline",
-            "cmd_reconcile":               "reconcile",
-            "cmd_sync_albums":             "sync_albums",
-            "cmd_sync_album_collections":  "sync_album_collections",
-            "cmd_checkpoint":              "checkpoint",
+            "cmd_scan":                      "scan",
+            "cmd_poll":                      "poll",
+            "cmd_thumbs":                    "thumbs",
+            "cmd_sync_names_from_flickr":    "sync_names_from_flickr",
+            "cmd_pipeline":                  "pipeline",
+            "cmd_reconcile":                 "reconcile",
+            "cmd_sync_albums":               "sync_albums",
+            "cmd_sync_album_collections":    "sync_album_collections",
+            "cmd_checkpoint":                "checkpoint",
         }
         originals = self._patch_steps(
             bp,
@@ -5266,8 +5267,8 @@ class TestCmdAll(unittest.TestCase):
             self._restore(bp, originals)
         self.assertEqual(
             called,
-            ["scan", "poll", "thumbs", "pipeline", "reconcile", "sync_albums",
-             "sync_album_collections", "checkpoint"],
+            ["scan", "poll", "thumbs", "sync_names_from_flickr", "pipeline",
+             "reconcile", "sync_albums", "sync_album_collections", "checkpoint"],
         )
 
     def test_failed_step_does_not_abort_sequence(self):
@@ -5280,20 +5281,21 @@ class TestCmdAll(unittest.TestCase):
 
         originals = self._patch_steps(bp, {
             "cmd_scan": fail_scan,
-            "cmd_poll":                   lambda a: called.append("poll"),
-            "cmd_thumbs":                 lambda a: called.append("thumbs"),
-            "cmd_pipeline":               lambda a: called.append("pipeline"),
-            "cmd_reconcile":              lambda a: called.append("reconcile"),
-            "cmd_sync_albums":            lambda a: called.append("sync_albums"),
-            "cmd_sync_album_collections": lambda a: called.append("sync_album_collections"),
-            "cmd_checkpoint":             lambda a: called.append("checkpoint"),
+            "cmd_poll":                    lambda a: called.append("poll"),
+            "cmd_thumbs":                  lambda a: called.append("thumbs"),
+            "cmd_sync_names_from_flickr":  lambda a: called.append("sync_names_from_flickr"),
+            "cmd_pipeline":                lambda a: called.append("pipeline"),
+            "cmd_reconcile":               lambda a: called.append("reconcile"),
+            "cmd_sync_albums":             lambda a: called.append("sync_albums"),
+            "cmd_sync_album_collections":  lambda a: called.append("sync_album_collections"),
+            "cmd_checkpoint":              lambda a: called.append("checkpoint"),
         })
         try:
             bp.cmd_all(self._args())
         finally:
             self._restore(bp, originals)
-        # scan ran and failed; all seven subsequent steps still ran
-        self.assertEqual(len(called), 8)
+        # scan ran and failed; all eight subsequent steps still ran
+        self.assertEqual(len(called), 9)
         self.assertEqual(called[0], "scan")
         self.assertIn("checkpoint", called)
 

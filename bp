@@ -12,7 +12,8 @@ Usage:
     bp link-orphans [--dry-run]     Merge split Photos/Flickr records
     bp checkpoint [--mode MODE]     Checkpoint the WAL file (default: truncate)
     bp sync-album-collections [--dry-run] [--remove [--force]]  Sync folder hierarchy → Flickr Collections
-    bp all [--dry-run]              Full maintenance run (scan, poll, thumbs, pipeline, reconcile, sync-albums, sync-album-collections, checkpoint)
+    bp sync-names-from-flickr [--dry-run]  Sync Flickr renames → Apple Photos
+    bp all [--dry-run]              Full maintenance run (scan, poll, thumbs, sync-names-from-flickr, pipeline, reconcile, sync-albums, sync-album-collections, checkpoint)
     bp install-daemons [--dry-run]  Install launchd agents to ~/Library/LaunchAgents
     bp uninstall-daemons [--dry-run] Remove installed launchd agents
     bp ui                           Start the review UI (http://localhost:5173)
@@ -263,6 +264,15 @@ def cmd_sync_album_collections(args):
         ("--dry-run", args.dry_run),
         ("--remove",  getattr(args, "remove", False)),
         ("--force",   getattr(args, "force", False)),
+        ("--verbose", args.verbose),
+    ])
+
+
+def cmd_sync_names_from_flickr(args):
+    from flickr.sync_names_from_flickr import main
+    _run(main, args, [
+        ("--config",  args.config),
+        ("--dry-run", args.dry_run),
         ("--verbose", args.verbose),
     ])
 
@@ -573,14 +583,15 @@ def cmd_doctor(args):
 def cmd_all(args):
     """
     Run the full periodic maintenance sequence:
-      1. scan --all       full Apple Photos index refresh
-      2. poll             catch recent Flickr uploads
-      3. thumbs           populate missing thumbnail paths
-      4. pipeline         metadata sync + auto-apply non-conflict proposals
-      5. reconcile --fix  repair DB/Flickr mismatches
-      6. sync-albums               push album memberships to Flickr
-      7. sync-album-collections    sync folder hierarchy → Flickr Collections
-      8. checkpoint                trim the WAL file
+      1. scan --all              full Apple Photos index refresh
+      2. poll                    catch recent Flickr uploads
+      3. thumbs                  populate missing thumbnail paths
+      4. sync-names-from-flickr  propagate Flickr renames → Apple Photos
+      5. pipeline                metadata sync + auto-apply non-conflict proposals
+      6. reconcile --fix         repair DB/Flickr mismatches
+      7. sync-albums             push album memberships to Flickr
+      8. sync-album-collections  sync folder hierarchy → Flickr Collections
+      9. checkpoint              trim the WAL file
     Each step runs independently; a failure is logged and the sequence continues.
     Not included: 'scan --all' can be skipped with --skip-scan; 'bp poll --backfill'
     and 'bp scan' incremental are intentionally excluded (manual operations).
@@ -598,9 +609,10 @@ def cmd_all(args):
         log.info("all: dry-run mode — no external writes will be made")
 
     steps = [
-        ("scan --all",      cmd_scan,        _step_args(args, all=True,       dry_run=dry_run, days=None)),
-        ("poll",            cmd_poll,        _step_args(args, backfill=False, dry_run=dry_run, days=None)),
-        ("pipeline",        cmd_pipeline,    _step_args(args, limit=None,     dry_run=dry_run)),
+        ("scan --all",             cmd_scan,                    _step_args(args, all=True,       dry_run=dry_run, days=None)),
+        ("poll",                   cmd_poll,                    _step_args(args, backfill=False, dry_run=dry_run, days=None)),
+        ("sync-names-from-flickr", cmd_sync_names_from_flickr, _step_args(args, dry_run=dry_run)),
+        ("pipeline",               cmd_pipeline,                _step_args(args, limit=None,     dry_run=dry_run)),
         ("reconcile",       cmd_reconcile,   _step_args(args, fix=not dry_run, apply_proposals=False, limit=None)),
         ("sync-albums",            cmd_sync_albums,            _step_args(args, dry_run=dry_run, album=None,    limit=None)),
         ("sync-album-collections", cmd_sync_album_collections, _step_args(args, dry_run=dry_run, remove=False,   force=False)),
@@ -698,6 +710,14 @@ def main():
                        help="Skip confirmation prompts when used with --remove")
     p_col.add_argument("--verbose", action="store_true")
 
+    # sync-names-from-flickr
+    p_names = sub.add_parser(
+        "sync-names-from-flickr",
+        help="Sync Flickr photoset/Collection renames → Apple Photos albums/folders",
+    )
+    p_names.add_argument("--dry-run", action="store_true")
+    p_names.add_argument("--verbose", action="store_true")
+
     # sync-metadata
     p_meta = sub.add_parser("sync-metadata", help="Pull Flickr metadata → Apple Photos")
     p_meta.add_argument("--dry-run",        action="store_true",
@@ -790,6 +810,7 @@ def main():
         "ui":            cmd_ui,
         "sync-albums":             cmd_sync_albums,
         "sync-album-collections":  cmd_sync_album_collections,
+        "sync-names-from-flickr":  cmd_sync_names_from_flickr,
         "sync-metadata":           cmd_sync_metadata,
         "link-orphans":  cmd_link_orphans,
         "checkpoint":       cmd_checkpoint,
