@@ -6182,6 +6182,135 @@ class TestSyncCollections(unittest.TestCase):
         self.assertEqual(row["flickr_name"], "Travel")
 
 
+class TestSyncNamesFromFlickr(unittest.TestCase):
+    """sync_names_from_flickr: propagate Flickr-side renames back to Photos."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+        self.db = Database(Path(self._tmp.name) / "test.db")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _seed_album(self, uuid, name, flickr_set_id=None, flickr_name=None):
+        aid = self.db.upsert_album(uuid, name)
+        if flickr_set_id:
+            self.db.set_album_flickr_set_id(aid, flickr_set_id)
+        if flickr_name is not None:
+            self.db.set_album_flickr_name(aid, flickr_name)
+        return aid
+
+    def _seed_folder(self, uuid, name, collection_id=None, flickr_name=None):
+        fid = self.db.upsert_folder(uuid, name)
+        if collection_id:
+            self.db.set_folder_flickr_collection_id(fid, collection_id)
+        if flickr_name is not None:
+            self.db.set_folder_flickr_name(fid, flickr_name)
+        return fid
+
+    def _make_flickr(self, photosets=None, collections=None):
+        from unittest.mock import MagicMock
+        m = MagicMock()
+        m.get_photosets_titled.return_value = photosets or {}
+        m.get_collections_flat.return_value = collections or {}
+        return m
+
+    def test_renames_photos_album_when_flickr_title_changed(self):
+        from unittest.mock import patch
+        from flickr.sync_names_from_flickr import sync_names_from_flickr
+        aid = self._seed_album("uuid-1", "Old Name", flickr_set_id="ps-1", flickr_name="Old Name")
+        flickr = self._make_flickr(photosets={"ps-1": "New Flickr Name"})
+
+        with patch("flickr.sync_names_from_flickr._rename_photos_album", return_value=True) as mock_rename:
+            result = sync_names_from_flickr(self.db, flickr)
+
+        mock_rename.assert_called_once_with("uuid-1", "New Flickr Name")
+        row = self.db.conn.execute("SELECT name, flickr_name FROM albums WHERE id = ?", (aid,)).fetchone()
+        self.assertEqual(row["name"], "New Flickr Name")
+        self.assertEqual(row["flickr_name"], "New Flickr Name")
+        self.assertEqual(result["albums_renamed"], 1)
+
+    def test_skips_when_no_baseline(self):
+        from unittest.mock import patch
+        from flickr.sync_names_from_flickr import sync_names_from_flickr
+        self._seed_album("uuid-1", "Old Name", flickr_set_id="ps-1")  # flickr_name=None
+        flickr = self._make_flickr(photosets={"ps-1": "Whatever"})
+
+        with patch("flickr.sync_names_from_flickr._rename_photos_album") as mock_rename:
+            result = sync_names_from_flickr(self.db, flickr)
+
+        mock_rename.assert_not_called()
+        self.assertEqual(result["albums_renamed"], 0)
+
+    def test_skips_when_in_sync(self):
+        from unittest.mock import patch
+        from flickr.sync_names_from_flickr import sync_names_from_flickr
+        self._seed_album("uuid-1", "Paris", flickr_set_id="ps-1", flickr_name="Paris")
+        flickr = self._make_flickr(photosets={"ps-1": "Paris"})
+
+        with patch("flickr.sync_names_from_flickr._rename_photos_album") as mock_rename:
+            sync_names_from_flickr(self.db, flickr)
+
+        mock_rename.assert_not_called()
+
+    def test_skips_conflict_photos_wins(self):
+        from unittest.mock import patch
+        from flickr.sync_names_from_flickr import sync_names_from_flickr
+        # Both renamed: DB name="Photos New", flickr_name="Old Name", Flickr title="Flickr New"
+        self._seed_album("uuid-1", "Photos New", flickr_set_id="ps-1", flickr_name="Old Name")
+        flickr = self._make_flickr(photosets={"ps-1": "Flickr New"})
+
+        with patch("flickr.sync_names_from_flickr._rename_photos_album") as mock_rename:
+            result = sync_names_from_flickr(self.db, flickr)
+
+        mock_rename.assert_not_called()
+        self.assertEqual(result["albums_renamed"], 0)
+
+    def test_dry_run_makes_no_changes(self):
+        from unittest.mock import patch
+        from flickr.sync_names_from_flickr import sync_names_from_flickr
+        aid = self._seed_album("uuid-1", "Old Name", flickr_set_id="ps-1", flickr_name="Old Name")
+        flickr = self._make_flickr(photosets={"ps-1": "New Flickr Name"})
+
+        with patch("flickr.sync_names_from_flickr._rename_photos_album") as mock_rename:
+            result = sync_names_from_flickr(self.db, flickr, dry_run=True)
+
+        mock_rename.assert_not_called()
+        row = self.db.conn.execute("SELECT name FROM albums WHERE id = ?", (aid,)).fetchone()
+        self.assertEqual(row["name"], "Old Name")  # unchanged
+        self.assertEqual(result["albums_renamed"], 1)  # counted but not applied
+
+    def test_skips_when_rename_fails(self):
+        from unittest.mock import patch
+        from flickr.sync_names_from_flickr import sync_names_from_flickr
+        aid = self._seed_album("uuid-1", "Old Name", flickr_set_id="ps-1", flickr_name="Old Name")
+        flickr = self._make_flickr(photosets={"ps-1": "New Flickr Name"})
+
+        with patch("flickr.sync_names_from_flickr._rename_photos_album", return_value=False):
+            result = sync_names_from_flickr(self.db, flickr)
+
+        row = self.db.conn.execute("SELECT name FROM albums WHERE id = ?", (aid,)).fetchone()
+        self.assertEqual(row["name"], "Old Name")
+        self.assertEqual(result["albums_renamed"], 0)
+
+    def test_renames_photos_folder_when_flickr_collection_changed(self):
+        from unittest.mock import patch
+        from flickr.sync_names_from_flickr import sync_names_from_flickr
+        fid = self._seed_folder("uuid-f1", "Old Folder", collection_id="col-1", flickr_name="Old Folder")
+        flickr = self._make_flickr(collections={"col-1": "New Folder Name"})
+
+        with patch("flickr.sync_names_from_flickr._rename_photos_folder", return_value=True) as mock_rename:
+            result = sync_names_from_flickr(self.db, flickr)
+
+        mock_rename.assert_called_once_with("uuid-f1", "New Folder Name")
+        row = self.db.conn.execute("SELECT name, flickr_name FROM folders WHERE id = ?", (fid,)).fetchone()
+        self.assertEqual(row["name"], "New Folder Name")
+        self.assertEqual(row["flickr_name"], "New Folder Name")
+        self.assertEqual(result["folders_renamed"], 1)
+
+
 class TestSyncAlbumTitles(unittest.TestCase):
     """sync_album_titles: pushes current album names to Flickr photoset titles."""
 
