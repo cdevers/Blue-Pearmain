@@ -345,12 +345,8 @@ class FlickrClient:
 
     def get_photosets_titled(self) -> dict[str, str]:
         """Return {photoset_id: title} for all the user's photosets."""
-        data = self._call(
-            "flickr.photosets.getList",
-            {"user_id": self.user_nsid or "me"},
-        )
         result = {}
-        for ps in data.get("photosets", {}).get("photoset", []):
+        for ps in self.get_photosets():
             title = ps.get("title", {})
             if isinstance(title, dict):
                 title = title.get("_content", "")
