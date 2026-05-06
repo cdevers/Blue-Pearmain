@@ -75,6 +75,7 @@ See [`docs/pipeline.md`](docs/pipeline.md) for the full pipeline reference: stag
 | `poller/thumbnailer.py` | Populate thumbnail paths for the review UI |
 | `poller/link_orphans.py` | Batch-link Photos-only / Flickr-only record pairs by capture timestamp |
 | `poller/reconcile.py` | Compare DB push state against actual Flickr state |
+| `flickr/sync_names_from_flickr.py` | `bp sync-names-from-flickr`; pull Flickr photoset/collection title changes back into Apple Photos |
 | `flickr/sync_metadata.py` | `bp sync-metadata` entry point; drift filter + sync engine dispatch |
 | `flickr/metadata_puller.py` | Cache-based sync engine: diff, classify, generate proposals |
 | `flickr/proposal_applier.py` | Apply approved proposals to Photos or Flickr with staleness re-checks |
@@ -146,13 +147,15 @@ bp sync-albums --album "Vacation"  # Sync a single named album only
 bp sync-album-collections          # Sync folder hierarchy → Flickr Collections; also pushes title changes to existing collections
 bp sync-album-collections --dry-run # Preview without API calls
 bp sync-album-collections --remove  # Remove collections for deleted folders
+bp sync-names-from-flickr          # Pull Flickr photoset/collection title changes back into Apple Photos (Photos wins on conflict)
+bp sync-names-from-flickr --dry-run # Preview renames without writing
 bp sync-metadata                   # Diff cached metadata, generate proposals
 bp sync-metadata --dry-run         # Detect differences without writing anything
 bp sync-metadata --conflicts-only  # Record conflicts only; skip Photos writes
 bp sync-metadata --force           # Process all photos, ignoring last-harmonized timestamp
 bp checkpoint                      # Checkpoint and truncate the WAL file
 bp checkpoint --mode passive       # Checkpoint without truncating (safe with active readers)
-bp all                             # Full maintenance run (scan --all, poll, thumbs, pipeline, reconcile --fix, sync-albums, checkpoint)
+bp all                             # Full maintenance run: scan, poll, thumbs, sync-names-from-flickr, pipeline, reconcile --fix, sync-albums, sync-album-collections, checkpoint
 bp install-daemons                 # Install launchd agents to ~/Library/LaunchAgents (substitutes paths automatically)
 bp install-daemons --dry-run       # Preview what would be installed without writing
 bp uninstall-daemons               # Remove installed launchd agents
@@ -530,6 +533,8 @@ The structured summary output distinguishes checked, mismatched, fixed, and fail
 python db/migrate_001_privacy_state_check.py --config config/config.yml
 python db/migrate_002_updated_at_and_indexes.py --config config/config.yml
 python db/migrate_003_dimensions_and_dedup.py --config config/config.yml
+# ... (migrations 004–011 likewise)
+python db/migrations/migrate_012_flickr_name.py --config config/config.yml
 ```
 
 All scripts are idempotent and safe to re-run.
@@ -554,7 +559,7 @@ All scripts are idempotent and safe to re-run.
 python -m pytest tests/ -q
 ```
 
-476 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, metadata-sync batch behaviour (PhotosDB caching, progress logging, flickr_deleted detection), Flickr metadata cache writes (flickr_title, flickr_tags JSON/hash, flickr_last_updated, meta_synced_flickr_at), DB-cache-first reads in sync-metadata (cache hit/miss logic, API call avoidance), scanner Photos metadata cache writes (photos_title/description/tags/hash, meta_synced_photos_at, skip-condition update), sync engine (classify_tags, classify_text_field, run_sync_engine, upsert_proposal, hash_match supersede), proposal applier (apply_proposal, apply_batch, _count_pending, apply_collision_reverse, set_photo_text, stale_uuid termination, staleness/drift re-checks, title/description apply), collision reverse (works even when the Photos→Flickr sibling has been superseded by a sync run), drift filter with --force bypass, WAL checkpoint (wal_autocheckpoint pragma, TRUNCATE and PASSIVE modes), `bp all` step sequencing and error isolation, the reviewer "Open in Photos" API endpoint, Flickr rotation API, daemon install/uninstall, and sync-album-collections (folder tree reading, Collection creation, editSets API calls, dry-run mode, --remove with confirmation).
+494 tests covering the privacy classifier, tagger, database layer, scanner matching, Flickr client retry/jitter/4xx/429/max-tags handling, batch person actions, schema migrations, reconcile exit codes and precedence, the `bp` CLI entry point, duplicate detection logic, background-thread file-descriptor lifecycle, Photos/Flickr record merging (including tag_events migration), orphan-linking, metadata-sync batch behaviour (PhotosDB caching, progress logging, flickr_deleted detection), Flickr metadata cache writes (flickr_title, flickr_tags JSON/hash, flickr_last_updated, meta_synced_flickr_at), DB-cache-first reads in sync-metadata (cache hit/miss logic, API call avoidance), scanner Photos metadata cache writes (photos_title/description/tags/hash, meta_synced_photos_at, skip-condition update), sync engine (classify_tags, classify_text_field, run_sync_engine, upsert_proposal, hash_match supersede), proposal applier (apply_proposal, apply_batch, _count_pending, apply_collision_reverse, set_photo_text, stale_uuid termination, staleness/drift re-checks, title/description apply), collision reverse (works even when the Photos→Flickr sibling has been superseded by a sync run), drift filter with --force bypass, WAL checkpoint (wal_autocheckpoint pragma, TRUNCATE and PASSIVE modes), `bp all` step sequencing and error isolation, the reviewer "Open in Photos" API endpoint, Flickr rotation API, daemon install/uninstall, sync-album-collections (folder tree reading, Collection creation, editSets API calls, dry-run mode, --remove with confirmation), name-sync baseline tracking (flickr_name column, set_album_flickr_name, set_folder_flickr_name), Flickr client photoset/collection title methods (get_photosets_titled, get_collections_flat, edit_photoset_meta, edit_collection_meta), and sync-names-from-flickr (rename detection, Photos-wins conflict policy, dry-run, AppleScript rename, folder/collection renames).
 
 ## License
 
