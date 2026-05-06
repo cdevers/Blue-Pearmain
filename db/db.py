@@ -690,6 +690,14 @@ class Database:
         )
         self.conn.commit()
 
+    def set_album_flickr_name(self, album_id: int, name: str) -> None:
+        """Record the name most recently pushed to the Flickr photoset title."""
+        self.conn.execute(
+            "UPDATE albums SET flickr_name = ?, updated_at = ? WHERE id = ?",
+            (name, _now_iso(), album_id),
+        )
+        self.conn.commit()
+
     # ------------------------------------------------------------------
     # Folder methods
     # ------------------------------------------------------------------
@@ -722,6 +730,14 @@ class Database:
         self.conn.execute(
             "UPDATE folders SET flickr_collection_id = ?, updated_at = ? WHERE id = ?",
             (collection_id, _now_iso(), folder_id),
+        )
+        self.conn.commit()
+
+    def set_folder_flickr_name(self, folder_id: int, name: str) -> None:
+        """Record the name most recently pushed to the Flickr Collection title."""
+        self.conn.execute(
+            "UPDATE folders SET flickr_name = ?, updated_at = ? WHERE id = ?",
+            (name, _now_iso(), folder_id),
         )
         self.conn.commit()
 

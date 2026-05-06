@@ -208,6 +208,7 @@ CREATE TABLE IF NOT EXISTS folders (
     name                 TEXT NOT NULL,
     parent_id            INTEGER REFERENCES folders(id) ON DELETE SET NULL,
     flickr_collection_id TEXT,
+    flickr_name          TEXT,                   -- last name pushed to Flickr Collection title
     created_at           TEXT,
     updated_at           TEXT
 );
@@ -224,6 +225,7 @@ CREATE TABLE IF NOT EXISTS albums (
     folder_id       INTEGER REFERENCES folders(id) ON DELETE SET NULL,
     flickr_set_id   TEXT,                   -- NULL until created on Flickr
     flickr_set_url  TEXT,
+    flickr_name     TEXT,                   -- last name pushed to Flickr photoset title
     created_at      TEXT,
     updated_at      TEXT
 );

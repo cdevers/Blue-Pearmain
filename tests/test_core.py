@@ -451,6 +451,22 @@ class TestDatabase(unittest.TestCase):
         self.assertIsNone(prev_id)
         self.assertIsNone(next_id)
 
+    def test_set_album_flickr_name(self):
+        album_id = self.db.upsert_album("uuid-a1", "Paris")
+        self.db.set_album_flickr_name(album_id, "Paris")
+        row = self.db.conn.execute(
+            "SELECT flickr_name FROM albums WHERE id = ?", (album_id,)
+        ).fetchone()
+        self.assertEqual(row["flickr_name"], "Paris")
+
+    def test_set_folder_flickr_name(self):
+        folder_id = self.db.upsert_folder("uuid-f1", "Travel")
+        self.db.set_folder_flickr_name(folder_id, "Travel")
+        row = self.db.conn.execute(
+            "SELECT flickr_name FROM folders WHERE id = ?", (folder_id,)
+        ).fetchone()
+        self.assertEqual(row["flickr_name"], "Travel")
+
 
 # ---------------------------------------------------------------------------
 # upsert_photo review protection
@@ -5899,6 +5915,43 @@ class TestMigration011(unittest.TestCase):
             db.close()
             self._run_migration(db_path)
             self._run_migration(db_path)  # second run must not raise
+
+
+class TestMigrate012FlickrName(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db_path = str(Path(self._tmp.name) / "test.db")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_migration_adds_flickr_name_to_albums(self):
+        from db.db import Database
+        from db.migrations.migrate_012_flickr_name import run
+        db = Database(Path(self.db_path))
+        run(self.db_path)
+        row = db.conn.execute("PRAGMA table_info(albums)").fetchall()
+        cols = {r["name"] for r in row}
+        self.assertIn("flickr_name", cols)
+        db.close()
+
+    def test_migration_adds_flickr_name_to_folders(self):
+        from db.db import Database
+        from db.migrations.migrate_012_flickr_name import run
+        db = Database(Path(self.db_path))
+        run(self.db_path)
+        row = db.conn.execute("PRAGMA table_info(folders)").fetchall()
+        cols = {r["name"] for r in row}
+        self.assertIn("flickr_name", cols)
+        db.close()
+
+    def test_migration_is_idempotent(self):
+        from db.db import Database
+        from db.migrations.migrate_012_flickr_name import run
+        db = Database(Path(self.db_path))
+        run(self.db_path)
+        run(self.db_path)  # second run must not raise
+        db.close()
 
 
 class TestSyncCollections(unittest.TestCase):
