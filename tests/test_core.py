@@ -6310,6 +6310,19 @@ class TestSyncNamesFromFlickr(unittest.TestCase):
         self.assertEqual(row["flickr_name"], "New Folder Name")
         self.assertEqual(result["folders_renamed"], 1)
 
+    def test_collections_error_skips_folders_section(self):
+        from unittest.mock import patch, MagicMock
+        from flickr.sync_names_from_flickr import sync_names_from_flickr
+        self._seed_folder("uuid-f1", "Old Folder", collection_id="col-1", flickr_name="Old Folder")
+        flickr = self._make_flickr()
+        flickr.get_collections_flat.side_effect = Exception("something went wrong")
+
+        with patch("flickr.sync_names_from_flickr._rename_photos_folder") as mock_rename:
+            result = sync_names_from_flickr(self.db, flickr)
+
+        mock_rename.assert_not_called()
+        self.assertEqual(result["folders_renamed"], 0)
+
 
 class TestSyncAlbumTitles(unittest.TestCase):
     """sync_album_titles: pushes current album names to Flickr photoset titles."""
