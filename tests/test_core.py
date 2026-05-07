@@ -5862,6 +5862,24 @@ class TestStaleUuid(unittest.TestCase):
         self.assertEqual(totals["failed"], 1)
         self.assertEqual(totals["errors"], [])
 
+    def test_stale_uuid_batch_emits_one_summary_not_per_proposal_warnings(self):
+        import logging
+        from unittest.mock import patch
+        from flickr.proposal_applier import apply_batch
+        with patch("flickr.proposal_applier._photos_is_running", return_value=True), \
+             self._mock_stale_uuid(), \
+             self.assertLogs("blue-pearmain.proposal_applier", level="DEBUG") as cm:
+            apply_batch(self.db, "/fake/lib")
+        # No WARNING-level per-proposal stale UUID message
+        warnings = [r for r in cm.records if r.levelno >= logging.WARNING]
+        self.assertEqual(warnings, [], "stale UUID should not emit a WARNING per proposal")
+        # One INFO summary mentioning stale UUID count
+        info_msgs = [r.getMessage() for r in cm.records if r.levelno == logging.INFO]
+        self.assertTrue(
+            any("stale UUID" in m for m in info_msgs),
+            "apply_batch should emit one INFO summary for stale UUIDs",
+        )
+
     def test_non_uuid_error_leaves_proposal_pending(self):
         from unittest.mock import patch, MagicMock
         from flickr.proposal_applier import apply_proposal

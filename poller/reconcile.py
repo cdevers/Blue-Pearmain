@@ -219,25 +219,25 @@ def main():
                 flickr_username = config.get("flickr", {}).get("username") or \
                                   config.get("flickr", {}).get("user_nsid", "")
                 url = f"https://www.flickr.com/photos/{flickr_username}/{fid}"
-                print(f"  [{result['status']}]  {fid}  {url}")
 
+                parts = []
                 if result["perm_expected"] and result["perm_expected"] != result["perm_actual"]:
-                    print(f"        perm:     expected={result['perm_expected']}"
-                          f"  actual={result['perm_actual']}")
-
+                    parts.append(f"perm:{result['perm_expected']}→{result['perm_actual']}")
                 if result["tags_missing"]:
                     missing_str = ", ".join(result["tags_missing"][:8])
-                    extra = f" (+{len(result['tags_missing'])-8} more)" if len(result["tags_missing"]) > 8 else ""
-                    print(f"        tags:     missing from Flickr: {missing_str}{extra}")
-
+                    extra = f" +{len(result['tags_missing'])-8}" if len(result["tags_missing"]) > 8 else ""
+                    parts.append(f"missing:{missing_str}{extra}")
                 if result["fixes"]:
                     fix_ok_count += len(result["fixes"])
-                    print(f"        fixed:    {', '.join(result['fixes'])}")
-
+                    parts.append(f"fixed:{','.join(result['fixes'])}")
                 if result["errors"]:
                     fix_fail_count += len(result["errors"])
-                    for e in result["errors"]:
-                        print(f"        error:    {e}")
+                    parts.append(f"errors:{len(result['errors'])}")
+
+                detail = ("  " + "  ".join(parts)) if parts else ""
+                print(f"  [{result['status']}]  {fid}{detail}  {url}")
+                for e in result["errors"]:
+                    print(f"        error:    {e}")
 
     except Exception as e:
         log.error(f"Reconcile interrupted: {e}")

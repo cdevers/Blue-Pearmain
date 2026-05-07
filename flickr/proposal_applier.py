@@ -162,6 +162,7 @@ def apply_batch(
         ).fetchall()
 
     totals: dict = {"applied": 0, "failed": 0, "superseded": 0, "errors": []}
+    stale_count = 0
     for r in rows:
         try:
             result = apply_proposal(db, r["id"], library_path, flickr_client)
@@ -178,10 +179,12 @@ def apply_batch(
             reason = result.get("reason", "unknown")
             totals["failed"] += 1
             if reason == "stale_uuid":
-                log.info("apply_batch: proposal %s permanently failed (stale UUID)", r["id"])
+                stale_count += 1
             else:
                 totals["errors"].append({"proposal_id": r["id"], "reason": reason})
                 log.warning("apply_batch: proposal %s failed: %s", r["id"], reason)
+    if stale_count:
+        log.info("apply_batch: %s proposals permanently failed (stale UUID — photo deleted from Photos)", stale_count)
     return totals
 
 
@@ -538,7 +541,7 @@ def _handle_stale_uuid(db: "Database", proposal_id: int, photo_id: int) -> None:
         (now, proposal_id),
     )
     db.conn.commit()
-    log.warning("stale UUID: photo_id=%s proposal %s marked failed", photo_id, proposal_id)
+    log.debug("stale UUID: photo_id=%s proposal %s marked failed", photo_id, proposal_id)
 
 
 def _supersede(db: "Database", proposal_id: int) -> None:
