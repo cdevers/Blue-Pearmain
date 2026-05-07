@@ -27,7 +27,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 
 from db.db import Database
-from scanner import normalise_dt, normalise_dt_plus1, normalise_dt_plus2
+from datetime import datetime, timedelta
+
+from scanner import normalise_dt, normalise_dt_localise
 
 log = logging.getLogger("blue-pearmain.link-orphans")
 
@@ -94,18 +96,39 @@ def find_orphan_pairs(db: Database, limit: int) -> list[tuple[int, int]]:
         if i > 0 and i % 10_000 == 0:
             log.info("  Matching: %d / %d scanned, %d pairs found …", i, total, len(pairs))
 
-        dt = normalise_dt(row["date_taken"])
-        if not dt:
+        # Build candidate keys from BOTH the stripped form (for Photos records
+        # already stored in local time with a tz offset) AND the localised form
+        # (for Photos records stored in UTC by a daemon running in UTC).
+        # Deduplication means no extra false positives when both forms agree.
+        # Each base is also tried at +1s and +2s (Flickr sub-second rounding).
+        raw_bases: set[str] = set()
+        for base_fn in (normalise_dt, normalise_dt_localise):
+            b = base_fn(row["date_taken"])
+            if b:
+                raw_bases.add(b)
+
+        if not raw_bases:
             continue
 
-        # Check dt, dt+1, dt+2: Flickr rounds sub-second EXIF times while Apple
-        # Photos truncates.  Most cases are off by 1s; some HEIC uploads exhibit
-        # a 2s offset through Flickr's processing pipeline.
-        candidates = (
-            flickr_by_dt.get(dt, [])
-            + flickr_by_dt.get(normalise_dt_plus1(row["date_taken"]) or "", [])
-            + flickr_by_dt.get(normalise_dt_plus2(row["date_taken"]) or "", [])
-        )
+        candidate_keys: list[str] = []
+        seen_keys: set[str] = set()
+        for base in sorted(raw_bases):   # deterministic order
+            for delta in (0, 1, 2):
+                try:
+                    key = (datetime.fromisoformat(base) + timedelta(seconds=delta)).strftime("%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    continue
+                if key not in seen_keys:
+                    candidate_keys.append(key)
+                    seen_keys.add(key)
+
+        candidates = []
+        seen_fids: set[int] = set()
+        for key in candidate_keys:
+            for fid in flickr_by_dt.get(key, []):
+                if fid not in seen_fids:
+                    candidates.append(fid)
+                    seen_fids.add(fid)
         for flickr_id in candidates:
             if flickr_id not in claimed:
                 pairs.append((flickr_id, row["id"]))

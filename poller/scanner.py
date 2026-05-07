@@ -294,6 +294,29 @@ def normalise_dt_plus2(dt_str: str | None) -> str | None:
         return None
 
 
+def normalise_dt_localise(dt_str: str | None, tz=None) -> str | None:
+    """
+    Like normalise_dt, but converts timezone-aware strings to the target timezone
+    before stripping the offset.
+
+    Flickr stores date_taken as EXIF local time (no timezone). Photos records
+    scanned while the daemon ran in UTC have +00:00 offsets; their wall-clock
+    hours differ from Flickr's by the UTC offset. Converting to the machine's
+    local timezone (tz=None) before comparison makes them match.
+
+    Pass an explicit timezone for deterministic tests.
+    """
+    if not dt_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(dt_str)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(tz).replace(tzinfo=None)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return normalise_dt(dt_str)
+
+
 def find_flickr_match(photo_row: dict, db: Database) -> list[dict]:
     """
     Find Flickr DB records that match a Photos record.

@@ -110,6 +110,51 @@ class TestNormaliseDtPlus2(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# normalise_dt_localise
+# ---------------------------------------------------------------------------
+
+class TestNormaliseDtLocalise(unittest.TestCase):
+    """normalise_dt_localise converts tz-aware strings to a target tz before stripping."""
+
+    from datetime import timezone, timedelta
+    EDT = timezone(timedelta(hours=-4))
+
+    def test_naive_flickr_format_unchanged(self):
+        from poller.scanner import normalise_dt_localise
+        self.assertEqual(
+            normalise_dt_localise("2020-06-15 18:24:08"),
+            "2020-06-15 18:24:08",
+        )
+
+    def test_utc_offset_converts_to_edt(self):
+        # UTC 22:24 == EDT 18:24 (UTC-4); this is the core bug case
+        from poller.scanner import normalise_dt_localise
+        self.assertEqual(
+            normalise_dt_localise("2020-06-15T22:24:08.411297+00:00", tz=self.EDT),
+            "2020-06-15 18:24:08",
+        )
+
+    def test_edt_offset_keeps_local_hours(self):
+        from poller.scanner import normalise_dt_localise
+        self.assertEqual(
+            normalise_dt_localise("2020-06-15T18:24:08.411297-04:00", tz=self.EDT),
+            "2020-06-15 18:24:08",
+        )
+
+    def test_none_returns_none(self):
+        from poller.scanner import normalise_dt_localise
+        self.assertIsNone(normalise_dt_localise(None))
+
+    def test_subsecond_stripped(self):
+        from poller.scanner import normalise_dt_localise
+        # Sub-second precision is stripped after conversion
+        self.assertEqual(
+            normalise_dt_localise("2020-06-15T22:24:08.411297+00:00", tz=self.EDT),
+            "2020-06-15 18:24:08",
+        )
+
+
+# ---------------------------------------------------------------------------
 # haversine_m
 # ---------------------------------------------------------------------------
 
@@ -4056,11 +4101,12 @@ class TestLinkOrphans(unittest.TestCase):
         shutil.rmtree(self._tmp)
 
     def _seed_pair(self, tag: str, date: str = "2026-01-15 10:00:00"):
-        """Insert a Photos-only and a Flickr-only record with matching timestamp."""
+        """Insert a Photos-only and a Flickr-only record with matching timestamp.
+        Both use naive local-time strings so the test is timezone-independent."""
         photos_id = self.db.upsert_photo({
             "uuid":              f"uuid-{tag}",
             "original_filename": f"IMG_{tag}.HEIC",
-            "date_taken":        f"{date.replace(' ', 'T')}+00:00",
+            "date_taken":        date,
             "privacy_state":     "candidate_public",
             "apple_labels":      [],
             "apple_persons":     [],
@@ -4114,7 +4160,7 @@ class TestLinkOrphans(unittest.TestCase):
         photos_id = self.db.upsert_photo({
             "uuid":              "uuid-nopair",
             "original_filename": "IMG_nopair.HEIC",
-            "date_taken":        "2026-06-01T12:00:00+00:00",
+            "date_taken":        "2026-06-01 12:00:00",
             "privacy_state":     "candidate_public",
             "apple_labels":      [],
             "apple_persons":     [],
@@ -4122,6 +4168,33 @@ class TestLinkOrphans(unittest.TestCase):
         linked, failed = link_orphans(self.db, dry_run=False, limit=100)
         self.assertEqual(linked, 0)
         self.assertIsNotNone(self.db.get_photo(photos_id))
+
+    def test_links_utc_photos_to_local_flickr(self):
+        # Photos stored with UTC offset (+00:00 from daemon in UTC timezone);
+        # Flickr has the same moment as local time. Compute expected local time
+        # dynamically so the test is machine-timezone-independent.
+        from poller.link_orphans import link_orphans
+        from datetime import datetime, timezone as tz_module
+        utc_dt = datetime(2020, 6, 15, 22, 24, 8, tzinfo=tz_module.utc)
+        local_str = utc_dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        photos_id = self.db.upsert_photo({
+            "uuid":              "uuid-utcbug",
+            "original_filename": "IMG_utcbug.HEIC",
+            "date_taken":        utc_dt.isoformat(),
+            "privacy_state":     "candidate_public",
+            "apple_labels":      [],
+            "apple_persons":     [],
+        })
+        flickr_row = self.db.upsert_photo({
+            "flickr_id":  "flickr-utcbug",
+            "date_taken": local_str,
+            "privacy_state": "candidate_public",
+        })
+        linked, failed = link_orphans(self.db, dry_run=False, limit=100)
+        self.assertEqual(linked, 1)
+        self.assertEqual(failed, 0)
+        self.assertEqual(self.db.get_photo(photos_id)["flickr_id"], "flickr-utcbug")
+        self.assertIsNone(self.db.get_photo(flickr_row))
 
     def test_links_when_flickr_timestamp_rounded_up(self):
         # Reproduces the real-world off-by-one: Photos stores sub-second precision
