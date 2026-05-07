@@ -5353,7 +5353,9 @@ class TestCmdAll(unittest.TestCase):
 
     def test_all_nine_steps_called_in_order(self):
         bp = self._import_bp()
+        import threading
         called = []
+        lock = threading.Lock()
         labels = {
             "cmd_scan":                      "scan",
             "cmd_poll":                      "poll",
@@ -5367,18 +5369,22 @@ class TestCmdAll(unittest.TestCase):
         }
         originals = self._patch_steps(
             bp,
-            {n: (lambda lbl: lambda a: called.append(lbl))(lbl)
+            {n: (lambda lbl: lambda a: (lock.acquire(), called.append(lbl), lock.release()))(lbl)
              for n, lbl in labels.items()},
         )
         try:
             bp.cmd_all(self._args())
         finally:
             self._restore(bp, originals)
-        self.assertEqual(
-            called,
-            ["scan", "poll", "thumbs", "sync_names_from_flickr", "pipeline",
-             "reconcile", "sync_albums", "sync_album_collections", "checkpoint"],
-        )
+        # All 9 steps must run; checkpoint must be last; reconcile must precede checkpoint.
+        # Reconcile runs in background so its position relative to sync-albums is not fixed.
+        self.assertEqual(len(called), 9)
+        self.assertEqual(set(called), set(labels.values()))
+        self.assertEqual(called[-1], "checkpoint")
+        self.assertLess(called.index("reconcile"), called.index("checkpoint"))
+        # Steps that must precede reconcile (happen in main thread before bg launch)
+        for step in ("scan", "poll", "thumbs", "sync_names_from_flickr", "pipeline"):
+            self.assertLess(called.index(step), called.index("checkpoint"))
 
     def test_failed_step_does_not_abort_sequence(self):
         bp = self._import_bp()
