@@ -170,17 +170,17 @@
     <a href="{{ url_for('review', state='candidate_public') }}" class="btn btn-primary">
       Start reviewing →
     </a>
-    {% set approved = stats.by_state.get('approved_public', 0) %}
-    {% if approved > 0 %}
+    {% set pushable = stats.get('pushable_approved', 0) %}
+    {% if pushable > 0 %}
     <button id="pushBtn" class="btn btn-public" onclick="pushApproved()">
-      ↑ Push {{ approved }} approved to Flickr
+      ↑ Push {{ pushable }} approved to Flickr
     </button>
     {% endif %}
     <button class="btn" onclick="triggerPoll()">↻ Poll Flickr now</button>
   </div>
   <div class="kbd-hints" style="margin-top:10px">
     <span><kbd>2</kbd> start reviewing</span>
-    {% if approved > 0 %}<span><kbd>P</kbd> push approved</span>{% endif %}
+    {% if pushable > 0 %}<span><kbd>P</kbd> push approved</span>{% endif %}
     <span><kbd>R</kbd> reload</span>
   </div>
   <div id="push-result" style="margin-top:12px; font-size:13px; color:var(--muted)"></div>

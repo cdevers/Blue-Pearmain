@@ -401,6 +401,21 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(stats["total"], 3)
         self.assertEqual(stats["by_state"]["candidate_public"], 1)
 
+    def test_stats_pushable_approved(self):
+        # approved_public with flickr_id and perms not yet pushed → pushable
+        p1 = self.db.upsert_photo({"flickr_id": "f1", "privacy_state": "approved_public",
+                                    "perms_pushed_flickr": 0})
+        # already pushed → not pushable
+        p2 = self.db.upsert_photo({"flickr_id": "f2", "privacy_state": "approved_public",
+                                    "perms_pushed_flickr": 1})
+        # Photos-only (no flickr_id) → not pushable
+        p3 = self.db.upsert_photo({"uuid": "uuid-nf", "privacy_state": "approved_public"})
+        # wrong state → not pushable
+        p4 = self.db.upsert_photo({"flickr_id": "f4", "privacy_state": "candidate_public",
+                                    "perms_pushed_flickr": 0})
+        stats = self.db.stats()
+        self.assertEqual(stats["pushable_approved"], 1)
+
     def test_geofence_match(self):
         self.db.upsert_zone({
             "name": "home", "label": "Home",

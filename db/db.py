@@ -1056,6 +1056,16 @@ class Database:
             result["flickr_only"] = 0
         try:
             row = self.conn.execute(
+                """SELECT COUNT(*) AS n FROM photos
+                   WHERE privacy_state = 'approved_public'
+                     AND flickr_id IS NOT NULL
+                     AND perms_pushed_flickr = 0"""
+            ).fetchone()
+            result["pushable_approved"] = row["n"] if row else 0
+        except Exception:
+            result["pushable_approved"] = 0
+        try:
+            row = self.conn.execute(
                 """SELECT MAX(meta_synced_flickr_at) AS flickr_ts,
                           MAX(meta_synced_photos_at) AS photos_ts
                    FROM photos"""
