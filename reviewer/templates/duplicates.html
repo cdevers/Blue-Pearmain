@@ -237,13 +237,12 @@
                 onclick="resolveGroup({{ group.id }}, this)">
           ✓ Confirm resolution
         </button>
-        {% elif section.type == 'uncertain' %}
+        {% endif %}
         <button class="btn"
                 style="color:var(--muted)"
                 onclick="notDuplicate({{ group.id }}, this)">
           Not a duplicate
         </button>
-        {% endif %}
       </div>
     </div>
     {% endfor %}
@@ -315,6 +314,7 @@ document.addEventListener('keydown', e => {
     const btn = _dupGroups[_dupIdx].querySelector('.dup-actions .btn-primary');
     if (btn && !btn.disabled) btn.click();
   } else if ((e.key === 'n' || e.key === 'N') && _dupIdx >= 0) {
+    e.preventDefault();
     const btn = _dupGroups[_dupIdx].querySelector('.dup-actions .btn:not(.btn-primary)');
     if (btn && !btn.disabled) btn.click();
   }
