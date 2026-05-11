@@ -224,7 +224,8 @@ def _harmonise_one(db: "Database", photo_id: int, now: str):
     row = db.conn.execute(
         """SELECT flickr_tags, flickr_tags_hash, photos_tags, photos_tags_hash,
                   flickr_title, photos_title,
-                  flickr_description, photos_description
+                  flickr_description, photos_description,
+                  proposed_tags
            FROM photos WHERE id = ?""",
         (photo_id,),
     ).fetchone()
@@ -239,7 +240,10 @@ def _harmonise_one(db: "Database", photo_id: int, now: str):
     tags_hash_match = fhash and phash and fhash == phash
     if not tags_hash_match:
         proposals.extend(
-            _classify_tags(photo_id, row["flickr_tags"], row["photos_tags"], fhash, phash, now)
+            _classify_tags(
+                photo_id, row["flickr_tags"], row["photos_tags"], fhash, phash, now,
+                proposed_tags_json=row["proposed_tags"],
+            )
         )
 
     # Title and description: always compare (short strings, no hash fast-path)
@@ -270,10 +274,15 @@ def _classify_tags(
     flickr_hash: str | None,
     photos_hash: str | None,
     now: str,
+    proposed_tags_json: str | None = None,
 ) -> list[dict]:
     """
     Classify the tag divergence and return proposal dicts.
     Proposals are returned but NOT written to DB here.
+
+    proposed_tags_json: tags Blue Pearmain computed and pushed to Flickr.
+    These are excluded from the Flickr side before comparison so that
+    BP-managed tags don't generate spurious Flickr→Photos proposals.
     """
     ftags_raw = json.loads(flickr_tags_json) if flickr_tags_json else []
     ptags_raw = json.loads(photos_tags_json) if photos_tags_json else []
@@ -290,9 +299,16 @@ def _classify_tags(
     ftags_norm = {norm(t) for t in ftags_raw if t.strip()}
     ptags_norm = {norm(t) for t in ptags_raw if t.strip()}
 
-    if not ftags_norm and not ptags_norm:
+    # Exclude BP-managed tags from the Flickr side. These were generated from
+    # Photos metadata and pushed to Flickr by Blue Pearmain — they should not
+    # be treated as Flickr-only additions that need syncing back to Photos.
+    proposed_raw = json.loads(proposed_tags_json) if proposed_tags_json else []
+    managed_norm = {norm(t) for t in proposed_raw if t.strip()}
+    ftags_effective = ftags_norm - managed_norm
+
+    if not ftags_effective and not ptags_norm:
         return []
-    if ftags_norm == ptags_norm:
+    if ftags_effective == ptags_norm:
         return []
 
     def make(source, target, proposed_value, conflict_type):
@@ -308,19 +324,19 @@ def _classify_tags(
             "created_at":              now,
         }
 
-    if not ftags_norm:
+    if not ftags_effective:
         return [make("photos", "flickr", photos_tags_json, "non_conflict")]
 
     if not ptags_norm:
         return [make("flickr", "photos", flickr_tags_json, "non_conflict")]
 
-    if ftags_norm > ptags_norm:
+    if ftags_effective > ptags_norm:
         return [make("flickr", "photos", flickr_tags_json, "divergence")]
 
-    if ptags_norm > ftags_norm:
+    if ptags_norm > ftags_effective:
         return [make("photos", "flickr", photos_tags_json, "divergence")]
 
-    # Collision: neither is a superset
+    # Collision: neither is a superset (even after excluding managed tags)
     return [
         make("flickr", "photos", flickr_tags_json, "collision"),
         make("photos", "flickr", photos_tags_json, "collision"),

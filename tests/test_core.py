@@ -4523,6 +4523,71 @@ class TestClassifyTags(unittest.TestCase):
         self.assertEqual(p["target_hash_at_creation"], "PHASH")
 
 
+class TestClassifyTagsProposedExclusion(unittest.TestCase):
+    """BP-managed tags (proposed_tags) should not generate Flickr→Photos proposals."""
+
+    def _classify(self, ftags, ptags, proposed=None, fhash="fh", phash="ph"):
+        import json
+        from flickr.metadata_puller import _classify_tags
+        fj = json.dumps(ftags) if ftags is not None else None
+        pj = json.dumps(ptags) if ptags is not None else None
+        prj = json.dumps(proposed) if proposed is not None else None
+        return _classify_tags(1, fj, pj, fhash, phash, "2026-01-01T00:00:00+00:00",
+                              proposed_tags_json=prj)
+
+    def test_managed_only_extra_on_flickr_no_proposal(self):
+        # Flickr has unitedstates (managed); Photos doesn't → no proposal
+        result = self._classify(
+            ftags=["nature", "landscape", "unitedstates"],
+            ptags=["nature", "landscape"],
+            proposed=["unitedstates"],
+        )
+        self.assertEqual(result, [])
+
+    def test_user_added_flickr_tag_still_generates_proposal(self):
+        # Flickr has usertagA (NOT managed) → divergence proposal still created
+        result = self._classify(
+            ftags=["nature", "usertagA"],
+            ptags=["nature"],
+            proposed=["unitedstates"],
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["source"], "flickr")
+        self.assertEqual(result[0]["conflict_type"], "divergence")
+
+    def test_photos_to_flickr_direction_unaffected(self):
+        # Photos has a tag Flickr is missing (not a managed tag) → Photos→Flickr proposal
+        result = self._classify(
+            ftags=["nature"],
+            ptags=["nature", "landscape"],
+            proposed=["unitedstates"],
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["source"], "photos")
+        self.assertEqual(result[0]["conflict_type"], "divergence")
+
+    def test_mixed_managed_and_user_tags_still_detects_divergence(self):
+        # Flickr has managed tag + user tag; Photos has different extra tag → collision
+        result = self._classify(
+            ftags=["nature", "unitedstates", "usertagA"],
+            ptags=["nature", "landscape"],
+            proposed=["unitedstates"],
+        )
+        # After removing managed tag: Flickr effective = {nature, usertagA},
+        # Photos = {nature, landscape} — neither superset → collision
+        self.assertEqual(len(result), 2)
+        types = {p["conflict_type"] for p in result}
+        self.assertEqual(types, {"collision"})
+
+    def test_all_flickr_tags_managed_and_photos_empty_no_proposal(self):
+        result = self._classify(
+            ftags=["unitedstates"],
+            ptags=[],
+            proposed=["unitedstates"],
+        )
+        self.assertEqual(result, [])
+
+
 class TestClassifyTextField(unittest.TestCase):
     """_classify_text_field"""
 
