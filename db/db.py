@@ -15,7 +15,7 @@ import json
 import math
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -997,6 +997,75 @@ class Database:
             (p["photo_id"], p["field"], p["source"]),
         ).fetchone()
         return sibling["id"] if sibling else None
+
+    def prune_proposals(self, older_than_days: int, dry_run: bool = False) -> int:
+        """Delete resolved proposals older than N days. Returns count affected."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
+        if dry_run:
+            row = self.conn.execute(
+                "SELECT COUNT(*) AS n FROM metadata_proposals WHERE status != 'pending' AND resolved_at < ?",
+                (cutoff,),
+            ).fetchone()
+            return row["n"] if row else 0
+        cur = self.conn.execute(
+            "DELETE FROM metadata_proposals WHERE status != 'pending' AND resolved_at < ?",
+            (cutoff,),
+        )
+        self.conn.commit()
+        return cur.rowcount
+
+    def supersede_managed_tag_proposals(self, dry_run: bool = False) -> int:
+        """Supersede pending flickr→photos tag proposals that only differ by BP-managed tags.
+
+        BP pushes machine-generated tags (location, labels) to Flickr via proposed_tags.
+        When those tags appear on Flickr but not in Photos, the metadata sync would
+        generate spurious flickr→photos divergence proposals. This method closes them.
+        """
+        import json
+        import unicodedata
+
+        def norm(tag: str) -> str:
+            return "".join(
+                c for c in unicodedata.normalize("NFC", tag.strip().casefold())
+                if c.isalnum()
+            )
+
+        now = datetime.now(timezone.utc).isoformat()
+        rows = self.conn.execute(
+            """SELECT mp.id, mp.proposed_value, p.proposed_tags, p.photos_tags
+               FROM metadata_proposals mp
+               JOIN photos p ON p.id = mp.photo_id
+               WHERE mp.status = 'pending'
+                 AND mp.field = 'tags'
+                 AND mp.source = 'flickr'
+                 AND mp.target = 'photos'"""
+        ).fetchall()
+
+        to_supersede = []
+        for row in rows:
+            ftags = json.loads(row["proposed_value"]) if row["proposed_value"] else []
+            ptags = json.loads(row["photos_tags"]) if row["photos_tags"] else []
+            managed = json.loads(row["proposed_tags"]) if row["proposed_tags"] else []
+            ftags_norm = {norm(t) for t in ftags if t.strip()}
+            ptags_norm = {norm(t) for t in ptags if t.strip()}
+            managed_norm = {norm(t) for t in managed if t.strip()}
+            ftags_effective = ftags_norm - managed_norm
+            if not (ftags_effective > ptags_norm):
+                to_supersede.append(row["id"])
+
+        if not dry_run and to_supersede:
+            chunk_size = 900
+            for i in range(0, len(to_supersede), chunk_size):
+                chunk = to_supersede[i : i + chunk_size]
+                placeholders = ",".join("?" * len(chunk))
+                self.conn.execute(
+                    f"UPDATE metadata_proposals SET status='superseded', resolved_at=?"
+                    f" WHERE id IN ({placeholders})",
+                    [now] + chunk,
+                )
+            self.conn.commit()
+
+        return len(to_supersede)
 
     def get_proposal_counts(self) -> dict:
         """Return pending proposal counts by conflict_type (display-facing).

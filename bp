@@ -402,6 +402,24 @@ def cmd_checkpoint(args):
         print(f"Checkpoint complete: {checkpointed}/{log} frames moved, WAL truncated.")
 
 
+def cmd_prune_proposals(args):
+    """Prune resolved metadata proposals and supersede spurious managed-tag proposals."""
+    import yaml
+    from db.db import Database
+
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+    db = Database(Path(config["database"]["path"]).expanduser())
+
+    superseded = db.supersede_managed_tag_proposals(dry_run=args.dry_run)
+    pruned = db.prune_proposals(older_than_days=args.older_than, dry_run=args.dry_run)
+
+    db.close()
+
+    prefix = "[dry-run] would " if args.dry_run else ""
+    print(f"{prefix}supersede={superseded}  prune={pruned}")
+
+
 def _inject_argv(args, pairs):
     """Rebuild sys.argv from parsed args so subcommand main()s parse correctly."""
     new_argv = [sys.argv[0]]
@@ -817,6 +835,17 @@ def main():
         help="Checkpoint mode (default: truncate)",
     )
 
+    # prune-proposals
+    p_prune = sub.add_parser(
+        "prune-proposals",
+        help="Supersede spurious managed-tag proposals and delete old resolved proposals",
+    )
+    p_prune.add_argument(
+        "--older-than", type=int, default=90, metavar="N",
+        help="Delete resolved proposals older than N days (default: 90)",
+    )
+    p_prune.add_argument("--dry-run", action="store_true", help="Report counts without modifying the DB")
+
     args = parser.parse_args()
 
     # Attach config/verbose to all subcommands
@@ -837,6 +866,7 @@ def main():
     if not hasattr(args, "conflicts_only"):  args.conflicts_only = False
     if not hasattr(args, "mode"):            args.mode = "truncate"
     if not hasattr(args, "check_flickr"):   args.check_flickr = False
+    if not hasattr(args, "older_than"):     args.older_than = 90
 
     dispatch = {
         "pipeline":      cmd_pipeline,
@@ -856,6 +886,7 @@ def main():
         "install-daemons":   cmd_install_daemons,
         "uninstall-daemons": cmd_uninstall_daemons,
         "doctor":            cmd_doctor,
+        "prune-proposals":   cmd_prune_proposals,
     }
     dispatch[args.command](args)
 

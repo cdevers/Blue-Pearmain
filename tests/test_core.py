@@ -6823,5 +6823,139 @@ class TestSyncAlbumTitles(unittest.TestCase):
         self.assertIsNone(row["flickr_name"])
 
 
+class TestPruneProposals(unittest.TestCase):
+    """Tests for Database.prune_proposals() and Database.supersede_managed_tag_proposals()."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        self.photo_id = self.db.upsert_photo({
+            "uuid": "uuid-prune-001",
+            "original_filename": "IMG_prune.JPG",
+            "privacy_state": "approved_public",
+            "flickr_id": "flickr-prune-001",
+            "proposed_tags": ["unitedstates", "newyork"],
+            "apple_persons": [],
+            "apple_labels": [],
+        })
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _insert_proposal(self, photo_id, status, field, source, target,
+                         proposed_value=None, resolved_at=None, conflict_type="non_conflict"):
+        now = "2026-01-01T00:00:00+00:00"
+        self.db.conn.execute(
+            """INSERT INTO metadata_proposals
+               (photo_id, status, field, source, target, proposed_value,
+                resolved_at, created_at, conflict_type)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (photo_id, status, field, source, target, proposed_value,
+             resolved_at or (now if status != "pending" else None), now, conflict_type),
+        )
+        self.db.conn.commit()
+        return self.db.conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+
+    # --- prune_proposals ---
+
+    def test_prune_deletes_old_resolved(self):
+        self._insert_proposal(
+            self.photo_id, "applied", "tags", "flickr", "photos",
+            resolved_at="2020-01-01T00:00:00+00:00",
+        )
+        n = self.db.prune_proposals(older_than_days=90)
+        self.assertEqual(n, 1)
+        count = self.db.conn.execute(
+            "SELECT COUNT(*) AS n FROM metadata_proposals"
+        ).fetchone()["n"]
+        self.assertEqual(count, 0)
+
+    def test_prune_keeps_recent_resolved(self):
+        from datetime import datetime, timedelta, timezone
+        recent = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+        self._insert_proposal(
+            self.photo_id, "applied", "tags", "flickr", "photos",
+            resolved_at=recent,
+        )
+        n = self.db.prune_proposals(older_than_days=90)
+        self.assertEqual(n, 0)
+
+    def test_prune_keeps_pending_regardless_of_age(self):
+        self._insert_proposal(
+            self.photo_id, "pending", "tags", "flickr", "photos",
+        )
+        n = self.db.prune_proposals(older_than_days=0)
+        self.assertEqual(n, 0)
+
+    def test_prune_dry_run_returns_count_without_deleting(self):
+        self._insert_proposal(
+            self.photo_id, "superseded", "tags", "flickr", "photos",
+            resolved_at="2020-01-01T00:00:00+00:00",
+        )
+        n = self.db.prune_proposals(older_than_days=90, dry_run=True)
+        self.assertEqual(n, 1)
+        count = self.db.conn.execute(
+            "SELECT COUNT(*) AS n FROM metadata_proposals"
+        ).fetchone()["n"]
+        self.assertEqual(count, 1)
+
+    # --- supersede_managed_tag_proposals ---
+
+    def test_supersede_closes_all_managed_proposal(self):
+        # proposed_value = only BP-managed tags; Photos has none
+        self._insert_proposal(
+            self.photo_id, "pending", "tags", "flickr", "photos",
+            proposed_value='["unitedstates", "newyork"]',
+        )
+        n = self.db.supersede_managed_tag_proposals()
+        self.assertEqual(n, 1)
+        row = self.db.conn.execute(
+            "SELECT status FROM metadata_proposals"
+        ).fetchone()
+        self.assertEqual(row["status"], "superseded")
+
+    def test_supersede_keeps_user_added_tag_proposal(self):
+        # Flickr has a user-added tag ("vacation") not in Photos and not managed
+        self._insert_proposal(
+            self.photo_id, "pending", "tags", "flickr", "photos",
+            proposed_value='["unitedstates", "vacation"]',
+        )
+        n = self.db.supersede_managed_tag_proposals()
+        self.assertEqual(n, 0)
+        row = self.db.conn.execute(
+            "SELECT status FROM metadata_proposals"
+        ).fetchone()
+        self.assertEqual(row["status"], "pending")
+
+    def test_supersede_dry_run_does_not_update(self):
+        self._insert_proposal(
+            self.photo_id, "pending", "tags", "flickr", "photos",
+            proposed_value='["unitedstates"]',
+        )
+        n = self.db.supersede_managed_tag_proposals(dry_run=True)
+        self.assertEqual(n, 1)
+        row = self.db.conn.execute(
+            "SELECT status FROM metadata_proposals"
+        ).fetchone()
+        self.assertEqual(row["status"], "pending")
+
+    def test_supersede_ignores_non_tag_proposals(self):
+        self._insert_proposal(
+            self.photo_id, "pending", "title", "flickr", "photos",
+            proposed_value="New Title",
+        )
+        n = self.db.supersede_managed_tag_proposals()
+        self.assertEqual(n, 0)
+
+    def test_supersede_ignores_photos_to_flickr_proposals(self):
+        self._insert_proposal(
+            self.photo_id, "pending", "tags", "photos", "flickr",
+            proposed_value='["unitedstates"]',
+        )
+        n = self.db.supersede_managed_tag_proposals()
+        self.assertEqual(n, 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
