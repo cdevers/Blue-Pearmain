@@ -4276,6 +4276,28 @@ class TestLinkOrphans(unittest.TestCase):
         self.assertEqual(self.db.get_photo(photos_id)["flickr_id"], "flickr-round")
         self.assertIsNone(self.db.get_photo(flickr_row))
 
+    def test_links_when_flickr_timestamp_three_seconds_ahead(self):
+        # Reproduces DB pair 5245/146585: Photos sub-second truncates to :33 while
+        # Flickr stores :36 — a 3-second gap outside the old ±2 s tolerance.
+        from poller.link_orphans import link_orphans
+        photos_id = self.db.upsert_photo({
+            "uuid":              "uuid-3s",
+            "original_filename": "IMG_3s.HEIC",
+            "date_taken":        "2021-11-11T18:03:33.572856-05:00",
+            "privacy_state":     "candidate_public",
+            "apple_labels":      [],
+            "apple_persons":     [],
+        })
+        flickr_row = self.db.upsert_photo({
+            "flickr_id":  "flickr-3s",
+            "date_taken": "2021-11-11 18:03:36",
+        })
+        linked, failed = link_orphans(self.db, dry_run=False, limit=100)
+        self.assertEqual(linked, 1)
+        self.assertEqual(failed, 0)
+        self.assertEqual(self.db.get_photo(photos_id)["flickr_id"], "flickr-3s")
+        self.assertIsNone(self.db.get_photo(flickr_row))
+
     def test_links_when_flickr_timestamp_two_seconds_ahead(self):
         # Reproduces the 2-second offset observed for HEIC photos 58000/154037
         # and 7299/154008 where Flickr's processing produces an extra second of drift.

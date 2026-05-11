@@ -113,7 +113,7 @@ def find_orphan_pairs(db: Database, limit: int) -> list[tuple[int, int]]:
         candidate_keys: list[str] = []
         seen_keys: set[str] = set()
         for base in sorted(raw_bases):   # deterministic order
-            for delta in (0, 1, 2):
+            for delta in (0, 1, 2, 3):
                 try:
                     key = (datetime.fromisoformat(base) + timedelta(seconds=delta)).strftime("%Y-%m-%d %H:%M:%S")
                 except ValueError:
@@ -133,7 +133,7 @@ def find_orphan_pairs(db: Database, limit: int) -> list[tuple[int, int]]:
                     shifted = datetime.fromisoformat(base) + timedelta(hours=hours)
                 except ValueError:
                     continue
-                for delta in (0, 1, 2):
+                for delta in (0, 1, 2, 3):
                     key = (shifted + timedelta(seconds=delta)).strftime("%Y-%m-%d %H:%M:%S")
                     if key not in seen_keys:
                         candidate_keys.append(key)
