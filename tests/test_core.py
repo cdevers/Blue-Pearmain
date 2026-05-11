@@ -846,6 +846,49 @@ class TestThumbnailer(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Poller: download_thumb URL preference
+# ---------------------------------------------------------------------------
+
+class TestDownloadThumb(unittest.TestCase):
+
+    def _run(self, row, files_on_disk=()):
+        from poller.poller import download_thumb
+        from unittest import mock
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmp:
+            thumb_root = Path(tmp)
+            fid = row.get("flickr_id", "99999")
+            shard = fid[:2]
+            (thumb_root / shard).mkdir(parents=True, exist_ok=True)
+            for name in files_on_disk:
+                (thumb_root / shard / name).write_bytes(b"x")
+
+            client = mock.MagicMock()
+            client.download_thumbnail.return_value = True
+
+            result = download_thumb(client, row, thumb_root)
+            return client, result
+
+    def test_prefers_url_m_over_url_l(self):
+        client, _ = self._run({
+            "flickr_id": "99999",
+            "thumbnail_url_m": "https://example.com/99999_m.jpg",
+            "thumbnail_url_l": "https://example.com/99999_l.jpg",
+        })
+        args = client.download_thumbnail.call_args[0]
+        self.assertIn("_m.jpg", args[0])
+
+    def test_falls_back_to_url_l_when_url_m_missing(self):
+        client, _ = self._run({
+            "flickr_id": "99998",
+            "thumbnail_url_m": "",
+            "thumbnail_url_l": "https://example.com/99998_l.jpg",
+        })
+        args = client.download_thumbnail.call_args[0]
+        self.assertIn("_l.jpg", args[0])
+
+
+# ---------------------------------------------------------------------------
 # Poller: flickr_photo_to_db
 # ---------------------------------------------------------------------------
 

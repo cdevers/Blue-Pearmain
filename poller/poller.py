@@ -274,7 +274,7 @@ def download_thumb(client: FlickrClient, row: dict, thumb_root: Path) -> str | N
     if not flickr_id:
         return None
 
-    url = row.get("thumbnail_url_l") or row.get("thumbnail_url_m")
+    url = row.get("thumbnail_url_m") or row.get("thumbnail_url_l")
     if not url:
         return None
 
@@ -506,7 +506,7 @@ def poll(
 
                 # Queue thumbnail download
                 if thumb_root:
-                    thumb_url = photo.get("url_l") or photo.get("url_m")
+                    thumb_url = photo.get("url_m") or photo.get("url_l")
                     if thumb_url:
                         fut = executor.submit(
                             download_thumb, client,
