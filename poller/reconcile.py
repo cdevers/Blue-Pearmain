@@ -26,6 +26,7 @@ import argparse
 import json
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -136,6 +137,35 @@ def check_photo(
     return result
 
 
+def format_result_line(result: dict, url: str, ts: str) -> str:
+    """Format one reconcile result as a single log line.
+
+    Column order: <ts> [<status>] <url> <corrective-action> <diagnostics>
+    Corrective actions (fixed:, errors:) come before diagnostics (perm:,
+    missing:) so the left-hand columns stay stable and scannable.
+    """
+    status = result["status"]
+    if status == "ok":
+        return f"{ts} [ok] {url}"
+    if status == "flickr_error":
+        return f"{ts} [ERR] {url}"
+
+    parts = []
+    if result.get("fixes"):
+        parts.append(f"fixed:{','.join(result['fixes'])}")
+    if result.get("errors"):
+        parts.append(f"errors:{len(result['errors'])}")
+    if result.get("perm_expected") and result["perm_expected"] != result.get("perm_actual"):
+        parts.append(f"perm:{result['perm_expected']}→{result['perm_actual']}")
+    if result.get("tags_missing"):
+        missing_str = ", ".join(result["tags_missing"][:8])
+        extra = f" +{len(result['tags_missing']) - 8}" if len(result["tags_missing"]) > 8 else ""
+        parts.append(f"missing:{missing_str}{extra}")
+
+    detail = (" " + " ".join(parts)) if parts else ""
+    return f"{ts} [{status}] {url}{detail}"
+
+
 def main():
     parser = argparse.ArgumentParser(description="Blue Pearmain reconciliation")
     parser.add_argument("--config",           default="config/config.yml")
@@ -198,46 +228,34 @@ def main():
 
     log.info(f"Checking {total} photos against Flickr...")
 
+    flickr_username = config.get("flickr", {}).get("username") or \
+                      config.get("flickr", {}).get("user_nsid", "")
+
     try:
         for row in rows:
             result = check_photo(client, dict(row), fix=args.fix, verbose=args.verbose)
+            ts  = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            fid = result["flickr_id"]
+            url = f"https://www.flickr.com/photos/{flickr_username}/{fid}"
 
             if result["status"] == "ok":
                 ok_count += 1
                 if args.verbose:
-                    print(f"  ok  {result['flickr_id']}")
+                    print(format_result_line(result, url, ts))
 
             elif result["status"] == "flickr_error":
                 error_count += 1
-                print(f"  ERR {result['flickr_id']}")
+                print(format_result_line(result, url, ts))
                 for e in result["errors"]:
-                    print(f"        error:    {e}")
+                    print(f"      error: {e}")
 
             else:
                 mismatch_count += 1
-                fid = result["flickr_id"]
-                flickr_username = config.get("flickr", {}).get("username") or \
-                                  config.get("flickr", {}).get("user_nsid", "")
-                url = f"https://www.flickr.com/photos/{flickr_username}/{fid}"
-
-                parts = []
-                if result["perm_expected"] and result["perm_expected"] != result["perm_actual"]:
-                    parts.append(f"perm:{result['perm_expected']}→{result['perm_actual']}")
-                if result["tags_missing"]:
-                    missing_str = ", ".join(result["tags_missing"][:8])
-                    extra = f" +{len(result['tags_missing'])-8}" if len(result["tags_missing"]) > 8 else ""
-                    parts.append(f"missing:{missing_str}{extra}")
-                if result["fixes"]:
-                    fix_ok_count += len(result["fixes"])
-                    parts.append(f"fixed:{','.join(result['fixes'])}")
-                if result["errors"]:
-                    fix_fail_count += len(result["errors"])
-                    parts.append(f"errors:{len(result['errors'])}")
-
-                detail = ("  " + "  ".join(parts)) if parts else ""
-                print(f"  [{result['status']}]  {fid}{detail}  {url}")
+                fix_ok_count   += len(result["fixes"])
+                fix_fail_count += len(result["errors"])
+                print(format_result_line(result, url, ts))
                 for e in result["errors"]:
-                    print(f"        error:    {e}")
+                    print(f"      error: {e}")
 
     except Exception as e:
         log.error(f"Reconcile interrupted: {e}")

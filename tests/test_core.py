@@ -3989,6 +3989,75 @@ class TestReconcileLifecycle(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# reconcile output format
+# ---------------------------------------------------------------------------
+
+class TestFormatResultLine(unittest.TestCase):
+    URL = "https://www.flickr.com/photos/cdevers/12345"
+    TS  = "2026-05-11T12:29:29"
+
+    def _base(self, **kw):
+        base = {
+            "flickr_id": "12345", "status": "ok",
+            "perm_expected": "", "perm_actual": "",
+            "tags_missing": [], "fixes": [], "errors": [],
+        }
+        base.update(kw)
+        return base
+
+    def test_ok_line(self):
+        from poller.reconcile import format_result_line
+        line = format_result_line(self._base(status="ok"), self.URL, self.TS)
+        self.assertEqual(line, f"{self.TS} [ok] {self.URL}")
+
+    def test_flickr_error_line(self):
+        from poller.reconcile import format_result_line
+        line = format_result_line(self._base(status="flickr_error", errors=["oops"]), self.URL, self.TS)
+        self.assertEqual(line, f"{self.TS} [ERR] {self.URL}")
+
+    def test_tag_mismatch_with_fix(self):
+        from poller.reconcile import format_result_line
+        result = self._base(status="tag_mismatch", fixes=["tags"],
+                            tags_missing=["unitedstates"])
+        line = format_result_line(result, self.URL, self.TS)
+        self.assertEqual(line, f"{self.TS} [tag_mismatch] {self.URL} fixed:tags missing:unitedstates")
+
+    def test_fix_comes_before_missing(self):
+        from poller.reconcile import format_result_line
+        result = self._base(status="tag_mismatch", fixes=["tags"],
+                            tags_missing=["opticalequipment", "unitedstates"])
+        line = format_result_line(result, self.URL, self.TS)
+        # fixed: must precede missing:
+        self.assertLess(line.index("fixed:"), line.index("missing:"))
+        self.assertIn("missing:opticalequipment, unitedstates", line)
+
+    def test_perm_mismatch_no_fix(self):
+        from poller.reconcile import format_result_line
+        result = self._base(status="perm_mismatch",
+                            perm_expected="public", perm_actual="private")
+        line = format_result_line(result, self.URL, self.TS)
+        self.assertIn("[perm_mismatch]", line)
+        self.assertIn("perm:public→private", line)
+        self.assertNotIn("fixed:", line)
+
+    def test_flickr_id_not_in_line(self):
+        from poller.reconcile import format_result_line
+        result = self._base(status="tag_mismatch", fixes=["tags"],
+                            tags_missing=["nature"])
+        line = format_result_line(result, self.URL, self.TS)
+        # Flickr ID appears only as part of the URL, never standalone
+        self.assertNotIn(" 12345 ", line)
+        self.assertNotIn(" 12345\n", line)
+
+    def test_missing_tags_truncated_at_8(self):
+        from poller.reconcile import format_result_line
+        tags = [f"tag{i}" for i in range(10)]
+        result = self._base(status="tag_mismatch", tags_missing=tags)
+        line = format_result_line(result, self.URL, self.TS)
+        self.assertIn("+2", line)
+
+
+# ---------------------------------------------------------------------------
 # merge_flickr_into_photos — late-linking of split records
 # ---------------------------------------------------------------------------
 
