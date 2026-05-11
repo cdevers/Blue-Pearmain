@@ -658,5 +658,13 @@ def _photos_is_running() -> bool:
 
 
 def _normalise_tags(tags: list[str]) -> set[str]:
-    """Normalise a tag list for comparison: lowercase, strip, dedupe."""
-    return {t.strip().lower() for t in tags if t.strip()}
+    """Normalise a tag list for comparison: NFC, casefold, alphanumeric-only, dedupe.
+
+    Flickr silently strips spaces and non-alphanumeric characters from tags, so
+    "New York" and "newyork" are the same tag. Must match norm() in _classify_tags.
+    """
+    return {
+        "".join(c for c in unicodedata.normalize("NFC", t.strip().casefold()) if c.isalnum())
+        for t in tags
+        if t.strip()
+    }

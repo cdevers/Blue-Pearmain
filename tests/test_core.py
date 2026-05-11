@@ -2789,6 +2789,34 @@ class TestMetadataConflictDB(unittest.TestCase):
 # Metadata puller — core comparison logic
 # ---------------------------------------------------------------------------
 
+class TestNormaliseTags(unittest.TestCase):
+    """_normalise_tags matches Flickr's alphanumeric-only normalisation."""
+
+    def _norm(self, tags):
+        from flickr.metadata_puller import _normalise_tags
+        return _normalise_tags(tags)
+
+    def test_strips_spaces_within_tag(self):
+        self.assertEqual(self._norm(["New York"]), {"newyork"})
+
+    def test_strips_punctuation(self):
+        self.assertEqual(self._norm(["black & white"]), {"blackwhite"})
+
+    def test_lowercases(self):
+        self.assertEqual(self._norm(["NATURE"]), {"nature"})
+
+    def test_space_and_nospace_variants_equal(self):
+        # "New York" on Photos side == "newyork" on Flickr side
+        self.assertEqual(self._norm(["New York"]), self._norm(["newyork"]))
+
+    def test_empty_tags_ignored(self):
+        self.assertEqual(self._norm(["", "  "]), set())
+
+    def test_unicode_nfc_normalisation(self):
+        # café vs café (decomposed) should be equal after NFC
+        self.assertEqual(self._norm(["café"]), self._norm(["café"]))
+
+
 class TestMetadataPuller(unittest.TestCase):
 
     def setUp(self):
@@ -2889,6 +2917,18 @@ class TestMetadataPuller(unittest.TestCase):
         from unittest.mock import patch
         self._set_flickr_meta(tags=["Nature", "Landscape"])
         with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "", "tags": ["nature", "landscape"]}), \
+             patch("flickr.metadata_puller._write_photos_metadata") as mock_write:
+            result = self._pull()
+        self.assertIn("tags", result["skipped"])
+        self.assertEqual(result["conflicts"], [])
+        mock_write.assert_not_called()
+
+    def test_tags_no_conflict_when_differ_only_by_spaces(self):
+        # Flickr strips spaces from tags, so "New York" == "newyork"
+        from unittest.mock import patch
+        self._set_flickr_meta(tags=["newyork", "landscape"])
+        with patch("flickr.metadata_puller._read_photos_metadata",
+                   return_value={"title": "", "description": "", "tags": ["New York", "landscape"]}), \
              patch("flickr.metadata_puller._write_photos_metadata") as mock_write:
             result = self._pull()
         self.assertIn("tags", result["skipped"])
