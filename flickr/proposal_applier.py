@@ -86,10 +86,10 @@ def apply_proposal(
         src_hash = _compute_text_hash(flickr_text if row["source"] == "flickr" else photos_text)
         tgt_hash = _compute_text_hash(photos_text if row["target"] == "photos" else flickr_text)
 
-    if src_hash != row["source_hash_at_creation"]:
+    if row["source_hash_at_creation"] is not None and src_hash != row["source_hash_at_creation"]:
         _supersede(db, proposal_id)
         return {"ok": False, "reason": "source_changed"}
-    if tgt_hash != row["target_hash_at_creation"]:
+    if row["target_hash_at_creation"] is not None and tgt_hash != row["target_hash_at_creation"]:
         _supersede(db, proposal_id)
         return {"ok": False, "reason": "target_changed"}
 
@@ -313,10 +313,10 @@ def apply_manual_merge(
     # Apply-time staleness checks (same contract as apply_proposal)
     src_hash = row["flickr_tags_hash"] if row["source"] == "flickr" else row["photos_tags_hash"]
     tgt_hash = row["photos_tags_hash"] if row["target"] == "photos" else row["flickr_tags_hash"]
-    if src_hash != row["source_hash_at_creation"]:
+    if row["source_hash_at_creation"] is not None and src_hash != row["source_hash_at_creation"]:
         _supersede(db, proposal_id)
         return {"ok": False, "reason": "source_changed"}
-    if tgt_hash != row["target_hash_at_creation"]:
+    if row["target_hash_at_creation"] is not None and tgt_hash != row["target_hash_at_creation"]:
         _supersede(db, proposal_id)
         return {"ok": False, "reason": "target_changed"}
 

@@ -5037,6 +5037,30 @@ class TestApplyProposal(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("Photos", result["reason"])
 
+    def test_null_target_hash_does_not_trigger_target_changed(self):
+        # Proposals created before description cache columns were populated have
+        # target_hash_at_creation=NULL. NULL means "no baseline", not "changed".
+        from unittest.mock import patch
+        from flickr.proposal_applier import apply_proposal
+        pid = self._insert_proposal(target_hash=None)
+        with patch("flickr.proposal_applier._photos_is_running", return_value=True):
+            with patch("flickr.proposal_applier._write_tags_to_photos") as mock_write:
+                mock_write.return_value = {"ok": True}
+                result = apply_proposal(self.db, pid, library_path="/fake/path")
+        self.assertNotEqual(result.get("reason"), "target_changed",
+                            "NULL target hash should not trigger staleness check")
+
+    def test_null_source_hash_does_not_trigger_source_changed(self):
+        from unittest.mock import patch
+        from flickr.proposal_applier import apply_proposal
+        pid = self._insert_proposal(source_hash=None)
+        with patch("flickr.proposal_applier._photos_is_running", return_value=True):
+            with patch("flickr.proposal_applier._write_tags_to_photos") as mock_write:
+                mock_write.return_value = {"ok": True}
+                result = apply_proposal(self.db, pid, library_path="/fake/path")
+        self.assertNotEqual(result.get("reason"), "source_changed",
+                            "NULL source hash should not trigger staleness check")
+
 
 class TestApplyBatch(unittest.TestCase):
     """apply_batch: continues past failures, populates errors list."""
