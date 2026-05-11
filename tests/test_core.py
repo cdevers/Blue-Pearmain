@@ -4283,6 +4283,54 @@ class TestLinkOrphans(unittest.TestCase):
         self.assertEqual(self.db.get_photo(photos_id)["flickr_id"], "flickr-2s")
         self.assertIsNone(self.db.get_photo(flickr_row))
 
+    def test_links_when_camera_timezone_differs_from_machine(self):
+        # Photos stores machine-local time (EDT, -04:00); Flickr stores EXIF camera
+        # time (PDT, 3 h earlier). The -3 h offset is the most common real-world case.
+        from poller.link_orphans import link_orphans
+        photos_id = self.db.upsert_photo({
+            "uuid":              "uuid-pdt",
+            "original_filename": "IMG_pdt.HEIC",
+            "date_taken":        "2022-03-17T19:57:36.719161-04:00",  # EDT machine
+            "privacy_state":     "candidate_public",
+            "apple_labels":      [],
+            "apple_persons":     [],
+        })
+        flickr_row = self.db.upsert_photo({
+            "flickr_id":  "flickr-pdt",
+            "date_taken": "2022-03-17 16:57:36",  # PDT camera EXIF, 3 h earlier
+        })
+        linked, failed = link_orphans(self.db, dry_run=False, limit=100)
+        self.assertEqual(linked, 1)
+        self.assertEqual(failed, 0)
+        self.assertEqual(self.db.get_photo(photos_id)["flickr_id"], "flickr-pdt")
+        self.assertIsNone(self.db.get_photo(flickr_row))
+
+    def test_exact_match_preferred_over_hour_offset_match(self):
+        # If both an exact match and a hour-offset match exist, the exact one wins.
+        from poller.link_orphans import link_orphans
+        photos_id = self.db.upsert_photo({
+            "uuid":              "uuid-exact",
+            "original_filename": "IMG_exact.HEIC",
+            "date_taken":        "2022-05-10 14:00:00",
+            "privacy_state":     "candidate_public",
+            "apple_labels":      [],
+            "apple_persons":     [],
+        })
+        # Exact match
+        exact_flickr = self.db.upsert_photo({
+            "flickr_id":  "flickr-exact",
+            "date_taken": "2022-05-10 14:00:00",
+        })
+        # Hour-offset decoy (1 h earlier — would match if exact is missed)
+        decoy_flickr = self.db.upsert_photo({
+            "flickr_id":  "flickr-decoy",
+            "date_taken": "2022-05-10 13:00:00",
+        })
+        linked, _ = link_orphans(self.db, dry_run=False, limit=100)
+        self.assertEqual(linked, 1)
+        merged = self.db.get_photo(photos_id)
+        self.assertEqual(merged["flickr_id"], "flickr-exact")
+
 
 # ---------------------------------------------------------------------------
 # Phase 4 — sync engine: classify + proposals

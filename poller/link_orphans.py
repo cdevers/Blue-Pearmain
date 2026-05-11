@@ -122,6 +122,23 @@ def find_orphan_pairs(db: Database, limit: int) -> list[tuple[int, int]]:
                     candidate_keys.append(key)
                     seen_keys.add(key)
 
+        # Also try integer hour offsets to catch camera-timezone ≠ machine-timezone
+        # (e.g. PDT camera on an EDT machine produces a systematic -3 h gap).
+        # These come after exact candidates so exact matches are always preferred.
+        for base in sorted(raw_bases):
+            for hours in range(-12, 13):
+                if hours == 0:
+                    continue
+                try:
+                    shifted = datetime.fromisoformat(base) + timedelta(hours=hours)
+                except ValueError:
+                    continue
+                for delta in (0, 1, 2):
+                    key = (shifted + timedelta(seconds=delta)).strftime("%Y-%m-%d %H:%M:%S")
+                    if key not in seen_keys:
+                        candidate_keys.append(key)
+                        seen_keys.add(key)
+
         candidates = []
         seen_fids: set[int] = set()
         for key in candidate_keys:
