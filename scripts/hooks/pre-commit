@@ -1,0 +1,6 @@
+#!/bin/sh
+# If pyproject.toml is staged, regenerate uv.lock and re-stage it.
+if git diff --cached --name-only | grep -q "^pyproject.toml$"; then
+    uv lock || { echo "uv lock failed"; exit 1; }
+    git add uv.lock
+fi

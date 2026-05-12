@@ -113,7 +113,10 @@ python flickr/flickr_auth.py --config config/config.yml
 bp doctor                          # Checks config, DB, Photos library, photoscript
 bp doctor --check-flickr           # Also makes a live Flickr API call
 
-# 5. (Optional) Install background daemons — poller (hourly), pipeline (6h), reviewer UI (always on)
+# 5. Install git hooks (keeps uv.lock in sync when pyproject.toml changes)
+make install-hooks
+
+# 6. (Optional) Install background daemons — poller (hourly), pipeline (6h), reviewer UI (always on)
 mkdir -p ~/Library/Logs/BluePearmain
 bp install-daemons
 # Output shows the launchctl bootstrap commands to load each agent.
