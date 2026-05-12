@@ -2,7 +2,7 @@
 
 A bidirectional sync and curation tool for photo libraries that span both Apple Photos and Flickr. It keeps metadata (titles, descriptions, tags) in sync between the two, automates privacy triage using Apple's ML analysis and geofencing, and serves a local web UI for reviewing photos, resolving metadata conflicts, and managing duplicates and albums.
 
-Named for the [Blue Pearmain apple](https://en.wikipedia.org/wiki/Blue_Pearmain), an American variety mentioned by Henry David Thoreau in his 1862 essay *Wild Apples*.
+This project is named for the [Blue Pearmain apple](https://en.wikipedia.org/wiki/Blue_Pearmain), an American variety mentioned by Henry David Thoreau in his 1862 essay *Wild Apples*. Why? Three reasons. First off, like McIntosh, it’s a variety of apple, so it alludes to the company. But apples are commonly thought of as being red, or maybe yellow or green, so I liked that _this_ variety of apples is “blue”, harkening to the colors of the Flickr logo. Plus, it’s a meta-allusion to the proud literary & artistic history of Massachusetts. Yes, the name is a mouthful (ahem), so feel free to just call it “BP” if you prefer.
 
 ---
 
