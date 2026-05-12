@@ -270,6 +270,8 @@ class Database:
             raise ValueError(f"target {target_id} not found")
         if target["uuid"] is None:
             raise ValueError(f"target {target_id} has no uuid — only Photos-linked records can be targets")
+        if target["flickr_id"] is not None:
+            raise ValueError(f"target {target_id} already has flickr_id '{target['flickr_id']}' — merge would overwrite it")
 
         donor = dict(donor)
 

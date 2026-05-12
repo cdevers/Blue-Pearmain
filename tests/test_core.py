@@ -7465,7 +7465,6 @@ class TestMergeFlickrDonorInGroup(unittest.TestCase):
         """Create a temp DB with duplicate_groups support and a ready-to-merge group."""
         from db.db import Database
         from db.migrations.migrate_003_dimensions_and_dedup import run as migrate_003
-        import shutil
         tmp = tempfile.mkdtemp()
         db_path = str(Path(tmp) / "test.db")
         db = Database(Path(db_path))
@@ -7601,6 +7600,15 @@ class TestMergeFlickrDonorInGroup(unittest.TestCase):
         with self.assertRaises(ValueError):
             # Pass donor as both donor and target — it has no uuid
             self.db.merge_flickr_donor_in_group(self.donor_id, self.donor_id, self.group_id)
+
+    def test_raises_value_error_if_target_already_has_flickr_id(self):
+        # Give the target a flickr_id to simulate a pre-linked record
+        self.db.conn.execute(
+            "UPDATE photos SET flickr_id = 'EXISTING' WHERE id = ?", (self.target_id,)
+        )
+        self.db.conn.commit()
+        with self.assertRaises(ValueError):
+            self.db.merge_flickr_donor_in_group(self.donor_id, self.target_id, self.group_id)
 
 
 if __name__ == "__main__":
