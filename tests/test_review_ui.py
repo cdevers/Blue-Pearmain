@@ -809,3 +809,43 @@ class TestMergeUI:
         resp = c.get("/duplicates")
         # Only the Flickr-only card (donor) should have the button; the Photos-linked card should not
         assert resp.data.decode().count("Merge into Photos record") == 1
+
+
+# ---------------------------------------------------------------------------
+# TestProposalJsDefensiveHandling — GH #79
+# ---------------------------------------------------------------------------
+
+class TestProposalJsDefensiveHandling:
+    """JS handlers in proposals.html must have try-catch, AbortController timeout,
+    and correct button-text restoration on error."""
+
+    @pytest.fixture(scope="class")
+    def proposals_src(self):
+        path = Path(__file__).parent.parent / "reviewer" / "templates" / "proposals.html"
+        return path.read_text()
+
+    def test_approve_proposal_has_abort_controller(self, proposals_src):
+        # approveProposal must create an AbortController to unblock the UI on server hang
+        assert "AbortController" in proposals_src
+
+    def test_approve_proposal_has_try_catch(self, proposals_src):
+        # approveProposal must wrap the fetch in try-catch so network errors re-enable the button
+        assert "} catch" in proposals_src
+
+    def test_approve_proposal_restores_orig_text_on_error(self, proposals_src):
+        # Error path must restore the button's original text, not hardcode 'Approve ✓'
+        # (collision buttons say 'Use Flickr ✓' / 'Use Photos ✓')
+        assert "origText" in proposals_src
+        assert "btn.textContent = 'Approve ✓'" not in proposals_src
+
+    def test_bulk_approve_has_abort_controller(self, proposals_src):
+        # bulkApprove must also have AbortController timeout protection
+        idx = proposals_src.find("async function bulkApprove")
+        assert idx != -1
+        assert "AbortController" in proposals_src[idx:idx + 600]
+
+    def test_approve_reverse_has_try_catch(self, proposals_src):
+        # approveReverse must also wrap in try-catch
+        idx = proposals_src.find("async function approveReverse")
+        assert idx != -1
+        assert "} catch" in proposals_src[idx:idx + 900]
