@@ -384,9 +384,13 @@ function showMergeConfirm(btn, groupId, donorId, targets) {
   btn.style.display = 'none';
   const confirm = wrap.querySelector('.merge-confirm');
   const sel = wrap.querySelector('.merge-target-select');
-  sel.innerHTML = targets.map(t =>
-    `<option value="${t.id}">${t.label}</option>`
-  ).join('');
+  sel.innerHTML = '';
+  targets.forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t.id;
+    opt.textContent = t.label;
+    sel.appendChild(opt);
+  });
   confirm.style.display = '';
   wrap.querySelector('.merge-confirm-btn').onclick =
     () => confirmMerge(groupId, donorId, wrap);
