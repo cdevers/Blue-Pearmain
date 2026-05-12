@@ -25,7 +25,7 @@
 - Modify: `flickr/proposal_applier.py` (lines 12–20 for import, lines 680–689 for implementation)
 - Modify: `tests/test_core.py` (add new test classes near existing `TestApplyProposal`)
 
-- [ ] **Step 1: Write failing tests for `_photos_is_responsive`**
+- [x] **Step 1: Write failing tests for `_photos_is_responsive`**
 
 Add a new class near the bottom of `tests/test_core.py` (before `TestRunWithTimeout` which you'll add next):
 
@@ -75,7 +75,7 @@ class TestRunWithTimeout(unittest.TestCase):
         self.assertEqual(result["reason"], "Photos not responding")
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 ```bash
 python -m pytest tests/test_core.py::TestPhotosIsResponsive tests/test_core.py::TestRunWithTimeout -v
@@ -83,7 +83,7 @@ python -m pytest tests/test_core.py::TestPhotosIsResponsive tests/test_core.py::
 
 Expected: ImportError or AttributeError — `_photos_is_responsive` and `_run_with_timeout` don't exist yet.
 
-- [ ] **Step 3: Add `import concurrent.futures` to `proposal_applier.py`**
+- [x] **Step 3: Add `import concurrent.futures` to `proposal_applier.py`**
 
 At line 18 (after `import subprocess`), add:
 
@@ -94,7 +94,7 @@ import subprocess
 
 (Replace the existing `import subprocess` line with these two lines in alphabetical order.)
 
-- [ ] **Step 4: Add `_photos_is_responsive`, `_run_with_timeout`, and `_PHOTOS_WRITE_TIMEOUT` to `proposal_applier.py`**
+- [x] **Step 4: Add `_photos_is_responsive`, `_run_with_timeout`, and `_PHOTOS_WRITE_TIMEOUT` to `proposal_applier.py`**
 
 Replace the existing `_photos_is_running` function (lines 680–689) with:
 
@@ -135,7 +135,7 @@ def _run_with_timeout(fn, *args, timeout: int = _PHOTOS_WRITE_TIMEOUT) -> dict:
             return {"ok": False, "reason": str(exc)}
 ```
 
-- [ ] **Step 5: Run the new tests to verify they pass**
+- [x] **Step 5: Run the new tests to verify they pass**
 
 ```bash
 python -m pytest tests/test_core.py::TestPhotosIsResponsive tests/test_core.py::TestRunWithTimeout -v
@@ -143,7 +143,7 @@ python -m pytest tests/test_core.py::TestPhotosIsResponsive tests/test_core.py::
 
 Expected: 5 passed.
 
-- [ ] **Step 6: Replace the three `_photos_is_running()` call sites with `_photos_is_responsive()`**
+- [x] **Step 6: Replace the three `_photos_is_running()` call sites with `_photos_is_responsive()`**
 
 In `flickr/proposal_applier.py`, find and replace (3 occurrences):
 
@@ -155,7 +155,7 @@ In `flickr/proposal_applier.py`, find and replace (3 occurrences):
 
 Also update the return reason strings from `"Photos.app is not running"` to `"Photos not responding"` at all three sites.
 
-- [ ] **Step 7: Bulk-rename `_photos_is_running` → `_photos_is_responsive` in the test file**
+- [x] **Step 7: Bulk-rename `_photos_is_running` → `_photos_is_responsive` in the test file**
 
 Run this sed command (it only matches `flickr.proposal_applier._photos_is_running`, leaving the unrelated `flickr.metadata_puller._photos_is_running` at line 3026 untouched):
 
@@ -179,7 +179,7 @@ grep "metadata_puller._photos_is_running" tests/test_core.py
 
 Expected: 1 line (line ~3026).
 
-- [ ] **Step 8: Update the existing `test_photos_not_running_returns_error` assertion**
+- [x] **Step 8: Update the existing `test_photos_not_running_returns_error` assertion**
 
 In `tests/test_core.py`, find `test_photos_not_running_returns_error` (was patching `_photos_is_running`, now `_photos_is_responsive`). The `assertIn("Photos", result["reason"])` assertion still passes (new reason is `"Photos not responding"`), but update the test name to `test_photos_not_responding_returns_error` and the assertion to be more precise:
 
@@ -194,7 +194,7 @@ def test_photos_not_responding_returns_error(self):
     self.assertEqual(result["reason"], "Photos not responding")
 ```
 
-- [ ] **Step 9: Run the full test suite**
+- [x] **Step 9: Run the full test suite**
 
 ```bash
 python -m pytest tests/ -q
@@ -202,7 +202,7 @@ python -m pytest tests/ -q
 
 Expected: same count as before (604), all passing. If any test fails it will reference the old reason string `"Photos.app is not running"` — update those assertions to `"Photos not responding"`.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add flickr/proposal_applier.py tests/test_core.py
@@ -219,7 +219,7 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 - Modify: `flickr/proposal_applier.py` (~lines 357–386)
 - Modify: `tests/test_core.py` (add test to `TestApplyProposal` or a new class)
 
-- [ ] **Step 1: Write a failing test for the timeout path**
+- [x] **Step 1: Write a failing test for the timeout path**
 
 Add this test to `TestApplyProposal` in `tests/test_core.py`:
 
@@ -237,7 +237,7 @@ def test_write_tags_timeout_returns_not_responding(self):
     self.assertEqual(result["reason"], "Photos not responding")
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 python -m pytest tests/test_core.py::TestApplyProposal::test_write_tags_timeout_returns_not_responding -v
@@ -245,7 +245,7 @@ python -m pytest tests/test_core.py::TestApplyProposal::test_write_tags_timeout_
 
 Expected: FAIL — `_write_tags_to_photos` doesn't call `_run_with_timeout` yet.
 
-- [ ] **Step 3: Refactor `_write_tags_to_photos`**
+- [x] **Step 3: Refactor `_write_tags_to_photos`**
 
 Replace the entire function body with:
 
@@ -290,7 +290,7 @@ def _write_tags_to_photos(
     return {"ok": True, "written": written}
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 python -m pytest tests/test_core.py::TestApplyProposal -v
@@ -298,7 +298,7 @@ python -m pytest tests/test_core.py::TestApplyProposal -v
 
 Expected: all pass including the new timeout test.
 
-- [ ] **Step 5: Run full suite**
+- [x] **Step 5: Run full suite**
 
 ```bash
 python -m pytest tests/ -q
@@ -306,7 +306,7 @@ python -m pytest tests/ -q
 
 Expected: all pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add flickr/proposal_applier.py tests/test_core.py
@@ -323,7 +323,7 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 - Modify: `flickr/proposal_applier.py` (~lines 445–492)
 - Modify: `tests/test_core.py`
 
-- [ ] **Step 1: Write a failing test**
+- [x] **Step 1: Write a failing test**
 
 Find the test class that tests `_apply_text_to_photos` (or `TestSetPhotoText` around line 6110). Add:
 
@@ -342,7 +342,7 @@ def test_apply_text_to_photos_timeout_returns_not_responding(self):
     self.assertEqual(result["reason"], "Photos not responding")
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 python -m pytest tests/test_core.py::TestSetPhotoText::test_apply_text_to_photos_timeout_returns_not_responding -v
@@ -350,7 +350,7 @@ python -m pytest tests/test_core.py::TestSetPhotoText::test_apply_text_to_photos
 
 Expected: FAIL.
 
-- [ ] **Step 3: Refactor `_apply_text_to_photos`**
+- [x] **Step 3: Refactor `_apply_text_to_photos`**
 
 Replace the function body with:
 
@@ -410,7 +410,7 @@ def _apply_text_to_photos(db: "Database", row, new_value: str) -> dict:
     return {"ok": True}
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 python -m pytest tests/test_core.py::TestSetPhotoText -v
@@ -418,7 +418,7 @@ python -m pytest tests/test_core.py::TestSetPhotoText -v
 
 Expected: all pass.
 
-- [ ] **Step 5: Run full suite**
+- [x] **Step 5: Run full suite**
 
 ```bash
 python -m pytest tests/ -q
@@ -426,7 +426,7 @@ python -m pytest tests/ -q
 
 Expected: all pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add flickr/proposal_applier.py tests/test_core.py
@@ -443,7 +443,7 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 - Modify: `flickr/proposal_applier.py` (~lines 624–658)
 - Modify: `tests/test_core.py`
 
-- [ ] **Step 1: Write a failing test**
+- [x] **Step 1: Write a failing test**
 
 Add to an appropriate test class (e.g. `TestSetPhotoText`):
 
@@ -461,7 +461,7 @@ def test_write_text_both_timeout_returns_not_responding(self):
     self.assertEqual(result["reason"], "Photos not responding")
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 python -m pytest tests/test_core.py::TestSetPhotoText::test_write_text_both_timeout_returns_not_responding -v
@@ -469,7 +469,7 @@ python -m pytest tests/test_core.py::TestSetPhotoText::test_write_text_both_time
 
 Expected: FAIL.
 
-- [ ] **Step 3: Refactor `_write_text_to_photos_both`**
+- [x] **Step 3: Refactor `_write_text_to_photos_both`**
 
 Replace the function body with:
 
@@ -519,7 +519,7 @@ def _write_text_to_photos_both(
     return {"ok": True}
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 python -m pytest tests/test_core.py::TestSetPhotoText -v
@@ -527,7 +527,7 @@ python -m pytest tests/test_core.py::TestSetPhotoText -v
 
 Expected: all pass.
 
-- [ ] **Step 5: Run full suite**
+- [x] **Step 5: Run full suite**
 
 ```bash
 python -m pytest tests/ -q
@@ -535,7 +535,7 @@ python -m pytest tests/ -q
 
 Expected: all pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add flickr/proposal_applier.py tests/test_core.py
@@ -551,7 +551,7 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 **Files:**
 - Modify: `README.md`
 
-- [ ] **Step 1: Get final test count**
+- [x] **Step 1: Get final test count**
 
 ```bash
 python -m pytest tests/ -q 2>&1 | tail -1
@@ -559,11 +559,11 @@ python -m pytest tests/ -q 2>&1 | tail -1
 
 Note the number.
 
-- [ ] **Step 2: Update README**
+- [x] **Step 2: Update README**
 
 Find the test count in `README.md` (appears in the Components table and Tests section) and update it to the new number.
 
-- [ ] **Step 3: Run full suite one final time**
+- [x] **Step 3: Run full suite one final time**
 
 ```bash
 python -m pytest tests/ -q
@@ -571,7 +571,7 @@ python -m pytest tests/ -q
 
 Expected: all pass, count matches README.
 
-- [ ] **Step 4: Final commit**
+- [x] **Step 4: Final commit**
 
 ```bash
 git add README.md
