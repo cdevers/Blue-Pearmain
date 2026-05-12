@@ -7430,5 +7430,32 @@ class TestScreenshotStats(unittest.TestCase):
         self.assertEqual(counts["screenshot_private"], 0)
 
 
+class TestMigrate014MergedIntoId(unittest.TestCase):
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db_path = str(Path(self._tmp.name) / "test.db")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_migration_adds_merged_into_id_column(self):
+        from db.db import Database
+        from db.migrations.migrate_014_merged_into_id import run
+        db = Database(Path(self.db_path))
+        run(self.db_path)
+        cols = {r["name"] for r in db.conn.execute("PRAGMA table_info(photos)").fetchall()}
+        self.assertIn("merged_into_id", cols)
+        db.close()
+
+    def test_migration_is_idempotent(self):
+        from db.db import Database
+        from db.migrations.migrate_014_merged_into_id import run
+        db = Database(Path(self.db_path))
+        run(self.db_path)
+        run(self.db_path)  # must not raise
+        db.close()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
