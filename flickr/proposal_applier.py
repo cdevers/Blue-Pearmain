@@ -11,6 +11,7 @@ proposal is superseded rather than applied.
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import html
 import json
@@ -358,26 +359,34 @@ def _write_tags_to_photos(
     db: "Database", photo_id: int, uuid: str, new_tags: list[str], library_path: str
 ) -> dict:
     """Write tags to Photos.app and update the DB cache. Does not touch proposal state."""
-    if not _photos_is_running():
-        return {"ok": False, "reason": "Photos.app is not running"}
+    if not _photos_is_responsive():
+        return {"ok": False, "reason": "Photos not responding"}
     try:
         import photoscript
     except ImportError:
         return {"ok": False, "reason": "photoscript not installed"}
-    try:
-        photo = photoscript.Photo(uuid)
-    except Exception as e:
-        if "invalid photo id" in str(e).lower():
-            return {"ok": False, "reason": "stale_uuid", "stale_uuid": True}
-        return {"ok": False, "reason": f"photo not found in Photos: {e}"}
-    try:
-        photo.keywords = new_tags
-    except Exception as e:
-        return {"ok": False, "reason": f"write failed: {e}"}
-    try:
-        written = list(photo.keywords or [])
-    except Exception:
-        written = new_tags
+
+    def _do_write():
+        try:
+            photo = photoscript.Photo(uuid)
+        except Exception as e:
+            if "invalid photo id" in str(e).lower():
+                return {"ok": False, "reason": "stale_uuid", "stale_uuid": True}
+            return {"ok": False, "reason": f"photo not found in Photos: {e}"}
+        try:
+            photo.keywords = new_tags
+        except Exception as e:
+            return {"ok": False, "reason": f"write failed: {e}"}
+        try:
+            written = list(photo.keywords or [])
+        except Exception:
+            written = new_tags
+        return {"ok": True, "written": written}
+
+    result = _run_with_timeout(_do_write)
+    if not result.get("ok"):
+        return result
+    written = result.get("written", new_tags)
     now = _now_iso()
     db.conn.execute(
         "UPDATE photos SET photos_tags=?, photos_tags_hash=?, meta_synced_photos_at=?, updated_at=? WHERE id=?",
@@ -447,35 +456,40 @@ def _apply_text_to_photos(db: "Database", row, new_value: str) -> dict:
     uuid = row["uuid"]
     if not uuid:
         return {"ok": False, "reason": "photo has no uuid"}
-    if not _photos_is_running():
-        return {"ok": False, "reason": "Photos.app is not running"}
+    if not _photos_is_responsive():
+        return {"ok": False, "reason": "Photos not responding"}
 
     try:
         import photoscript
     except ImportError:
         return {"ok": False, "reason": "photoscript not installed"}
 
-    try:
-        photo = photoscript.Photo(uuid)
-    except Exception as e:
-        if "invalid photo id" in str(e).lower():
-            return {"ok": False, "reason": "stale_uuid", "stale_uuid": True}
-        return {"ok": False, "reason": f"photo not found in Photos: {e}"}
+    def _do_write():
+        try:
+            photo = photoscript.Photo(uuid)
+        except Exception as e:
+            if "invalid photo id" in str(e).lower():
+                return {"ok": False, "reason": "stale_uuid", "stale_uuid": True}
+            return {"ok": False, "reason": f"photo not found in Photos: {e}"}
+        try:
+            if field == "title":
+                photo.title = new_value
+            else:
+                photo.description = new_value
+        except Exception as e:
+            return {"ok": False, "reason": f"write failed: {e}"}
+        try:
+            written = photo.title if field == "title" else photo.description
+            written = (written or "").strip()
+        except Exception:
+            written = new_value
+        return {"ok": True, "written": written}
 
-    try:
-        if field == "title":
-            photo.title = new_value
-        else:
-            photo.description = new_value
-    except Exception as e:
-        return {"ok": False, "reason": f"write failed: {e}"}
+    result = _run_with_timeout(_do_write)
+    if not result.get("ok"):
+        return result
 
-    try:
-        written = photo.title if field == "title" else photo.description
-        written = (written or "").strip()
-    except Exception:
-        written = new_value
-
+    written = result.get("written", new_value)
     now = _now_iso()
     assert field in ("title", "description", "tags"), f"unexpected field: {field!r}"
     col = f"photos_{field}"
@@ -625,35 +639,43 @@ def _write_text_to_photos_both(
     db: "Database", photo_id: int, uuid: str, title: str, description: str
 ) -> dict:
     """Write both title and description to Photos.app and update the DB cache."""
-    if not _photos_is_running():
-        return {"ok": False, "reason": "Photos.app is not running"}
+    if not _photos_is_responsive():
+        return {"ok": False, "reason": "Photos not responding"}
     try:
         import photoscript
     except ImportError:
         return {"ok": False, "reason": "photoscript not installed"}
-    try:
-        photo = photoscript.Photo(uuid)
-    except Exception as e:
-        if "invalid photo id" in str(e).lower():
-            return {"ok": False, "reason": "stale_uuid", "stale_uuid": True}
-        return {"ok": False, "reason": f"photo not found in Photos: {e}"}
-    try:
-        photo.title = title
-        photo.description = description
-    except Exception as e:
-        return {"ok": False, "reason": f"write failed: {e}"}
-    try:
-        written_title = (photo.title or "").strip()
-        written_desc  = (photo.description or "").strip()
-    except Exception:
-        written_title = title
-        written_desc  = description
+
+    def _do_write():
+        try:
+            photo = photoscript.Photo(uuid)
+        except Exception as e:
+            if "invalid photo id" in str(e).lower():
+                return {"ok": False, "reason": "stale_uuid", "stale_uuid": True}
+            return {"ok": False, "reason": f"photo not found in Photos: {e}"}
+        try:
+            photo.title = title
+            photo.description = description
+        except Exception as e:
+            return {"ok": False, "reason": f"write failed: {e}"}
+        try:
+            written_title = (photo.title or "").strip()
+            written_desc  = (photo.description or "").strip()
+        except Exception:
+            written_title = title
+            written_desc  = description
+        return {"ok": True, "written_title": written_title, "written_desc": written_desc}
+
+    result = _run_with_timeout(_do_write)
+    if not result.get("ok"):
+        return result
+
     now = _now_iso()
     db.conn.execute(
         """UPDATE photos
            SET photos_title=?, photos_description=?, meta_synced_photos_at=?, updated_at=?
            WHERE id=?""",
-        (written_title, written_desc, now, now, photo_id),
+        (result["written_title"], result["written_desc"], now, now, photo_id),
     )
     return {"ok": True}
 
@@ -677,13 +699,46 @@ def _write_text_to_flickr_both(
     return {"ok": True}
 
 
-def _photos_is_running() -> bool:
+_PHOTOS_WRITE_TIMEOUT = 45  # seconds before a hung photoscript call is abandoned
+
+
+def _photos_is_responsive(timeout: int = 3) -> bool:
+    """
+    Return True only if Photos.app is running AND responds to a test AppleScript
+    command within `timeout` seconds.  Catches the case where the process exists
+    but is hung — which a process-existence check cannot detect.
+    """
     try:
+        # Guard: check process exists without triggering a launch event
+        pgrep = subprocess.run(["pgrep", "-x", "Photos"], capture_output=True, timeout=1)
+        if pgrep.returncode != 0:
+            return False
+        # Now verify it actually responds to AppleScript
         result = subprocess.run(
-            ["osascript", "-e",
-             'tell application "System Events" to (name of processes) contains "Photos"'],
-            capture_output=True, text=True, timeout=5,
+            ["osascript", "-e", 'tell application "Photos" to name'],
+            capture_output=True, text=True, timeout=timeout,
         )
-        return result.stdout.strip().lower() == "true"
+        return result.returncode == 0
     except Exception:
         return False
+
+
+def _run_with_timeout(fn, *args, timeout: int = _PHOTOS_WRITE_TIMEOUT) -> dict:
+    """
+    Run fn(*args) in a ThreadPoolExecutor with a timeout.
+    Returns {"ok": False, "reason": "Photos not responding"} if the timeout
+    fires.  The stray thread cannot be killed (OS limitation) but the Flask
+    handler is unblocked and the user gets a clear error.
+    """
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(fn, *args)
+    try:
+        result = future.result(timeout=timeout)
+        pool.shutdown(wait=False)
+        return result
+    except concurrent.futures.TimeoutError:
+        pool.shutdown(wait=False, cancel_futures=False)
+        return {"ok": False, "reason": "Photos not responding"}
+    except Exception as exc:
+        pool.shutdown(wait=False)
+        return {"ok": False, "reason": str(exc)}
