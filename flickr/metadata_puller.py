@@ -622,9 +622,9 @@ def _write_photos_metadata(uuid: str, library_path: str, fields: dict, photos_db
     Write title/description/keywords to Apple Photos via photoscript (AppleScript bridge).
     Raises RuntimeError if Photos.app is not running or photoscript is unavailable.
     """
-    if not _photos_is_running():
+    if not _photos_is_responsive():
         raise RuntimeError(
-            "Photos.app is not running — open Photos.app and re-run sync-metadata"
+            "Photos not responding — open Photos.app and re-run sync-metadata"
         )
 
     try:
@@ -645,14 +645,17 @@ def _write_photos_metadata(uuid: str, library_path: str, fields: dict, photos_db
         photo.keywords = json.loads(fields["tags"])
 
 
-def _photos_is_running() -> bool:
-    """Return True if Photos.app is currently running."""
+def _photos_is_responsive(timeout: int = 3) -> bool:
+    """Return True if Photos.app is running and responds to AppleScript within timeout seconds."""
     try:
+        pgrep = subprocess.run(["pgrep", "-x", "Photos"], capture_output=True, timeout=1)
+        if pgrep.returncode != 0:
+            return False
         result = subprocess.run(
-            ["osascript", "-e", 'tell application "System Events" to (name of processes) contains "Photos"'],
-            capture_output=True, text=True, timeout=5,
+            ["osascript", "-e", 'tell application "Photos" to name'],
+            capture_output=True, text=True, timeout=timeout,
         )
-        return result.stdout.strip().lower() == "true"
+        return result.returncode == 0
     except Exception:
         return False
 

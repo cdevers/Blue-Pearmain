@@ -3023,7 +3023,7 @@ class TestMetadataPuller(unittest.TestCase):
         self._set_flickr_meta(title="Flickr Title")
         # Simulate photoscript raising ValueError("Invalid photo id: <uuid>")
         with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "", "tags": []}), \
-             patch("flickr.metadata_puller._photos_is_running", return_value=True), \
+             patch("flickr.metadata_puller._photos_is_responsive", return_value=True), \
              patch.dict(__import__("sys").modules, {"photoscript": MagicMock(
                  Photo=MagicMock(side_effect=ValueError("Invalid photo id: uuid-mp-001"))
              )}):
@@ -7722,6 +7722,53 @@ class TestRunWithTimeout(unittest.TestCase):
         result = _run_with_timeout(lambda: 1/0)
         self.assertFalse(result["ok"])
         self.assertEqual(result["reason"], "division by zero")
+
+
+class TestMetadataPullerPhotosIsResponsive(unittest.TestCase):
+    def test_returns_true_when_pgrep_succeeds_and_osascript_succeeds(self):
+        from unittest.mock import patch, MagicMock
+        from flickr.metadata_puller import _photos_is_responsive
+        pgrep_ok = MagicMock()
+        pgrep_ok.returncode = 0
+        osascript_ok = MagicMock()
+        osascript_ok.returncode = 0
+        with patch("flickr.metadata_puller.subprocess.run",
+                   side_effect=[pgrep_ok, osascript_ok]):
+            self.assertTrue(_photos_is_responsive())
+
+    def test_returns_false_when_pgrep_fails(self):
+        from unittest.mock import patch, MagicMock
+        from flickr.metadata_puller import _photos_is_responsive
+        pgrep_fail = MagicMock()
+        pgrep_fail.returncode = 1
+        with patch("flickr.metadata_puller.subprocess.run",
+                   return_value=pgrep_fail) as mock_run:
+            result = _photos_is_responsive()
+        self.assertFalse(result)
+        self.assertEqual(mock_run.call_count, 1,
+                         "Should not send AppleScript when pgrep says Photos is not running")
+
+    def test_returns_false_when_osascript_times_out(self):
+        import subprocess
+        from unittest.mock import patch, MagicMock
+        from flickr.metadata_puller import _photos_is_responsive
+        pgrep_ok = MagicMock()
+        pgrep_ok.returncode = 0
+        with patch("flickr.metadata_puller.subprocess.run",
+                   side_effect=[pgrep_ok,
+                                 subprocess.TimeoutExpired("osascript", 3)]):
+            self.assertFalse(_photos_is_responsive())
+
+    def test_returns_false_when_osascript_returns_nonzero(self):
+        from unittest.mock import patch, MagicMock
+        from flickr.metadata_puller import _photos_is_responsive
+        pgrep_ok = MagicMock()
+        pgrep_ok.returncode = 0
+        osascript_fail = MagicMock()
+        osascript_fail.returncode = 1
+        with patch("flickr.metadata_puller.subprocess.run",
+                   side_effect=[pgrep_ok, osascript_fail]):
+            self.assertFalse(_photos_is_responsive())
 
 
 if __name__ == "__main__":
