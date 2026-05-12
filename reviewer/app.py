@@ -375,14 +375,28 @@ def duplicates():
             "privacy_state":     r["privacy_state"],
         })
 
+    # Annotate each group with whether all its photos have a usable thumbnail
+    for g in groups.values():
+        g["has_all_thumbs"] = all(
+            p["thumbnail_path"] or (p["flickr_secret"] and p["flickr_server"])
+            for p in g["photos"]
+        )
+
     sections = []
     for gtype, label, description in (
-        ("snapbridge",    "Snapbridge",    "Low-res phone preview vs. full-res card import — keeper is the higher-resolution copy"),
-        ("device_upload", "Device upload", "Same file uploaded from multiple devices — keeper is the earlier Flickr upload"),
-        ("uncertain",     "Uncertain",     "Same filename and timestamp but pattern unclear — needs manual review"),
+        ("snapbridge",    "Snapbridge",
+         "Low-res phone preview vs. full-res card import — keeper is the higher-resolution copy"),
+        ("device_upload", "Device upload",
+         "Same file uploaded from multiple devices — keeper is the earlier Flickr upload"),
+        ("uncertain",     "Uncertain",
+         "Same filename and timestamp but pattern unclear. "
+         "May be intentional edits, camera firmware quirks, or burst-mode stills. "
+         "Review carefully — “Not a duplicate” is safe to use if you want to keep both."),
     ):
         type_groups = [g for g in groups.values() if g["group_type"] == gtype]
         if type_groups:
+            # Groups with all thumbnails first; missing-thumbnail groups last
+            type_groups.sort(key=lambda g: (0 if g["has_all_thumbs"] else 1, g["id"]))
             sections.append({
                 "type":        gtype,
                 "label":       label,
