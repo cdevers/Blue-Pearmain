@@ -7044,6 +7044,151 @@ class TestPruneProposals(unittest.TestCase):
         self.assertEqual(n, 0)
 
 
+class TestDeduplicatorDimensionDivergence(unittest.TestCase):
+    """GH #72: auto-dismiss uncertain groups where dimensions differ significantly."""
+
+    def _photo(self, id, fp, width, height, flickr_id=None, date_uploaded=None):
+        from poller.deduplicator import PhotoRow
+        return PhotoRow(
+            id=id, flickr_id=flickr_id, uuid=f"uuid-{id}",
+            original_filename="IMG_001.JPG",
+            date_taken="2024-01-01T12:00:00",
+            date_added_photos=None,
+            date_uploaded_flickr=date_uploaded,
+            fingerprint=fp, width=width, height=height,
+            privacy_state="candidate_public", duplicate_group_id=None,
+        )
+
+    # --- _pixels_ratio ---
+
+    def test_pixels_ratio_none_when_any_dimensions_missing(self):
+        from poller.deduplicator import _pixels_ratio
+        photos = [self._photo(1, "a", 6000, 4000), self._photo(2, "b", None, None)]
+        self.assertIsNone(_pixels_ratio(photos))
+
+    def test_pixels_ratio_one_for_identical_dimensions(self):
+        from poller.deduplicator import _pixels_ratio
+        photos = [self._photo(1, "a", 6000, 4000), self._photo(2, "b", 6000, 4000)]
+        self.assertAlmostEqual(_pixels_ratio(photos), 1.0)
+
+    def test_pixels_ratio_correct_for_different_dimensions(self):
+        from poller.deduplicator import _pixels_ratio
+        # 6000×4000 = 24M, 3000×2000 = 6M → ratio 4.0
+        photos = [self._photo(1, "a", 6000, 4000), self._photo(2, "b", 3000, 2000)]
+        self.assertAlmostEqual(_pixels_ratio(photos), 4.0)
+
+    # --- _classify_group: not_duplicate ---
+
+    def test_classify_uncertain_when_dimensions_identical(self):
+        from poller.deduplicator import _classify_group
+        photos = [
+            self._photo(1, "fp1", 6000, 4000),
+            self._photo(2, "fp1", 6000, 4000),  # same fingerprint, same dims
+        ]
+        self.assertEqual(_classify_group(photos).group_type, "uncertain")
+
+    def test_classify_not_duplicate_when_dimensions_diverge(self):
+        from poller.deduplicator import _classify_group
+        # Same fingerprint (so not snapbridge), but very different dimensions
+        photos = [
+            self._photo(1, "fp1", 6000, 4000),   # 24M px
+            self._photo(2, "fp1", 3000, 2000),   # 6M px — ratio 4.0 >> 1.1
+        ]
+        self.assertEqual(_classify_group(photos).group_type, "not_duplicate")
+
+    def test_classify_uncertain_when_dimensions_missing(self):
+        from poller.deduplicator import _classify_group
+        photos = [self._photo(1, "fp1", None, None), self._photo(2, "fp1", None, None)]
+        self.assertEqual(_classify_group(photos).group_type, "uncertain")
+
+    def test_classify_snapbridge_not_reclassified_as_not_duplicate(self):
+        from poller.deduplicator import _classify_group
+        # Different fingerprints + different dimensions + 2 photos = snapbridge
+        photos = [
+            self._photo(1, "fp1", 6000, 4000),
+            self._photo(2, "fp2", 3000, 2000),
+        ]
+        self.assertEqual(_classify_group(photos).group_type, "snapbridge")
+
+    def test_not_duplicate_group_has_no_keeper_or_discards(self):
+        from poller.deduplicator import _classify_group
+        photos = [
+            self._photo(1, "fp1", 6000, 4000),
+            self._photo(2, "fp1", 3000, 2000),
+        ]
+        g = _classify_group(photos)
+        self.assertEqual(g.group_type, "not_duplicate")
+        self.assertIsNone(g.keeper)
+        self.assertEqual(g.discards, [])
+
+    def test_classify_uncertain_when_ratio_just_below_threshold(self):
+        from poller.deduplicator import _classify_group, _pixels_ratio, NOT_DUPLICATE_PIXEL_RATIO
+        # 6000×4000 = 24M; 4899×4672 ≈ 22.9M → ratio ~1.047, just below 1.1
+        photos = [
+            self._photo(1, "fp1", 6000, 4000),
+            self._photo(2, "fp1", 4899, 4672),
+        ]
+        ratio = _pixels_ratio(photos)
+        self.assertLess(ratio, NOT_DUPLICATE_PIXEL_RATIO)
+        self.assertEqual(_classify_group(photos).group_type, "uncertain")
+
+    # --- _write_groups: auto-resolve not_duplicate ---
+
+    def _make_db_with_dedup(self):
+        from db.db import Database
+        from db.migrations.migrate_003_dimensions_and_dedup import run as migrate
+        tmp = tempfile.mkdtemp()
+        db_path = str(Path(tmp) / "test.db")
+        db = Database(Path(db_path))
+        migrate(db_path)
+        return db, tmp
+
+    def test_write_groups_marks_not_duplicate_as_resolved(self):
+        from poller.deduplicator import DuplicateGroup, _write_groups
+        import shutil
+        db, tmp = self._make_db_with_dedup()
+        try:
+            group = DuplicateGroup(
+                match_key="IMG_001.JPG|2024-01-01T12:00:00",
+                group_type="not_duplicate",
+                photos=[],
+                notes="auto-dismissed: dimension divergence",
+            )
+            _write_groups(db.conn, [group])
+            row = db.conn.execute(
+                "SELECT resolved, group_type FROM duplicate_groups WHERE match_key = ?",
+                (group.match_key,),
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["resolved"], 1)
+            self.assertEqual(row["group_type"], "not_duplicate")
+        finally:
+            db.close()
+            shutil.rmtree(tmp)
+
+    def test_write_groups_updates_existing_uncertain_to_resolved(self):
+        from poller.deduplicator import DuplicateGroup, _write_groups
+        import shutil
+        db, tmp = self._make_db_with_dedup()
+        try:
+            key = "IMG_002.JPG|2024-01-01T12:00:00"
+            db.conn.execute(
+                "INSERT INTO duplicate_groups (match_key, group_type, photo_count, notes) VALUES (?,?,?,?)",
+                (key, "uncertain", 2, ""),
+            )
+            db.conn.commit()
+            group = DuplicateGroup(key, "not_duplicate", [], notes="auto-dismissed")
+            _write_groups(db.conn, [group])
+            row = db.conn.execute(
+                "SELECT resolved, group_type FROM duplicate_groups WHERE match_key = ?", (key,)
+            ).fetchone()
+            self.assertEqual(row["group_type"], "not_duplicate")
+            self.assertEqual(row["resolved"], 1)
+        finally:
+            db.close()
+            shutil.rmtree(tmp)
+
+
 class TestConfirmPublicDecision(unittest.TestCase):
     """confirm_public decision transitions photo to already_public."""
 

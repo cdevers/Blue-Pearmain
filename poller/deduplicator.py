@@ -48,6 +48,11 @@ log = logging.getLogger(__name__)
 # Upload timestamps this far apart suggest dual-device upload
 DEVICE_GAP_MINUTES = 5
 
+# Uncertain groups whose max/min pixel-count ratio exceeds this are auto-dismissed
+# as not_duplicate (clearly different images — crops, firmware quirks, edits).
+# True duplicates always have identical dimensions (ratio = 1.0).
+NOT_DUPLICATE_PIXEL_RATIO = 1.1
+
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -125,6 +130,15 @@ def _parse_dt(s: str) -> datetime | None:
         return None
 
 
+def _pixels_ratio(photos: list[PhotoRow]) -> float | None:
+    """Return max/min pixel count ratio across photos, or None if any lack dimensions."""
+    pixel_counts = [p.pixels for p in photos]
+    if any(px is None for px in pixel_counts):
+        return None
+    counts = [px for px in pixel_counts if px is not None]
+    return max(counts) / min(counts)
+
+
 def _upload_gap_minutes(photos: list[PhotoRow]) -> float | None:
     """Max gap in minutes between Flickr upload timestamps in a group."""
     times = [p.date_uploaded_dt for p in photos if p.date_uploaded_dt]
@@ -200,6 +214,16 @@ def _classify_group(photos: list[PhotoRow]) -> DuplicateGroup:
         )
         return DuplicateGroup(match_key, "device_upload", photos, keeper, discards, [], notes)
 
+    # Dimension-divergence check: if all photos have dimensions and they differ
+    # beyond the threshold, these are clearly different images (crop, firmware quirk).
+    ratio = _pixels_ratio(photos)
+    if ratio is not None and ratio > NOT_DUPLICATE_PIXEL_RATIO:
+        notes = (
+            f"Auto-dismissed: pixel ratio {ratio:.2f} exceeds threshold "
+            f"{NOT_DUPLICATE_PIXEL_RATIO} — likely distinct images with coincident filename/timestamp"
+        )
+        return DuplicateGroup(match_key, "not_duplicate", photos, None, [], [], notes)
+
     # Uncertain — flag for human review
     notes = (
         f"Uncertain: {len(photos)} photos, "
@@ -257,19 +281,23 @@ def _fetch_duplicate_candidates(conn: sqlite3.Connection) -> list[DuplicateGroup
 
 def _write_groups(conn: sqlite3.Connection, groups: list[DuplicateGroup]) -> dict[str, int]:
     """Write duplicate_groups rows and update photos. Returns type counts."""
-    counts: dict[str, int] = {"snapbridge": 0, "device_upload": 0, "uncertain": 0}
+    counts: dict[str, int] = {"snapbridge": 0, "device_upload": 0, "uncertain": 0, "not_duplicate": 0}
 
     for group in groups:
-        # Upsert into duplicate_groups
+        is_not_duplicate = group.group_type == "not_duplicate"
+
+        # Upsert into duplicate_groups; not_duplicate groups are immediately resolved
         conn.execute("""
-            INSERT INTO duplicate_groups (match_key, group_type, photo_count, notes)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO duplicate_groups (match_key, group_type, photo_count, notes, resolved)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(match_key) DO UPDATE SET
                 group_type  = excluded.group_type,
                 photo_count = excluded.photo_count,
                 notes       = excluded.notes,
+                resolved    = excluded.resolved,
                 updated_at  = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-        """, (group.match_key, group.group_type, len(group.photos), group.notes))
+        """, (group.match_key, group.group_type, len(group.photos), group.notes,
+              1 if is_not_duplicate else 0))
 
         group_id = conn.execute(
             "SELECT id FROM duplicate_groups WHERE match_key = ?", (group.match_key,)
