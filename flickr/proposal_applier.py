@@ -11,11 +11,11 @@ proposal is superseded rather than applied.
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import html
 import json
 import logging
-import concurrent.futures
 import subprocess
 import unicodedata
 from datetime import datetime, timezone
@@ -704,11 +704,13 @@ def _run_with_timeout(fn, *args, timeout: int = _PHOTOS_WRITE_TIMEOUT) -> dict:
     fires.  The stray thread cannot be killed (OS limitation) but the Flask
     handler is unblocked and the user gets a clear error.
     """
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(fn, *args)
-        try:
-            return future.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
-            return {"ok": False, "reason": "Photos not responding"}
-        except Exception as exc:
-            return {"ok": False, "reason": str(exc)}
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(fn, *args)
+    try:
+        return future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        pool.shutdown(wait=False, cancel_futures=False)
+        return {"ok": False, "reason": "Photos not responding"}
+    except Exception as exc:
+        pool.shutdown(wait=False)
+        return {"ok": False, "reason": str(exc)}

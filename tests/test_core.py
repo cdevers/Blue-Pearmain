@@ -7644,16 +7644,26 @@ class TestRunWithTimeout(unittest.TestCase):
         self.assertEqual(result, {"ok": True, "value": 42})
 
     def test_returns_not_responding_when_fn_exceeds_timeout(self):
+        import time
         import threading
         from flickr.proposal_applier import _run_with_timeout
         blocker = threading.Event()
         def slow():
             blocker.wait(timeout=5)
             return {"ok": True}
+        start = time.monotonic()
         result = _run_with_timeout(slow, timeout=0.05)
+        elapsed = time.monotonic() - start
         blocker.set()  # release thread immediately so it doesn't linger
         self.assertFalse(result["ok"])
         self.assertEqual(result["reason"], "Photos not responding")
+        self.assertLess(elapsed, 1.0, f"_run_with_timeout took {elapsed:.2f}s — should return immediately after timeout")
+
+    def test_returns_error_when_fn_raises(self):
+        from flickr.proposal_applier import _run_with_timeout
+        result = _run_with_timeout(lambda: 1/0)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason"], "division by zero")
 
 
 if __name__ == "__main__":
