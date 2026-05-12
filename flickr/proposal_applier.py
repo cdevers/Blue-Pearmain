@@ -464,27 +464,32 @@ def _apply_text_to_photos(db: "Database", row, new_value: str) -> dict:
     except ImportError:
         return {"ok": False, "reason": "photoscript not installed"}
 
-    try:
-        photo = photoscript.Photo(uuid)
-    except Exception as e:
-        if "invalid photo id" in str(e).lower():
-            return {"ok": False, "reason": "stale_uuid", "stale_uuid": True}
-        return {"ok": False, "reason": f"photo not found in Photos: {e}"}
+    def _do_write():
+        try:
+            photo = photoscript.Photo(uuid)
+        except Exception as e:
+            if "invalid photo id" in str(e).lower():
+                return {"ok": False, "reason": "stale_uuid", "stale_uuid": True}
+            return {"ok": False, "reason": f"photo not found in Photos: {e}"}
+        try:
+            if field == "title":
+                photo.title = new_value
+            else:
+                photo.description = new_value
+        except Exception as e:
+            return {"ok": False, "reason": f"write failed: {e}"}
+        try:
+            written = photo.title if field == "title" else photo.description
+            written = (written or "").strip()
+        except Exception:
+            written = new_value
+        return {"ok": True, "written": written}
 
-    try:
-        if field == "title":
-            photo.title = new_value
-        else:
-            photo.description = new_value
-    except Exception as e:
-        return {"ok": False, "reason": f"write failed: {e}"}
+    result = _run_with_timeout(_do_write)
+    if not result.get("ok"):
+        return result
 
-    try:
-        written = photo.title if field == "title" else photo.description
-        written = (written or "").strip()
-    except Exception:
-        written = new_value
-
+    written = result.get("written", new_value)
     now = _now_iso()
     assert field in ("title", "description", "tags"), f"unexpected field: {field!r}"
     col = f"photos_{field}"
