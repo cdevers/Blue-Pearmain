@@ -15,6 +15,7 @@ import hashlib
 import html
 import json
 import logging
+import concurrent.futures
 import subprocess
 import unicodedata
 from datetime import datetime, timezone
@@ -358,8 +359,8 @@ def _write_tags_to_photos(
     db: "Database", photo_id: int, uuid: str, new_tags: list[str], library_path: str
 ) -> dict:
     """Write tags to Photos.app and update the DB cache. Does not touch proposal state."""
-    if not _photos_is_running():
-        return {"ok": False, "reason": "Photos.app is not running"}
+    if not _photos_is_responsive():
+        return {"ok": False, "reason": "Photos not responding"}
     try:
         import photoscript
     except ImportError:
@@ -447,8 +448,8 @@ def _apply_text_to_photos(db: "Database", row, new_value: str) -> dict:
     uuid = row["uuid"]
     if not uuid:
         return {"ok": False, "reason": "photo has no uuid"}
-    if not _photos_is_running():
-        return {"ok": False, "reason": "Photos.app is not running"}
+    if not _photos_is_responsive():
+        return {"ok": False, "reason": "Photos not responding"}
 
     try:
         import photoscript
@@ -625,8 +626,8 @@ def _write_text_to_photos_both(
     db: "Database", photo_id: int, uuid: str, title: str, description: str
 ) -> dict:
     """Write both title and description to Photos.app and update the DB cache."""
-    if not _photos_is_running():
-        return {"ok": False, "reason": "Photos.app is not running"}
+    if not _photos_is_responsive():
+        return {"ok": False, "reason": "Photos not responding"}
     try:
         import photoscript
     except ImportError:
@@ -677,13 +678,37 @@ def _write_text_to_flickr_both(
     return {"ok": True}
 
 
-def _photos_is_running() -> bool:
+_PHOTOS_WRITE_TIMEOUT = 45  # seconds before a hung photoscript call is abandoned
+
+
+def _photos_is_responsive(timeout: int = 3) -> bool:
+    """
+    Return True only if Photos.app is running AND responds to a test AppleScript
+    command within `timeout` seconds.  Catches the case where the process exists
+    but is hung — which a process-existence check cannot detect.
+    """
     try:
         result = subprocess.run(
-            ["osascript", "-e",
-             'tell application "System Events" to (name of processes) contains "Photos"'],
-            capture_output=True, text=True, timeout=5,
+            ["osascript", "-e", 'tell application "Photos" to name'],
+            capture_output=True, text=True, timeout=timeout,
         )
-        return result.stdout.strip().lower() == "true"
+        return result.returncode == 0
     except Exception:
         return False
+
+
+def _run_with_timeout(fn, *args, timeout: int = _PHOTOS_WRITE_TIMEOUT) -> dict:
+    """
+    Run fn(*args) in a ThreadPoolExecutor with a timeout.
+    Returns {"ok": False, "reason": "Photos not responding"} if the timeout
+    fires.  The stray thread cannot be killed (OS limitation) but the Flask
+    handler is unblocked and the user gets a clear error.
+    """
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(fn, *args)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            return {"ok": False, "reason": "Photos not responding"}
+        except Exception as exc:
+            return {"ok": False, "reason": str(exc)}

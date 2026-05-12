@@ -5091,14 +5091,14 @@ class TestApplyProposal(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("applied", result["reason"])
 
-    def test_photos_not_running_returns_error(self):
+    def test_photos_not_responding_returns_error(self):
         from unittest.mock import patch
         from flickr.proposal_applier import apply_proposal
         pid = self._insert_proposal()
-        with patch("flickr.proposal_applier._photos_is_running", return_value=False):
+        with patch("flickr.proposal_applier._photos_is_responsive", return_value=False):
             result = apply_proposal(self.db, pid, library_path="/fake/path")
         self.assertFalse(result["ok"])
-        self.assertIn("Photos", result["reason"])
+        self.assertEqual(result["reason"], "Photos not responding")
 
     def test_null_target_hash_does_not_trigger_target_changed(self):
         # Proposals created before description cache columns were populated have
@@ -5106,7 +5106,7 @@ class TestApplyProposal(unittest.TestCase):
         from unittest.mock import patch
         from flickr.proposal_applier import apply_proposal
         pid = self._insert_proposal(target_hash=None)
-        with patch("flickr.proposal_applier._photos_is_running", return_value=True):
+        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True):
             with patch("flickr.proposal_applier._write_tags_to_photos") as mock_write:
                 mock_write.return_value = {"ok": True}
                 result = apply_proposal(self.db, pid, library_path="/fake/path")
@@ -5117,7 +5117,7 @@ class TestApplyProposal(unittest.TestCase):
         from unittest.mock import patch
         from flickr.proposal_applier import apply_proposal
         pid = self._insert_proposal(source_hash=None)
-        with patch("flickr.proposal_applier._photos_is_running", return_value=True):
+        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True):
             with patch("flickr.proposal_applier._write_tags_to_photos") as mock_write:
                 mock_write.return_value = {"ok": True}
                 result = apply_proposal(self.db, pid, library_path="/fake/path")
@@ -5350,7 +5350,7 @@ class TestApplyManualMerge(unittest.TestCase):
         primary, sibling = self._seed_collision_pair()
 
         mock_flickr = MagicMock()
-        with unittest.mock.patch("flickr.proposal_applier._photos_is_running", return_value=False):
+        with unittest.mock.patch("flickr.proposal_applier._photos_is_responsive", return_value=False):
             # Photos not running — only Flickr write happens (uuid present but Photos blocked)
             result = apply_manual_merge(
                 self.db, primary, ["nature", "travel", "vacation"],
@@ -5377,7 +5377,7 @@ class TestApplyManualMerge(unittest.TestCase):
         mock_ps = MagicMock()
         mock_ps.Photo.return_value = mock_photo
 
-        with patch("flickr.proposal_applier._photos_is_running", return_value=True), \
+        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
              patch.dict("sys.modules", {"photoscript": mock_ps}):
             result = apply_manual_merge(
                 self.db, primary, ["nature", "travel", "vacation"],
@@ -6130,7 +6130,7 @@ class TestSetPhotoText(unittest.TestCase):
         from unittest.mock import MagicMock
         from flickr.proposal_applier import set_photo_text
         mock_client = MagicMock()
-        with unittest.mock.patch("flickr.proposal_applier._photos_is_running", return_value=False):
+        with unittest.mock.patch("flickr.proposal_applier._photos_is_responsive", return_value=False):
             result = set_photo_text(self.db, self.photo_id, "New Title", "New Desc",
                                     "/fake/lib", flickr_client=mock_client)
         self.assertTrue(result["ok"], result)
@@ -6139,7 +6139,7 @@ class TestSetPhotoText(unittest.TestCase):
     def test_updates_flickr_cache_in_db(self):
         from unittest.mock import MagicMock
         from flickr.proposal_applier import set_photo_text
-        with unittest.mock.patch("flickr.proposal_applier._photos_is_running", return_value=False):
+        with unittest.mock.patch("flickr.proposal_applier._photos_is_responsive", return_value=False):
             set_photo_text(self.db, self.photo_id, "T2", "D2", "/fake/lib",
                            flickr_client=MagicMock())
         row = self.db.get_photo(self.photo_id)
@@ -6158,7 +6158,7 @@ class TestSetPhotoText(unittest.TestCase):
                 "created_at": "2026-01-01T00:00:00+00:00",
             })
         self.db.conn.commit()
-        with unittest.mock.patch("flickr.proposal_applier._photos_is_running", return_value=False):
+        with unittest.mock.patch("flickr.proposal_applier._photos_is_responsive", return_value=False):
             set_photo_text(self.db, self.photo_id, "T", "D", "/fake/lib",
                            flickr_client=MagicMock())
         statuses = [r["status"] for r in self.db.conn.execute(
@@ -6176,7 +6176,7 @@ class TestSetPhotoText(unittest.TestCase):
 
     def test_no_flickr_client_produces_warning(self):
         from flickr.proposal_applier import set_photo_text
-        with unittest.mock.patch("flickr.proposal_applier._photos_is_running", return_value=False):
+        with unittest.mock.patch("flickr.proposal_applier._photos_is_responsive", return_value=False):
             result = set_photo_text(self.db, self.photo_id, "T", "D", "/fake/lib",
                                     flickr_client=None)
         self.assertTrue(result["ok"], result)
@@ -6187,7 +6187,7 @@ class TestSetPhotoText(unittest.TestCase):
         from flickr.proposal_applier import set_photo_text
         mock_client = MagicMock()
         mock_client.set_meta.side_effect = Exception("API down")
-        with unittest.mock.patch("flickr.proposal_applier._photos_is_running", return_value=False):
+        with unittest.mock.patch("flickr.proposal_applier._photos_is_responsive", return_value=False):
             result = set_photo_text(self.db, self.photo_id, "T", "D", "/fake/lib",
                                     flickr_client=mock_client)
         self.assertTrue(result["ok"], result)
@@ -6201,7 +6201,7 @@ class TestSetPhotoText(unittest.TestCase):
         mock_photo.description = ""
         mock_ps = MagicMock()
         mock_ps.Photo.return_value = mock_photo
-        with patch("flickr.proposal_applier._photos_is_running", return_value=True), \
+        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
              patch.dict("sys.modules", {"photoscript": mock_ps}):
             result = set_photo_text(self.db, self.photo_id, "T3", "D3", "/fake/lib",
                                     flickr_client=MagicMock())
@@ -6258,7 +6258,7 @@ class TestStaleUuid(unittest.TestCase):
     def test_stale_uuid_marks_proposal_failed(self):
         from unittest.mock import patch
         from flickr.proposal_applier import apply_proposal
-        with patch("flickr.proposal_applier._photos_is_running", return_value=True), \
+        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
              self._mock_stale_uuid():
             result = apply_proposal(self.db, self.proposal_id, "/fake/lib")
         self.assertFalse(result["ok"])
@@ -6273,7 +6273,7 @@ class TestStaleUuid(unittest.TestCase):
     def test_stale_uuid_sets_flag_on_photo(self):
         from unittest.mock import patch
         from flickr.proposal_applier import apply_proposal
-        with patch("flickr.proposal_applier._photos_is_running", return_value=True), \
+        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
              self._mock_stale_uuid():
             apply_proposal(self.db, self.proposal_id, "/fake/lib")
         flag = self.db.conn.execute(
@@ -6284,7 +6284,7 @@ class TestStaleUuid(unittest.TestCase):
     def test_stale_uuid_in_apply_batch_counted_as_failed_not_error(self):
         from unittest.mock import patch
         from flickr.proposal_applier import apply_batch
-        with patch("flickr.proposal_applier._photos_is_running", return_value=True), \
+        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
              self._mock_stale_uuid():
             totals = apply_batch(self.db, "/fake/lib")
         self.assertEqual(totals["failed"], 1)
@@ -6294,7 +6294,7 @@ class TestStaleUuid(unittest.TestCase):
         import logging
         from unittest.mock import patch
         from flickr.proposal_applier import apply_batch
-        with patch("flickr.proposal_applier._photos_is_running", return_value=True), \
+        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
              self._mock_stale_uuid(), \
              self.assertLogs("blue-pearmain.proposal_applier", level="DEBUG") as cm:
             apply_batch(self.db, "/fake/lib")
@@ -6313,7 +6313,7 @@ class TestStaleUuid(unittest.TestCase):
         from flickr.proposal_applier import apply_proposal
         mock_ps = MagicMock()
         mock_ps.Photo.side_effect = Exception("permission denied")
-        with patch("flickr.proposal_applier._photos_is_running", return_value=True), \
+        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
              patch.dict("sys.modules", {"photoscript": mock_ps}):
             result = apply_proposal(self.db, self.proposal_id, "/fake/lib")
         self.assertFalse(result["ok"])
@@ -7609,6 +7609,51 @@ class TestMergeFlickrDonorInGroup(unittest.TestCase):
         self.db.conn.commit()
         with self.assertRaises(ValueError):
             self.db.merge_flickr_donor_in_group(self.donor_id, self.target_id, self.group_id)
+
+
+class TestPhotosIsResponsive(unittest.TestCase):
+    def test_returns_true_when_osascript_succeeds(self):
+        from unittest.mock import patch, MagicMock
+        from flickr.proposal_applier import _photos_is_responsive
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        with patch("flickr.proposal_applier.subprocess.run", return_value=mock_result):
+            self.assertTrue(_photos_is_responsive())
+
+    def test_returns_false_when_osascript_nonzero(self):
+        from unittest.mock import patch, MagicMock
+        from flickr.proposal_applier import _photos_is_responsive
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        with patch("flickr.proposal_applier.subprocess.run", return_value=mock_result):
+            self.assertFalse(_photos_is_responsive())
+
+    def test_returns_false_on_subprocess_timeout(self):
+        import subprocess
+        from unittest.mock import patch
+        from flickr.proposal_applier import _photos_is_responsive
+        with patch("flickr.proposal_applier.subprocess.run",
+                   side_effect=subprocess.TimeoutExpired("osascript", 3)):
+            self.assertFalse(_photos_is_responsive())
+
+
+class TestRunWithTimeout(unittest.TestCase):
+    def test_returns_fn_result_on_success(self):
+        from flickr.proposal_applier import _run_with_timeout
+        result = _run_with_timeout(lambda: {"ok": True, "value": 42})
+        self.assertEqual(result, {"ok": True, "value": 42})
+
+    def test_returns_not_responding_when_fn_exceeds_timeout(self):
+        import threading
+        from flickr.proposal_applier import _run_with_timeout
+        blocker = threading.Event()
+        def slow():
+            blocker.wait(timeout=5)
+            return {"ok": True}
+        result = _run_with_timeout(slow, timeout=0.05)
+        blocker.set()  # release thread immediately so it doesn't linger
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason"], "Photos not responding")
 
 
 if __name__ == "__main__":
