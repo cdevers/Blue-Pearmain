@@ -217,7 +217,11 @@
   </button>
 
   <div class="shortcuts">
+    {% if state_filter == 'screenshot_public' %}
+    <span><kbd>P</kbd> confirm public</span>
+    {% else %}
     <span><kbd>P</kbd> public</span>
+    {% endif %}
     {% if state_filter.startswith('screenshot_') %}
     <span><kbd>X</kbd> confirm private</span>
     {% else %}
@@ -275,8 +279,8 @@
       {% endif %}
       <div class="actions">
         <button class="btn-pub"
-                onclick="event.stopPropagation(); quickDecide({{ photo.id }}, 'make_public', this.closest('.photo-card'))">
-          ✓ Public
+                onclick="event.stopPropagation(); quickDecide({{ photo.id }}, '{{ 'confirm_public' if state_filter == 'screenshot_public' else 'make_public' }}', this.closest('.photo-card'))">
+          {% if state_filter == 'screenshot_public' %}✓ Confirm public{% else %}✓ Public{% endif %}
         </button>
         <button class="{% if state_filter.startswith('screenshot_') %}btn-pub{% else %}btn-prv{% endif %}"
                 onclick="event.stopPropagation(); quickDecide({{ photo.id }}, 'keep_private', this.closest('.photo-card'))">
@@ -325,9 +329,10 @@ let   _reviewTotal = {{ total }};
 const _stateMap = {{ stats.by_state | tojson }};
 Object.assign(_stateMap, {{ stats.screenshot_counts | tojson }});
 const _decisionToState = {
-  make_public:  'approved_public',
-  keep_private: 'keep_private',
-  skip:         'skipped',
+  make_public:    'approved_public',
+  confirm_public: 'already_public',
+  keep_private:   'keep_private',
+  skip:           'skipped',
 };
 
 function _updateReviewCounts(decision) {
@@ -403,7 +408,8 @@ document.addEventListener('keydown', e => {
     const prev = cards[idx - 1];
     if (prev) selectCard(prev);
   } else if (e.key === 'p' || e.key === 'P') {
-    if (selected) quickDecide(+selected.dataset.id, 'make_public', selected);
+    const _pubDecision = _stateFilter === 'screenshot_public' ? 'confirm_public' : 'make_public';
+    if (selected) quickDecide(+selected.dataset.id, _pubDecision, selected);
   } else if (e.key === 'x' || e.key === 'X') {
     if (selected) quickDecide(+selected.dataset.id, 'keep_private', selected);
   } else if (e.key === ' ') {

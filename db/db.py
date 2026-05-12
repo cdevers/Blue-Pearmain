@@ -338,9 +338,10 @@ class Database:
     def record_review(self, photo_id: int, decision: str, notes: str = ""):
         """Record a human review decision and update privacy state accordingly."""
         state_map = {
-            "make_public":  "approved_public",
-            "keep_private": "keep_private",
-            "skip":         "skipped",
+            "make_public":    "approved_public",
+            "confirm_public": "already_public",
+            "keep_private":   "keep_private",
+            "skip":           "skipped",
         }
         new_state = state_map.get(decision, "skipped")
         self.conn.execute(
@@ -1123,7 +1124,7 @@ class Database:
             screenshot_counts: dict[str, int] = {}
             for label, condition in [
                 ("screenshot_unreviewed", "is_screenshot = 1 AND privacy_state = 'auto_private'"),
-                ("screenshot_public",     "is_screenshot = 1 AND privacy_state IN ('approved_public', 'already_public')"),
+                ("screenshot_public",     "is_screenshot = 1 AND privacy_state = 'approved_public'"),
                 ("screenshot_private",    "is_screenshot = 1 AND privacy_state = 'keep_private'"),
             ]:
                 row = self.conn.execute(

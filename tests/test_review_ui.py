@@ -623,3 +623,89 @@ class TestScreenshotQueueButtons:
         resp = c.get("/review?state=screenshot_unreviewed")
         html = resp.data.decode()
         assert "confirm private" in html.lower()
+
+
+@pytest.fixture
+def client_with_confirmed_screenshot():
+    """DB with one approved_public screenshot and one already_public screenshot."""
+    with tempfile.TemporaryDirectory() as tmp:
+        from db.migrations.migrate_013_screenshot_flag import run as migrate
+        db_path = Path(tmp) / "test.db"
+        test_db = Database(db_path)
+        migrate(str(db_path))
+
+        test_db.upsert_photo({
+            "uuid": "uuid-ss-approved",
+            "original_filename": "SS_approved.PNG",
+            "privacy_state": "approved_public",
+            "proposed_tags": [],
+            "apple_persons": [],
+            "apple_labels": [],
+            "apple_unknown_faces": 0,
+            "apple_named_faces": 0,
+            "is_screenshot": 1,
+        })
+        test_db.upsert_photo({
+            "uuid": "uuid-ss-confirmed",
+            "original_filename": "SS_confirmed.PNG",
+            "privacy_state": "already_public",
+            "proposed_tags": [],
+            "apple_persons": [],
+            "apple_labels": [],
+            "apple_unknown_faces": 0,
+            "apple_named_faces": 0,
+            "is_screenshot": 1,
+        })
+
+        app_module._db = test_db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+
+        with app_module.app.test_client() as c:
+            yield c, test_db
+
+        app_module._db = None
+
+
+class TestScreenshotPublicQueue:
+    """screenshot_public shows only approved_public; already_public falls off."""
+
+    def test_approved_public_screenshot_appears(self, client_with_confirmed_screenshot):
+        c, _ = client_with_confirmed_screenshot
+        resp = c.get("/review?state=screenshot_public")
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "SS_approved.PNG" in html
+
+    def test_already_public_screenshot_absent(self, client_with_confirmed_screenshot):
+        c, _ = client_with_confirmed_screenshot
+        resp = c.get("/review?state=screenshot_public")
+        html = resp.data.decode()
+        assert "SS_confirmed.PNG" not in html
+
+    def test_confirm_public_button_present(self, client_with_confirmed_screenshot):
+        c, _ = client_with_confirmed_screenshot
+        resp = c.get("/review?state=screenshot_public")
+        html = resp.data.decode()
+        assert "Confirm public" in html
+
+    def test_confirm_public_hint_in_shortcuts(self, client_with_confirmed_screenshot):
+        c, _ = client_with_confirmed_screenshot
+        resp = c.get("/review?state=screenshot_public")
+        html = resp.data.decode()
+        assert "confirm public" in html.lower()
+
+    def test_confirm_public_api_sets_already_public(self, client_with_confirmed_screenshot):
+        c, test_db = client_with_confirmed_screenshot
+        photo = test_db.conn.execute(
+            "SELECT id FROM photos WHERE uuid='uuid-ss-approved'"
+        ).fetchone()
+        resp = c.post("/api/decide", json={
+            "photo_id": photo["id"],
+            "decision": "confirm_public",
+        })
+        assert resp.status_code == 200
+        row = test_db.conn.execute(
+            "SELECT privacy_state FROM photos WHERE uuid='uuid-ss-approved'"
+        ).fetchone()
+        assert row["privacy_state"] == "already_public"

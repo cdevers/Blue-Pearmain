@@ -128,7 +128,7 @@ def review():
     ]
     _screenshot_sql: dict[str, str] = {
         "screenshot_unreviewed": "is_screenshot = 1 AND privacy_state = 'auto_private'",
-        "screenshot_public":     "is_screenshot = 1 AND privacy_state IN ('approved_public', 'already_public')",
+        "screenshot_public":     "is_screenshot = 1 AND privacy_state = 'approved_public'",
         "screenshot_private":    "is_screenshot = 1 AND privacy_state = 'keep_private'",
     }
     if state_filter not in valid_states:
@@ -539,7 +539,7 @@ def api_decide():
     push      = data.get("push", False)
     tags      = data.get("tags")        # optional updated tag list
 
-    if not photo_id or decision not in ("make_public", "keep_private", "skip"):
+    if not photo_id or decision not in ("make_public", "confirm_public", "keep_private", "skip"):
         return jsonify({"ok": False, "error": "invalid params"}), 400
 
     photo = db().get_photo(photo_id)

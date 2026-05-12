@@ -7044,6 +7044,76 @@ class TestPruneProposals(unittest.TestCase):
         self.assertEqual(n, 0)
 
 
+class TestConfirmPublicDecision(unittest.TestCase):
+    """confirm_public decision transitions photo to already_public."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        self.photo_id = self.db.upsert_photo({
+            "uuid": "uuid-confirm-001",
+            "original_filename": "Screenshot_confirm.PNG",
+            "privacy_state": "approved_public",
+            "proposed_tags": [],
+            "apple_persons": [],
+            "apple_labels": [],
+        })
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def test_confirm_public_sets_already_public(self):
+        self.db.record_review(self.photo_id, "confirm_public")
+        row = self.db.conn.execute(
+            "SELECT privacy_state FROM photos WHERE id = ?", (self.photo_id,)
+        ).fetchone()
+        self.assertEqual(row["privacy_state"], "already_public")
+
+    def test_confirm_public_sets_review_decision(self):
+        self.db.record_review(self.photo_id, "confirm_public")
+        row = self.db.conn.execute(
+            "SELECT review_decision FROM photos WHERE id = ?", (self.photo_id,)
+        ).fetchone()
+        self.assertEqual(row["review_decision"], "confirm_public")
+
+
+class TestScreenshotPublicStatsFilter(unittest.TestCase):
+    """stats() screenshot_public count excludes already_public photos."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        db_path = Path(self._tmp.name) / "test.db"
+        from db.db import Database
+        from db.migrations.migrate_013_screenshot_flag import run as migrate
+        self.db = Database(db_path)
+        migrate(str(db_path))
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _insert(self, uid: str, state: str, is_screenshot: int = 1) -> None:
+        self.db.upsert_photo({
+            "uuid": uid, "original_filename": f"{uid}.PNG",
+            "privacy_state": state, "proposed_tags": [],
+            "apple_persons": [], "apple_labels": [],
+            "is_screenshot": is_screenshot,
+        })
+
+    def test_screenshot_public_count_only_includes_approved_public(self):
+        self._insert("u1", "approved_public")
+        self._insert("u2", "already_public")   # confirmed — should NOT count
+        counts = self.db.stats()["screenshot_counts"]
+        self.assertEqual(counts["screenshot_public"], 1)
+
+    def test_screenshot_public_count_zero_when_all_confirmed(self):
+        self._insert("u3", "already_public")
+        counts = self.db.stats()["screenshot_counts"]
+        self.assertEqual(counts["screenshot_public"], 0)
+
+
 class TestReviewQueueScreenshots(unittest.TestCase):
     """review_queue and review_queue_count handle is_screenshot filtering."""
 
@@ -7186,12 +7256,12 @@ class TestScreenshotStats(unittest.TestCase):
         counts = self.db.stats()["screenshot_counts"]
         self.assertEqual(counts["screenshot_unreviewed"], 1)
 
-    def test_public_counts_approved_and_already_public(self):
+    def test_public_counts_only_approved_public(self):
         self._insert("s3", "approved_public", 1)
-        self._insert("s4", "already_public", 1)
+        self._insert("s4", "already_public", 1)   # confirmed — no longer in this bucket
         self._insert("s5", "approved_public", 0)  # not a screenshot
         counts = self.db.stats()["screenshot_counts"]
-        self.assertEqual(counts["screenshot_public"], 2)
+        self.assertEqual(counts["screenshot_public"], 1)
 
     def test_private_counts_keep_private(self):
         self._insert("s6", "keep_private", 1)
