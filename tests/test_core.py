@@ -3656,6 +3656,29 @@ class TestFlickrPhotoToDb(unittest.TestCase):
         self._enrich_from_info(row, info)
         self.assertEqual(row["flickr_title"], "Keep This")
 
+    def test_original_dimensions_stored_from_width_o_height_o(self):
+        row = self._flickr_photo_to_db(self._make_photo(width_o="6048", height_o="4024"))
+        self.assertEqual(row["width"],  6048)
+        self.assertEqual(row["height"], 4024)
+
+    def test_large_dimensions_used_as_fallback(self):
+        row = self._flickr_photo_to_db(self._make_photo(width_l="2048", height_l="1365"))
+        self.assertEqual(row["width"],  2048)
+        self.assertEqual(row["height"], 1365)
+
+    def test_original_preferred_over_large(self):
+        row = self._flickr_photo_to_db(self._make_photo(
+            width_o="6048", height_o="4024",
+            width_l="2048", height_l="1365",
+        ))
+        self.assertEqual(row["width"],  6048)
+        self.assertEqual(row["height"], 4024)
+
+    def test_no_dimensions_when_absent(self):
+        row = self._flickr_photo_to_db(self._make_photo())
+        self.assertNotIn("width",  row)
+        self.assertNotIn("height", row)
+
 
 class TestPollerMetadataCache(unittest.TestCase):
     """Integration tests: poll() writes Flickr metadata cache columns to DB."""

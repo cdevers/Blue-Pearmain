@@ -170,6 +170,19 @@ def flickr_photo_to_db(photo: dict, info: dict | None = None) -> dict:
     row["thumbnail_url_l"] = photo.get("url_l", "")
     row["thumbnail_url_m"] = photo.get("url_m", "")
 
+    # Dimensions — original size preferred (width_o/height_o returned alongside url_o
+    # in extras), fall back to Large size. Scanner overwrites these with authoritative
+    # Apple Photos dimensions when the photo is matched.
+    try:
+        if photo.get("width_o") and photo.get("height_o"):
+            row["width"]  = int(photo["width_o"])
+            row["height"] = int(photo["height_o"])
+        elif photo.get("width_l") and photo.get("height_l"):
+            row["width"]  = int(photo["width_l"])
+            row["height"] = int(photo["height_l"])
+    except (TypeError, ValueError):
+        pass
+
     # Original filename and format from extras
     row["original_format"] = photo.get("originalformat", "")
 
