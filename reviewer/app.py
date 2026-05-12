@@ -410,12 +410,32 @@ def duplicates():
             "privacy_state":     r["privacy_state"],
         })
 
-    # Annotate each group with whether all its photos have a usable thumbnail
+    # Annotate each group with thumbnail availability and merge candidate data
     for g in groups.values():
         g["has_all_thumbs"] = all(
             p["thumbnail_path"] or (p["flickr_secret"] and p["flickr_server"])
             for p in g["photos"]
         )
+        # Photos-linked records sorted highest-res first (merge targets)
+        photos_targets = sorted(
+            [p for p in g["photos"] if p.get("uuid")],
+            key=lambda p: (p.get("width") or 0) * (p.get("height") or 0),
+            reverse=True,
+        )
+        g["flickr_only_ids"] = {
+            p["id"] for p in g["photos"] if p.get("flickr_id") and not p.get("uuid")
+        }
+        g["photos_targets"] = [
+            {
+                "id": p["id"],
+                "label": (
+                    f"{p['original_filename']} ({p['width']}×{p['height']}px)"
+                    if p.get("width") and p.get("height")
+                    else p["original_filename"]
+                ),
+            }
+            for p in photos_targets
+        ]
 
     sections = []
     for gtype, label, description in (

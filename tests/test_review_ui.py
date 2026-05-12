@@ -797,3 +797,15 @@ class TestMergeUI:
             json={"action": "merge", "donor_id": target_id, "target_id": donor_id},
         )
         assert resp.status_code == 400
+
+    def test_merge_button_shown_on_flickr_only_card(self, client_with_merge_group):
+        c, db, group_id, donor_id, target_id = client_with_merge_group
+        resp = c.get("/duplicates")
+        assert resp.status_code == 200
+        assert b"Merge into Photos record" in resp.data
+
+    def test_merge_button_appears_exactly_once(self, client_with_merge_group):
+        c, db, group_id, donor_id, target_id = client_with_merge_group
+        resp = c.get("/duplicates")
+        # Only the Flickr-only card (donor) should have the button; the Photos-linked card should not
+        assert resp.data.decode().count("Merge into Photos record") == 1

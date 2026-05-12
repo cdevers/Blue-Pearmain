@@ -167,6 +167,27 @@
   padding: 8px 14px;
   margin-bottom: 20px;
 }
+.btn-merge {
+  font-size: 12px;
+  padding: 4px 10px;
+  color: #6ab4f5;
+  margin-top: 4px;
+}
+.merge-confirm {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.merge-confirm label { color: var(--text); }
+.merge-confirm select { font-size: 12px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px; }
+.merge-cancel { font-size: 12px; color: var(--muted); text-decoration: none; }
+.merge-cancel:hover { color: var(--text); }
 {% endblock %}
 
 {% block content %}
@@ -248,6 +269,22 @@
                 Make keeper
               </button>
             </div>
+            {% if photo.id in group.flickr_only_ids and group.photos_targets %}
+            <div class="dup-merge-wrap">
+              <button class="btn btn-merge"
+                      onclick="showMergeConfirm(this, {{ group.id }}, {{ photo.id }},
+                               {{ group.photos_targets | tojson }})">
+                Merge into Photos record
+              </button>
+              <div class="merge-confirm" style="display:none">
+                <label>Into:
+                  <select class="merge-target-select"></select>
+                </label>
+                <button class="btn btn-primary merge-confirm-btn">Confirm merge</button>
+                <a class="merge-cancel" href="#">Cancel</a>
+              </div>
+            </div>
+            {% endif %}
           </div>
         </div>
         {% endfor %}
@@ -341,6 +378,46 @@ document.addEventListener('keydown', e => {
     if (btn && !btn.disabled) btn.click();
   }
 });
+
+function showMergeConfirm(btn, groupId, donorId, targets) {
+  const wrap = btn.closest('.dup-merge-wrap');
+  btn.style.display = 'none';
+  const confirm = wrap.querySelector('.merge-confirm');
+  const sel = wrap.querySelector('.merge-target-select');
+  sel.innerHTML = targets.map(t =>
+    `<option value="${t.id}">${t.label}</option>`
+  ).join('');
+  confirm.style.display = '';
+  wrap.querySelector('.merge-confirm-btn').onclick =
+    () => confirmMerge(groupId, donorId, wrap);
+  wrap.querySelector('.merge-cancel').onclick = e => {
+    e.preventDefault();
+    confirm.style.display = 'none';
+    btn.style.display = '';
+  };
+}
+
+async function confirmMerge(groupId, donorId, wrap) {
+  const targetId = parseInt(wrap.querySelector('.merge-target-select').value, 10);
+  const confirmBtn = wrap.querySelector('.merge-confirm-btn');
+  confirmBtn.disabled = true;
+  const r = await apiFetch(`/api/duplicates/${groupId}/assign`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({action: 'merge', donor_id: donorId, target_id: targetId}),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    toast('Merged — Flickr identity moved to Photos record');
+    const card = document.getElementById(`group-${groupId}`);
+    card.style.opacity = '0.4';
+    card.querySelectorAll('button').forEach(b => b.disabled = true);
+    refreshStats();
+  } else {
+    toast('Error: ' + (d.error || 'unknown'), 'err');
+    confirmBtn.disabled = false;
+  }
+}
 
 async function notDuplicate(groupId, btn) {
   btn.disabled = true;
