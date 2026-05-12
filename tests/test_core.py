@@ -7044,5 +7044,120 @@ class TestPruneProposals(unittest.TestCase):
         self.assertEqual(n, 0)
 
 
+class TestMigrate013ScreenshotFlag(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db_path = str(Path(self._tmp.name) / "test.db")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_migration_adds_is_screenshot_column(self):
+        from db.db import Database
+        from db.migrations.migrate_013_screenshot_flag import run
+        db = Database(Path(self.db_path))
+        run(self.db_path)
+        cols = {r["name"] for r in db.conn.execute("PRAGMA table_info(photos)").fetchall()}
+        self.assertIn("is_screenshot", cols)
+        db.close()
+
+    def test_migration_backfills_from_privacy_reason(self):
+        from db.db import Database
+        from db.migrations.migrate_013_screenshot_flag import run
+        db = Database(Path(self.db_path))
+        db.conn.execute(
+            """INSERT INTO photos (flickr_id, privacy_state, privacy_reason)
+               VALUES ('aaa', 'auto_private', 'screenshot')"""
+        )
+        db.conn.commit()
+        run(self.db_path)
+        row = db.conn.execute("SELECT is_screenshot FROM photos WHERE flickr_id='aaa'").fetchone()
+        self.assertEqual(row[0], 1)
+        db.close()
+
+    def test_migration_does_not_set_flag_for_other_reasons(self):
+        from db.db import Database
+        from db.migrations.migrate_013_screenshot_flag import run
+        db = Database(Path(self.db_path))
+        db.conn.execute(
+            """INSERT INTO photos (flickr_id, privacy_state, privacy_reason)
+               VALUES ('bbb', 'auto_private', 'faces')"""
+        )
+        db.conn.commit()
+        run(self.db_path)
+        row = db.conn.execute("SELECT is_screenshot FROM photos WHERE flickr_id='bbb'").fetchone()
+        self.assertEqual(row[0], 0)
+        db.close()
+
+    def test_migration_is_idempotent(self):
+        from db.db import Database
+        from db.migrations.migrate_013_screenshot_flag import run
+        db = Database(Path(self.db_path))
+        run(self.db_path)
+        run(self.db_path)  # second run must not raise
+        db.close()
+
+
+class TestScreenshotStats(unittest.TestCase):
+    """stats() returns correct screenshot_counts after migration 013."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db_path = str(Path(self._tmp.name) / "test.db")
+        from db.db import Database
+        from db.migrations.migrate_013_screenshot_flag import run as migrate
+        self.db = Database(Path(self.db_path))
+        migrate(self.db_path)
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _insert(self, flickr_id: str, state: str, is_screenshot: int) -> None:
+        self.db.conn.execute(
+            "INSERT INTO photos (flickr_id, privacy_state, is_screenshot) VALUES (?, ?, ?)",
+            (flickr_id, state, is_screenshot),
+        )
+        self.db.conn.commit()
+
+    def test_screenshot_counts_key_present(self):
+        stats = self.db.stats()
+        self.assertIn("screenshot_counts", stats)
+
+    def test_unreviewed_counts_auto_private_screenshots(self):
+        self._insert("s1", "auto_private", 1)
+        self._insert("s2", "auto_private", 0)  # not a screenshot
+        counts = self.db.stats()["screenshot_counts"]
+        self.assertEqual(counts["screenshot_unreviewed"], 1)
+
+    def test_public_counts_approved_and_already_public(self):
+        self._insert("s3", "approved_public", 1)
+        self._insert("s4", "already_public", 1)
+        self._insert("s5", "approved_public", 0)  # not a screenshot
+        counts = self.db.stats()["screenshot_counts"]
+        self.assertEqual(counts["screenshot_public"], 2)
+
+    def test_private_counts_keep_private(self):
+        self._insert("s6", "keep_private", 1)
+        self._insert("s7", "keep_private", 0)  # not a screenshot
+        counts = self.db.stats()["screenshot_counts"]
+        self.assertEqual(counts["screenshot_private"], 1)
+
+    def test_counts_are_independent(self):
+        self._insert("s9",  "auto_private",   1)
+        self._insert("s10", "approved_public", 1)
+        self._insert("s11", "keep_private",    1)
+        counts = self.db.stats()["screenshot_counts"]
+        self.assertEqual(counts["screenshot_unreviewed"], 1)
+        self.assertEqual(counts["screenshot_public"], 1)
+        self.assertEqual(counts["screenshot_private"], 1)
+
+    def test_empty_db_returns_zeros(self):
+        counts = self.db.stats()["screenshot_counts"]
+        self.assertEqual(counts["screenshot_unreviewed"], 0)
+        self.assertEqual(counts["screenshot_public"], 0)
+        self.assertEqual(counts["screenshot_private"], 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -177,6 +177,16 @@
     <option value="skipped" data-label="Skipped" {% if state_filter=='skipped' %}selected{% endif %}>
       Skipped ({{ stats.by_state.get('skipped',0) }})
     </option>
+    <option disabled>──────────────────</option>
+    <option value="screenshot_unreviewed" data-label="Screenshots: unreviewed" {% if state_filter=='screenshot_unreviewed' %}selected{% endif %}>
+      Screenshots: unreviewed ({{ stats.screenshot_counts.get('screenshot_unreviewed',0) }})
+    </option>
+    <option value="screenshot_public" data-label="Screenshots: public" {% if state_filter=='screenshot_public' %}selected{% endif %}>
+      Screenshots: public ({{ stats.screenshot_counts.get('screenshot_public',0) }})
+    </option>
+    <option value="screenshot_private" data-label="Screenshots: private" {% if state_filter=='screenshot_private' %}selected{% endif %}>
+      Screenshots: private ({{ stats.screenshot_counts.get('screenshot_private',0) }})
+    </option>
   </select>
 
   <span class="count">
@@ -294,6 +304,7 @@ const _perPage     = {{ per_page }};
 let   _reviewPage  = {{ page }};
 let   _reviewTotal = {{ total }};
 const _stateMap = {{ stats.by_state | tojson }};
+Object.assign(_stateMap, {{ stats.screenshot_counts | tojson }});
 const _decisionToState = {
   make_public:  'approved_public',
   keep_private: 'keep_private',

@@ -1117,6 +1117,24 @@ class Database:
         except Exception:
             result["proposals"] = {"total": 0, "non_conflict": 0, "divergence": 0, "collision": 0}
         try:
+            screenshot_counts: dict[str, int] = {}
+            for label, condition in [
+                ("screenshot_unreviewed", "is_screenshot = 1 AND privacy_state = 'auto_private'"),
+                ("screenshot_public",     "is_screenshot = 1 AND privacy_state IN ('approved_public', 'already_public')"),
+                ("screenshot_private",    "is_screenshot = 1 AND privacy_state = 'keep_private'"),
+            ]:
+                row = self.conn.execute(
+                    f"SELECT COUNT(*) AS n FROM photos WHERE {condition}"
+                ).fetchone()
+                screenshot_counts[label] = row["n"] if row else 0
+            result["screenshot_counts"] = screenshot_counts
+        except Exception:
+            result["screenshot_counts"] = {
+                "screenshot_unreviewed": 0,
+                "screenshot_public": 0,
+                "screenshot_private": 0,
+            }
+        try:
             row = self.conn.execute(
                 "SELECT COUNT(*) AS n FROM photos WHERE flickr_id IS NOT NULL AND uuid IS NULL"
             ).fetchone()

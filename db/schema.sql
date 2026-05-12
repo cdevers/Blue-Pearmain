@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS photos (
     review_decision         TEXT,                   -- 'make_public' | 'keep_private' | 'skip'
     review_notes            TEXT,                   -- optional freeform notes
     uuid_stale              INTEGER NOT NULL DEFAULT 0, -- 1 if Photos.app rejected UUID as invalid
+    is_screenshot           INTEGER NOT NULL DEFAULT 0, -- 1 if osxphotos flagged this as a screenshot
     updated_at              TEXT                    -- ISO8601, last time this row was written
 );
 

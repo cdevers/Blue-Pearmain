@@ -121,8 +121,16 @@ def review():
     per_page = int(request.args.get("per_page", 120))
     offset = (page - 1) * per_page
 
-    valid_states = ["candidate_public", "needs_review", "auto_private",
-                    "already_public", "approved_public", "keep_private", "skipped"]
+    valid_states = [
+        "candidate_public", "needs_review", "auto_private",
+        "already_public", "approved_public", "keep_private", "skipped",
+        "screenshot_unreviewed", "screenshot_public", "screenshot_private",
+    ]
+    _screenshot_sql: dict[str, str] = {
+        "screenshot_unreviewed": "is_screenshot = 1 AND privacy_state = 'auto_private'",
+        "screenshot_public":     "is_screenshot = 1 AND privacy_state IN ('approved_public', 'already_public')",
+        "screenshot_private":    "is_screenshot = 1 AND privacy_state = 'keep_private'",
+    }
     if state_filter not in valid_states:
         state_filter = "candidate_public"
 
@@ -152,6 +160,31 @@ def review():
                FROM photos, json_each(photos.apple_persons) AS p
                WHERE p.value = ? AND photos.privacy_state = ?""",
             (person_filter, state_filter)
+        ).fetchone()
+        total = total_row["n"] if total_row else 0
+    elif state_filter in _screenshot_sql:
+        condition = _screenshot_sql[state_filter]
+        rows = db().conn.execute(
+            f"""SELECT id, flickr_id, original_filename,
+                       apple_unknown_faces, apple_named_faces, proposed_tags,
+                       display_rotation
+                FROM photos
+                WHERE {condition}
+                ORDER BY date_taken DESC, id DESC
+                LIMIT ? OFFSET ?""",
+            [per_page, offset],
+        ).fetchall()
+        photos = []
+        for row in rows:
+            d = dict(row)
+            if isinstance(d.get("proposed_tags"), str):
+                try:
+                    d["proposed_tags"] = json.loads(d["proposed_tags"])
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    d["proposed_tags"] = []
+            photos.append(d)
+        total_row = db().conn.execute(
+            f"SELECT COUNT(*) AS n FROM photos WHERE {condition}"
         ).fetchone()
         total = total_row["n"] if total_row else 0
     else:

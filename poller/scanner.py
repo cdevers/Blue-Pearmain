@@ -412,6 +412,7 @@ def build_enriched_row(
 
     # Screenshot / selfie → auto_private unless already reviewed
     is_screenshot = photo_row.get("_is_screenshot", False)
+    merged["is_screenshot"] = 1 if is_screenshot else 0
     if is_screenshot and existing.get("privacy_state") not in (
         "approved_public", "keep_private", "already_public"
     ):
@@ -573,6 +574,7 @@ def scan(
             is_screenshot = photo_row.pop("_is_screenshot", False)
             photo_row.pop("_is_selfie", None)
             photo_row.pop("_is_live", None)
+            photo_row["is_screenshot"] = 1 if is_screenshot else 0
 
             if is_screenshot:
                 photo_row["privacy_state"]  = "auto_private"
