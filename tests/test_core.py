@@ -5124,6 +5124,18 @@ class TestApplyProposal(unittest.TestCase):
         self.assertNotEqual(result.get("reason"), "source_changed",
                             "NULL source hash should not trigger staleness check")
 
+    def test_write_tags_timeout_returns_not_responding(self):
+        import sys
+        from unittest.mock import patch, MagicMock
+        from flickr.proposal_applier import _write_tags_to_photos
+        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
+             patch.dict(sys.modules, {"photoscript": MagicMock()}), \
+             patch("flickr.proposal_applier._run_with_timeout",
+                   return_value={"ok": False, "reason": "Photos not responding"}):
+            result = _write_tags_to_photos(MagicMock(), 1, "U1", [], "/path")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason"], "Photos not responding")
+
 
 class TestApplyBatch(unittest.TestCase):
     """apply_batch: continues past failures, populates errors list."""

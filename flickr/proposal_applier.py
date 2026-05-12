@@ -365,20 +365,28 @@ def _write_tags_to_photos(
         import photoscript
     except ImportError:
         return {"ok": False, "reason": "photoscript not installed"}
-    try:
-        photo = photoscript.Photo(uuid)
-    except Exception as e:
-        if "invalid photo id" in str(e).lower():
-            return {"ok": False, "reason": "stale_uuid", "stale_uuid": True}
-        return {"ok": False, "reason": f"photo not found in Photos: {e}"}
-    try:
-        photo.keywords = new_tags
-    except Exception as e:
-        return {"ok": False, "reason": f"write failed: {e}"}
-    try:
-        written = list(photo.keywords or [])
-    except Exception:
-        written = new_tags
+
+    def _do_write():
+        try:
+            photo = photoscript.Photo(uuid)
+        except Exception as e:
+            if "invalid photo id" in str(e).lower():
+                return {"ok": False, "reason": "stale_uuid", "stale_uuid": True}
+            return {"ok": False, "reason": f"photo not found in Photos: {e}"}
+        try:
+            photo.keywords = new_tags
+        except Exception as e:
+            return {"ok": False, "reason": f"write failed: {e}"}
+        try:
+            written = list(photo.keywords or [])
+        except Exception:
+            written = new_tags
+        return {"ok": True, "written": written}
+
+    result = _run_with_timeout(_do_write)
+    if not result.get("ok"):
+        return result
+    written = result.get("written", new_tags)
     now = _now_iso()
     db.conn.execute(
         "UPDATE photos SET photos_tags=?, photos_tags_hash=?, meta_synced_photos_at=?, updated_at=? WHERE id=?",
