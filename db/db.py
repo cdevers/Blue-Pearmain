@@ -408,6 +408,7 @@ class Database:
         states: list[str] | None = None,
         limit: int = 50,
         offset: int = 0,
+        exclude_screenshots: bool = False,
     ) -> list[dict]:
         """Return photos awaiting review, ordered newest-first.
 
@@ -419,12 +420,13 @@ class Database:
         if states is None:
             states = ["needs_review", "candidate_public"]
         placeholders = ",".join("?" * len(states))
+        screenshot_filter = " AND is_screenshot = 0" if exclude_screenshots else ""
         rows = self.conn.execute(
-            f"""SELECT id, flickr_id, original_filename,
+            f"""SELECT id, uuid, flickr_id, original_filename,
                        apple_unknown_faces, apple_named_faces, proposed_tags,
-                       display_rotation
+                       display_rotation, is_screenshot
                 FROM photos
-                WHERE privacy_state IN ({placeholders})
+                WHERE privacy_state IN ({placeholders}){screenshot_filter}
                 ORDER BY date_taken DESC, id DESC
                 LIMIT ? OFFSET ?""",
             states + [limit, offset],
@@ -488,12 +490,13 @@ class Database:
             next_row["id"] if next_row else None,
         )
 
-    def review_queue_count(self, states: list[str] | None = None) -> int:
+    def review_queue_count(self, states: list[str] | None = None, exclude_screenshots: bool = False) -> int:
         if states is None:
             states = ["needs_review", "candidate_public"]
         placeholders = ",".join("?" * len(states))
+        screenshot_filter = " AND is_screenshot = 0" if exclude_screenshots else ""
         row = self.conn.execute(
-            f"SELECT COUNT(*) AS n FROM photos WHERE privacy_state IN ({placeholders})",
+            f"SELECT COUNT(*) AS n FROM photos WHERE privacy_state IN ({placeholders}){screenshot_filter}",
             states,
         ).fetchone()
         return row["n"] if row else 0

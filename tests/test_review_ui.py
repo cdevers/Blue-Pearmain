@@ -506,3 +506,120 @@ class TestBackgroundPushClosesConnection:
 
         closed = self._run_decide_and_wait(c, photo_id, test_db, mock_flickr)
         assert len(closed) >= 1, "connection not closed after exception in background push thread"
+
+
+# ---------------------------------------------------------------------------
+# GH #76 — Screenshot special-casing in review UI
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def client_with_screenshots():
+    """DB with one normal candidate_public and one screenshot candidate_public."""
+    with tempfile.TemporaryDirectory() as tmp:
+        from db.migrations.migrate_013_screenshot_flag import run as migrate
+        db_path = Path(tmp) / "test.db"
+        test_db = Database(db_path)
+        migrate(str(db_path))
+
+        test_db.upsert_photo({
+            "uuid": "uuid-normal-001",
+            "original_filename": "IMG_normal.JPG",
+            "privacy_state": "candidate_public",
+            "proposed_tags": [],
+            "apple_persons": [],
+            "apple_labels": [],
+            "apple_unknown_faces": 0,
+            "apple_named_faces": 0,
+            "is_screenshot": 0,
+        })
+        test_db.upsert_photo({
+            "uuid": "uuid-screenshot-001",
+            "original_filename": "Screenshot_2024.PNG",
+            "privacy_state": "candidate_public",
+            "proposed_tags": [],
+            "apple_persons": [],
+            "apple_labels": [],
+            "apple_unknown_faces": 0,
+            "apple_named_faces": 0,
+            "is_screenshot": 1,
+        })
+        # One screenshot in auto_private for the unreviewed queue
+        test_db.upsert_photo({
+            "uuid": "uuid-screenshot-002",
+            "original_filename": "Screenshot_2024b.PNG",
+            "privacy_state": "auto_private",
+            "proposed_tags": [],
+            "apple_persons": [],
+            "apple_labels": [],
+            "apple_unknown_faces": 0,
+            "apple_named_faces": 0,
+            "is_screenshot": 1,
+        })
+
+        app_module._db = test_db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+
+        with app_module.app.test_client() as c:
+            yield c, test_db
+
+        app_module._db = None
+
+
+class TestCandidatePublicExcludesScreenshots:
+    """candidate_public queue must not show is_screenshot=1 photos."""
+
+    def test_screenshot_absent_from_candidate_public(self, client_with_screenshots):
+        c, _ = client_with_screenshots
+        resp = c.get("/review?state=candidate_public")
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "Screenshot_2024.PNG" not in html
+
+    def test_normal_photo_present_in_candidate_public(self, client_with_screenshots):
+        c, _ = client_with_screenshots
+        resp = c.get("/review?state=candidate_public")
+        html = resp.data.decode()
+        assert "IMG_normal.JPG" in html
+
+
+class TestScreenshotBadge:
+    """is_screenshot=1 photos show a screenshot badge; others do not."""
+
+    def test_screenshot_badge_shown_in_screenshot_queue(self, client_with_screenshots):
+        c, _ = client_with_screenshots
+        resp = c.get("/review?state=screenshot_unreviewed")
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "screenshot" in html.lower()
+
+    def test_no_screenshot_badge_for_normal_photo(self, client_with_screenshots):
+        c, _ = client_with_screenshots
+        resp = c.get("/review?state=candidate_public")
+        html = resp.data.decode()
+        # The badge class/text should not appear for the normal-only queue
+        assert 'class="screenshot-badge"' not in html
+
+
+class TestScreenshotQueueButtons:
+    """In screenshot queues the Private button reads 'Confirm private'."""
+
+    def test_confirm_private_label_in_screenshot_unreviewed(self, client_with_screenshots):
+        c, _ = client_with_screenshots
+        resp = c.get("/review?state=screenshot_unreviewed")
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "Confirm private" in html
+
+    def test_normal_private_label_in_candidate_public(self, client_with_screenshots):
+        c, _ = client_with_screenshots
+        resp = c.get("/review?state=candidate_public")
+        html = resp.data.decode()
+        # Standard label, not the screenshot-specific one
+        assert "✗ Private" in html
+
+    def test_shortcuts_hint_says_confirm_private_in_screenshot_queue(self, client_with_screenshots):
+        c, _ = client_with_screenshots
+        resp = c.get("/review?state=screenshot_unreviewed")
+        html = resp.data.decode()
+        assert "confirm private" in html.lower()

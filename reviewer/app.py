@@ -188,12 +188,14 @@ def review():
         ).fetchone()
         total = total_row["n"] if total_row else 0
     else:
+        exclude_ss = (state_filter == "candidate_public")
         photos = db().review_queue(
             states=[state_filter],
             limit=per_page,
             offset=offset,
+            exclude_screenshots=exclude_ss,
         )
-        total = db().review_queue_count(states=[state_filter])
+        total = db().review_queue_count(states=[state_filter], exclude_screenshots=exclude_ss)
 
     total_pages = max(1, (total + per_page - 1) // per_page)
 

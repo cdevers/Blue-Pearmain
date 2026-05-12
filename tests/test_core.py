@@ -7044,6 +7044,62 @@ class TestPruneProposals(unittest.TestCase):
         self.assertEqual(n, 0)
 
 
+class TestReviewQueueScreenshots(unittest.TestCase):
+    """review_queue and review_queue_count handle is_screenshot filtering."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+        from db.migrations.migrate_013_screenshot_flag import run as migrate
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        migrate(str(Path(self._tmp.name) / "test.db"))
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _insert(self, uuid: str, state: str, is_screenshot: int = 0) -> int:
+        return self.db.upsert_photo({
+            "uuid": uuid,
+            "original_filename": f"{uuid}.JPG",
+            "privacy_state": state,
+            "proposed_tags": [],
+            "apple_persons": [],
+            "apple_labels": [],
+            "is_screenshot": is_screenshot,
+        })
+
+    def test_review_queue_returns_is_screenshot_field(self):
+        self._insert("u1", "candidate_public", 0)
+        rows = self.db.review_queue(states=["candidate_public"])
+        self.assertIn("is_screenshot", rows[0])
+
+    def test_review_queue_excludes_screenshots_when_flag_set(self):
+        self._insert("u2", "candidate_public", 0)
+        self._insert("u3", "candidate_public", 1)
+        rows = self.db.review_queue(states=["candidate_public"], exclude_screenshots=True)
+        uuids = [r["uuid"] for r in rows]
+        self.assertIn("u2", uuids)
+        self.assertNotIn("u3", uuids)
+
+    def test_review_queue_includes_screenshots_when_flag_not_set(self):
+        self._insert("u4", "candidate_public", 1)
+        rows = self.db.review_queue(states=["candidate_public"], exclude_screenshots=False)
+        uuids = [r["uuid"] for r in rows]
+        self.assertIn("u4", uuids)
+
+    def test_review_queue_count_excludes_screenshots_when_flag_set(self):
+        self._insert("u5", "candidate_public", 0)
+        self._insert("u6", "candidate_public", 1)
+        count = self.db.review_queue_count(states=["candidate_public"], exclude_screenshots=True)
+        self.assertEqual(count, 1)
+
+    def test_review_queue_count_default_includes_screenshots(self):
+        self._insert("u7", "candidate_public", 1)
+        count = self.db.review_queue_count(states=["candidate_public"])
+        self.assertEqual(count, 1)
+
+
 class TestMigrate013ScreenshotFlag(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
