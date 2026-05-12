@@ -232,6 +232,128 @@ class Database:
         self.conn.commit()
         return True
 
+    _FLICKR_COPY_FIELDS: list[str] = [
+        "flickr_id", "flickr_secret", "flickr_server", "flickr_farm",
+        "date_uploaded_flickr", "tags_pushed_flickr", "perms_pushed_flickr",
+        "flickr_deleted", "flickr_title", "flickr_description", "flickr_tags",
+        "flickr_tags_hash", "flickr_last_updated", "meta_synced_flickr_at",
+        "tags_truncated_for_flickr", "display_rotation",
+    ]
+
+    def merge_flickr_donor_in_group(
+        self, donor_id: int, target_id: int, group_id: int
+    ) -> None:
+        """
+        Soft-merge a Flickr-only donor record into a Photos-linked target record.
+
+        Copies all Flickr identity fields from donor → target, migrates
+        photo_albums/tag_events/metadata_conflicts, then soft-deletes the donor
+        (sets merged_into_id, privacy_state='duplicate_flickr', duplicate_role='discard')
+        and resolves the duplicate group.
+
+        Raises ValueError if preconditions are not met.
+        """
+        donor = self.conn.execute(
+            "SELECT * FROM photos WHERE id = ?", (donor_id,)
+        ).fetchone()
+        target = self.conn.execute(
+            "SELECT * FROM photos WHERE id = ?", (target_id,)
+        ).fetchone()
+
+        if not donor:
+            raise ValueError(f"donor {donor_id} not found")
+        if not donor["flickr_id"]:
+            raise ValueError(f"donor {donor_id} has no flickr_id")
+        if donor["uuid"] is not None:
+            raise ValueError(f"donor {donor_id} has a uuid — only Flickr-only records can be donors")
+        if not target:
+            raise ValueError(f"target {target_id} not found")
+        if target["uuid"] is None:
+            raise ValueError(f"target {target_id} has no uuid — only Photos-linked records can be targets")
+
+        donor = dict(donor)
+
+        # 1. Migrate album memberships
+        albums = self.conn.execute(
+            "SELECT album_id, flickr_pushed, pushed_at FROM photo_albums WHERE photo_id = ?",
+            (donor_id,),
+        ).fetchall()
+        for a in albums:
+            self.conn.execute(
+                """INSERT OR IGNORE INTO photo_albums (photo_id, album_id, flickr_pushed, pushed_at)
+                   VALUES (?, ?, ?, ?)""",
+                (target_id, a["album_id"], a["flickr_pushed"], a["pushed_at"]),
+            )
+
+        # 2. Migrate tag_events — DELETE + re-INSERT to work around SQLite FK/ALTER TABLE bug
+        tag_rows = self.conn.execute(
+            "SELECT event_at, destination, tags_before, tags_after, success, error "
+            "FROM tag_events WHERE photo_id = ?",
+            (donor_id,),
+        ).fetchall()
+        if tag_rows:
+            self.conn.execute("DELETE FROM tag_events WHERE photo_id = ?", (donor_id,))
+            for t in tag_rows:
+                self.conn.execute(
+                    """INSERT INTO tag_events
+                       (photo_id, event_at, destination, tags_before, tags_after, success, error)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (target_id, t["event_at"], t["destination"],
+                     t["tags_before"], t["tags_after"], t["success"], t["error"]),
+                )
+
+        # 3. Migrate metadata_conflicts
+        conflicts = self.conn.execute(
+            "SELECT * FROM metadata_conflicts WHERE photo_id = ?",
+            (donor_id,),
+        ).fetchall()
+        for c in conflicts:
+            self.conn.execute(
+                """INSERT OR IGNORE INTO metadata_conflicts
+                   (photo_id, field, flickr_value, photos_value,
+                    resolved, resolution, resolved_at, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (target_id, c["field"], c["flickr_value"], c["photos_value"],
+                 c["resolved"], c["resolution"], c["resolved_at"], c["created_at"]),
+            )
+
+        # 4. Build set of Flickr fields to copy to target (skip nulls)
+        update = {f: donor[f] for f in self._FLICKR_COPY_FIELDS if donor.get(f) is not None}
+        update["updated_at"] = _now_iso()
+
+        # 5. Clear flickr_id on donor BEFORE writing it to target (UNIQUE constraint)
+        self.conn.execute("UPDATE photos SET flickr_id = NULL WHERE id = ?", (donor_id,))
+
+        # 6. Copy Flickr fields to target
+        if update:
+            placeholders = ", ".join(f"{k} = ?" for k in update)
+            self.conn.execute(
+                f"UPDATE photos SET {placeholders} WHERE id = ?",
+                list(update.values()) + [target_id],
+            )
+
+        # 7. Soft-delete donor
+        self.conn.execute(
+            """UPDATE photos
+               SET merged_into_id = ?, privacy_state = 'duplicate_flickr', duplicate_role = 'discard'
+               WHERE id = ?""",
+            (target_id, donor_id),
+        )
+
+        # 8. Promote target role
+        self.conn.execute(
+            "UPDATE photos SET duplicate_role = 'keeper' WHERE id = ?", (target_id,)
+        )
+
+        # 9. Resolve the duplicate group
+        self.conn.execute(
+            """UPDATE duplicate_groups
+               SET resolved = 1, keeper_id = ?, resolved_at = datetime('now')
+               WHERE id = ?""",
+            (target_id, group_id),
+        )
+
+        self.conn.commit()
 
     def _ensure_schema(self):
         schema_path = Path(__file__).parent / "schema.sql"

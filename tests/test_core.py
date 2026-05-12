@@ -7457,5 +7457,151 @@ class TestMigrate014MergedIntoId(unittest.TestCase):
         db.close()
 
 
+class TestMergeFlickrDonorInGroup(unittest.TestCase):
+    """Database.merge_flickr_donor_in_group() must correctly soft-merge a
+    Flickr-only donor into a Photos-linked target and resolve the group."""
+
+    def _make_merge_db(self):
+        """Create a temp DB with duplicate_groups support and a ready-to-merge group."""
+        from db.db import Database
+        from db.migrations.migrate_003_dimensions_and_dedup import run as migrate_003
+        import shutil
+        tmp = tempfile.mkdtemp()
+        db_path = str(Path(tmp) / "test.db")
+        db = Database(Path(db_path))
+        migrate_003(db_path)  # adds duplicate_groups table + duplicate_role/duplicate_group_id columns
+
+        # Flickr-only donor: flickr_id set, no uuid
+        donor_id = db.upsert_photo({
+            "flickr_id":            "F001",
+            "flickr_secret":        "sec123",
+            "flickr_server":        "65535",
+            "flickr_farm":          66,
+            "original_filename":    "IMG_9999.JPG",
+            "date_taken":           "2024-06-15 12:00:00",
+            "date_uploaded_flickr": "2024-06-15 18:00:00",
+            "privacy_state":        "candidate_public",
+        })
+
+        # Photos-linked target: uuid set, no flickr_id
+        target_id = db.upsert_photo({
+            "uuid":              "U001",
+            "original_filename": "IMG_9999.JPG",
+            "date_taken":        "2024-06-15T12:00:00-04:00",
+            "privacy_state":     "candidate_public",
+            "width":             4000,
+            "height":            3000,
+            "apple_labels":      [],
+            "apple_persons":     [],
+            "proposed_tags":     [],
+        })
+
+        # Create duplicate group and link both photos to it
+        db.conn.execute(
+            """INSERT INTO duplicate_groups (match_key, group_type, photo_count, notes)
+               VALUES (?, ?, ?, ?)""",
+            ("IMG_9999.JPG|2024-06-15 12:00:00", "snapbridge", 2, ""),
+        )
+        group_id = db.conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+        db.conn.execute(
+            "UPDATE photos SET duplicate_group_id = ?, duplicate_role = 'discard' WHERE id = ?",
+            (group_id, donor_id),
+        )
+        db.conn.execute(
+            "UPDATE photos SET duplicate_group_id = ?, duplicate_role = 'keeper' WHERE id = ?",
+            (group_id, target_id),
+        )
+        db.conn.commit()
+
+        return db, tmp, donor_id, target_id, group_id
+
+    def setUp(self):
+        self.db, self._tmp, self.donor_id, self.target_id, self.group_id = self._make_merge_db()
+
+    def tearDown(self):
+        self.db.close()
+        import shutil
+        shutil.rmtree(self._tmp)
+
+    def _row(self, photo_id):
+        return self.db.get_photo(photo_id)
+
+    def _group(self):
+        return self.db.conn.execute(
+            "SELECT * FROM duplicate_groups WHERE id = ?", (self.group_id,)
+        ).fetchone()
+
+    def test_flickr_id_copied_to_target(self):
+        self.db.merge_flickr_donor_in_group(self.donor_id, self.target_id, self.group_id)
+        self.assertEqual(self._row(self.target_id)["flickr_id"], "F001")
+
+    def test_flickr_secret_and_date_uploaded_copied_to_target(self):
+        self.db.merge_flickr_donor_in_group(self.donor_id, self.target_id, self.group_id)
+        row = self._row(self.target_id)
+        self.assertEqual(row["flickr_secret"], "sec123")
+        self.assertIsNotNone(row["date_uploaded_flickr"])
+
+    def test_donor_flickr_id_is_null_after_merge(self):
+        self.db.merge_flickr_donor_in_group(self.donor_id, self.target_id, self.group_id)
+        self.assertIsNone(self._row(self.donor_id)["flickr_id"])
+
+    def test_donor_merged_into_id_points_to_target(self):
+        self.db.merge_flickr_donor_in_group(self.donor_id, self.target_id, self.group_id)
+        self.assertEqual(self._row(self.donor_id)["merged_into_id"], self.target_id)
+
+    def test_donor_privacy_state_is_duplicate_flickr_and_role_is_discard(self):
+        self.db.merge_flickr_donor_in_group(self.donor_id, self.target_id, self.group_id)
+        row = self._row(self.donor_id)
+        self.assertEqual(row["privacy_state"], "duplicate_flickr")
+        self.assertEqual(row["duplicate_role"], "discard")
+
+    def test_target_duplicate_role_is_keeper(self):
+        self.db.merge_flickr_donor_in_group(self.donor_id, self.target_id, self.group_id)
+        self.assertEqual(self._row(self.target_id)["duplicate_role"], "keeper")
+
+    def test_group_resolved_with_correct_keeper(self):
+        self.db.merge_flickr_donor_in_group(self.donor_id, self.target_id, self.group_id)
+        g = self._group()
+        self.assertEqual(g["resolved"], 1)
+        self.assertEqual(g["keeper_id"], self.target_id)
+
+    def test_photo_albums_migrated_to_target(self):
+        album_id = self.db.upsert_album("apple-a", "Test Album")
+        self.db.upsert_photo_album(self.donor_id, album_id)
+        self.db.merge_flickr_donor_in_group(self.donor_id, self.target_id, self.group_id)
+        row = self.db.conn.execute(
+            "SELECT * FROM photo_albums WHERE photo_id = ? AND album_id = ?",
+            (self.target_id, album_id),
+        ).fetchone()
+        self.assertIsNotNone(row)
+
+    def test_tag_events_migrated_to_target_and_removed_from_donor(self):
+        self.db.conn.execute(
+            """INSERT INTO tag_events (photo_id, event_at, destination, tags_before, tags_after, success)
+               VALUES (?, '2024-06-15T18:00:00Z', 'flickr', '[]', '["travel"]', 1)""",
+            (self.donor_id,),
+        )
+        self.db.conn.commit()
+        self.db.merge_flickr_donor_in_group(self.donor_id, self.target_id, self.group_id)
+        on_target = self.db.conn.execute(
+            "SELECT COUNT(*) AS n FROM tag_events WHERE photo_id = ?", (self.target_id,)
+        ).fetchone()["n"]
+        on_donor = self.db.conn.execute(
+            "SELECT COUNT(*) AS n FROM tag_events WHERE photo_id = ?", (self.donor_id,)
+        ).fetchone()["n"]
+        self.assertEqual(on_target, 1)
+        self.assertEqual(on_donor, 0)
+
+    def test_raises_value_error_if_donor_has_uuid(self):
+        with self.assertRaises(ValueError):
+            # Pass target as donor — it has a uuid
+            self.db.merge_flickr_donor_in_group(self.target_id, self.donor_id, self.group_id)
+
+    def test_raises_value_error_if_target_has_no_uuid(self):
+        with self.assertRaises(ValueError):
+            # Pass donor as both donor and target — it has no uuid
+            self.db.merge_flickr_donor_in_group(self.donor_id, self.donor_id, self.group_id)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
