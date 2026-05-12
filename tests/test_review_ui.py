@@ -709,3 +709,91 @@ class TestScreenshotPublicQueue:
             "SELECT privacy_state FROM photos WHERE uuid='uuid-ss-approved'"
         ).fetchone()
         assert row["privacy_state"] == "already_public"
+
+
+@pytest.fixture
+def client_with_merge_group():
+    """DB with one unresolved snapbridge group: Flickr-only donor + Photos-linked target."""
+    with tempfile.TemporaryDirectory() as tmp:
+        from db.migrations.migrate_003_dimensions_and_dedup import run as migrate_003
+        db_path = Path(tmp) / "test.db"
+        test_db = Database(db_path)
+        migrate_003(str(db_path))  # creates duplicate_groups table + duplicate_role/duplicate_group_id
+
+        # Flickr-only donor
+        donor_id = test_db.upsert_photo({
+            "flickr_id":         "F001",
+            "flickr_secret":     "sec",
+            "flickr_server":     "65535",
+            "original_filename": "IMG_999.JPG",
+            "date_taken":        "2024-06-15 12:00:00",
+            "privacy_state":     "candidate_public",
+        })
+
+        # Photos-linked target (higher-res)
+        target_id = test_db.upsert_photo({
+            "uuid":              "U001",
+            "original_filename": "IMG_999.JPG",
+            "date_taken":        "2024-06-15T12:00:00-04:00",
+            "privacy_state":     "candidate_public",
+            "width":             4000,
+            "height":            3000,
+            "apple_labels":      [],
+            "apple_persons":     [],
+            "proposed_tags":     [],
+        })
+
+        # Link both to a duplicate group
+        test_db.conn.execute(
+            "INSERT INTO duplicate_groups (match_key, group_type, photo_count) VALUES (?,?,?)",
+            ("IMG_999.JPG|2024-06-15 12:00:00", "snapbridge", 2),
+        )
+        group_id = test_db.conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+        test_db.conn.execute(
+            "UPDATE photos SET duplicate_group_id = ?, duplicate_role = 'discard' WHERE id = ?",
+            (group_id, donor_id),
+        )
+        test_db.conn.execute(
+            "UPDATE photos SET duplicate_group_id = ?, duplicate_role = 'keeper' WHERE id = ?",
+            (group_id, target_id),
+        )
+        test_db.conn.commit()
+
+        app_module._db = test_db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+
+        with app_module.app.test_client() as c:
+            yield c, test_db, group_id, donor_id, target_id
+
+        app_module._db = None
+
+
+class TestMergeUI:
+    """API and UI tests for the duplicate merge action."""
+
+    def test_merge_action_returns_ok(self, client_with_merge_group):
+        c, db, group_id, donor_id, target_id = client_with_merge_group
+        resp = c.post(
+            f"/api/duplicates/{group_id}/assign",
+            json={"action": "merge", "donor_id": donor_id, "target_id": target_id},
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
+
+    def test_merge_with_photo_not_in_group_returns_400(self, client_with_merge_group):
+        c, db, group_id, donor_id, target_id = client_with_merge_group
+        resp = c.post(
+            f"/api/duplicates/{group_id}/assign",
+            json={"action": "merge", "donor_id": 99999, "target_id": target_id},
+        )
+        assert resp.status_code == 400
+
+    def test_merge_with_donor_having_uuid_returns_400(self, client_with_merge_group):
+        c, db, group_id, donor_id, target_id = client_with_merge_group
+        # target_id has a uuid — passing it as the donor must be rejected
+        resp = c.post(
+            f"/api/duplicates/{group_id}/assign",
+            json={"action": "merge", "donor_id": target_id, "target_id": donor_id},
+        )
+        assert resp.status_code == 400

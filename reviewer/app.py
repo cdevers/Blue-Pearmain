@@ -513,6 +513,24 @@ def api_dup_assign(group_id: int):
         db().conn.commit()
         return jsonify({"ok": True})
 
+    elif action == "merge":
+        donor_id  = data.get("donor_id")
+        target_id = data.get("target_id")
+        if not donor_id or not target_id:
+            return jsonify({"ok": False, "error": "missing donor_id or target_id"}), 400
+        for pid in (donor_id, target_id):
+            member = db().conn.execute(
+                "SELECT id FROM photos WHERE id = ? AND duplicate_group_id = ?",
+                (pid, group_id),
+            ).fetchone()
+            if not member:
+                return jsonify({"ok": False, "error": f"photo {pid} not in group"}), 400
+        try:
+            db().merge_flickr_donor_in_group(donor_id, target_id, group_id)
+            return jsonify({"ok": True})
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
     else:
         return jsonify({"ok": False, "error": "invalid action"}), 400
 
