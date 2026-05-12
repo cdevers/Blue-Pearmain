@@ -402,6 +402,22 @@ def cmd_checkpoint(args):
         print(f"Checkpoint complete: {checkpointed}/{log} frames moved, WAL truncated.")
 
 
+def cmd_deduplicator(args):
+    """Find and classify duplicate photos; optionally write results to DB."""
+    import yaml
+    from poller.deduplicator import main as dedup_main
+
+    pairs = [("--config", args.config)]
+    if args.write:
+        pairs.append(("--write", True))
+    if args.dry_run:
+        pairs.append(("--dry-run", True))
+    if args.confirm:
+        pairs.append(("--confirm", True))
+    _inject_argv(args, pairs)
+    dedup_main()
+
+
 def cmd_prune_proposals(args):
     """Prune resolved metadata proposals and supersede spurious managed-tag proposals."""
     import yaml
@@ -835,6 +851,15 @@ def main():
         help="Checkpoint mode (default: truncate)",
     )
 
+    # deduplicator
+    p_dedup = sub.add_parser(
+        "deduplicator",
+        help="Find and classify duplicate photos (dry-run by default)",
+    )
+    p_dedup.add_argument("--write", action="store_true", help="Write results to the DB")
+    p_dedup.add_argument("--confirm", action="store_true", help="Delete Flickr discards (requires --write)")
+    p_dedup.add_argument("--dry-run", action="store_true", help="Report without writing (default behaviour)")
+
     # prune-proposals
     p_prune = sub.add_parser(
         "prune-proposals",
@@ -867,6 +892,8 @@ def main():
     if not hasattr(args, "mode"):            args.mode = "truncate"
     if not hasattr(args, "check_flickr"):   args.check_flickr = False
     if not hasattr(args, "older_than"):     args.older_than = 90
+    if not hasattr(args, "write"):          args.write = False
+    if not hasattr(args, "confirm"):        args.confirm = False
 
     dispatch = {
         "pipeline":      cmd_pipeline,
@@ -886,6 +913,7 @@ def main():
         "install-daemons":   cmd_install_daemons,
         "uninstall-daemons": cmd_uninstall_daemons,
         "doctor":            cmd_doctor,
+        "deduplicator":      cmd_deduplicator,
         "prune-proposals":   cmd_prune_proposals,
     }
     dispatch[args.command](args)
