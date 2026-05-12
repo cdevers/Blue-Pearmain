@@ -6234,6 +6234,18 @@ class TestSetPhotoText(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(result["reason"], "Photos not responding")
 
+    def test_write_text_both_timeout_returns_not_responding(self):
+        import sys
+        from unittest.mock import patch, MagicMock
+        from flickr.proposal_applier import _write_text_to_photos_both
+        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
+             patch.dict(sys.modules, {"photoscript": MagicMock()}), \
+             patch("flickr.proposal_applier._run_with_timeout",
+                   return_value={"ok": False, "reason": "Photos not responding"}):
+            result = _write_text_to_photos_both(MagicMock(), 1, "U1", "title", "desc")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason"], "Photos not responding")
+
 
 class TestStaleUuid(unittest.TestCase):
     """Proposals that fail with 'invalid photo ID' are marked failed; photo gets uuid_stale=1."""

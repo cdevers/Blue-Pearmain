@@ -645,29 +645,37 @@ def _write_text_to_photos_both(
         import photoscript
     except ImportError:
         return {"ok": False, "reason": "photoscript not installed"}
-    try:
-        photo = photoscript.Photo(uuid)
-    except Exception as e:
-        if "invalid photo id" in str(e).lower():
-            return {"ok": False, "reason": "stale_uuid", "stale_uuid": True}
-        return {"ok": False, "reason": f"photo not found in Photos: {e}"}
-    try:
-        photo.title = title
-        photo.description = description
-    except Exception as e:
-        return {"ok": False, "reason": f"write failed: {e}"}
-    try:
-        written_title = (photo.title or "").strip()
-        written_desc  = (photo.description or "").strip()
-    except Exception:
-        written_title = title
-        written_desc  = description
+
+    def _do_write():
+        try:
+            photo = photoscript.Photo(uuid)
+        except Exception as e:
+            if "invalid photo id" in str(e).lower():
+                return {"ok": False, "reason": "stale_uuid", "stale_uuid": True}
+            return {"ok": False, "reason": f"photo not found in Photos: {e}"}
+        try:
+            photo.title = title
+            photo.description = description
+        except Exception as e:
+            return {"ok": False, "reason": f"write failed: {e}"}
+        try:
+            written_title = (photo.title or "").strip()
+            written_desc  = (photo.description or "").strip()
+        except Exception:
+            written_title = title
+            written_desc  = description
+        return {"ok": True, "written_title": written_title, "written_desc": written_desc}
+
+    result = _run_with_timeout(_do_write)
+    if not result.get("ok"):
+        return result
+
     now = _now_iso()
     db.conn.execute(
         """UPDATE photos
            SET photos_title=?, photos_description=?, meta_synced_photos_at=?, updated_at=?
            WHERE id=?""",
-        (written_title, written_desc, now, now, photo_id),
+        (result["written_title"], result["written_desc"], now, now, photo_id),
     )
     return {"ok": True}
 
