@@ -688,6 +688,11 @@ def _photos_is_responsive(timeout: int = 3) -> bool:
     but is hung — which a process-existence check cannot detect.
     """
     try:
+        # Guard: check process exists without triggering a launch event
+        pgrep = subprocess.run(["pgrep", "-x", "Photos"], capture_output=True, timeout=1)
+        if pgrep.returncode != 0:
+            return False
+        # Now verify it actually responds to AppleScript
         result = subprocess.run(
             ["osascript", "-e", 'tell application "Photos" to name'],
             capture_output=True, text=True, timeout=timeout,
@@ -707,7 +712,9 @@ def _run_with_timeout(fn, *args, timeout: int = _PHOTOS_WRITE_TIMEOUT) -> dict:
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     future = pool.submit(fn, *args)
     try:
-        return future.result(timeout=timeout)
+        result = future.result(timeout=timeout)
+        pool.shutdown(wait=False)
+        return result
     except concurrent.futures.TimeoutError:
         pool.shutdown(wait=False, cancel_futures=False)
         return {"ok": False, "reason": "Photos not responding"}

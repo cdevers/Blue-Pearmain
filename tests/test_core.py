@@ -7613,28 +7613,49 @@ class TestMergeFlickrDonorInGroup(unittest.TestCase):
 
 class TestPhotosIsResponsive(unittest.TestCase):
     def test_returns_true_when_osascript_succeeds(self):
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch, MagicMock, call
         from flickr.proposal_applier import _photos_is_responsive
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        with patch("flickr.proposal_applier.subprocess.run", return_value=mock_result):
+        pgrep_ok = MagicMock()
+        pgrep_ok.returncode = 0
+        osascript_ok = MagicMock()
+        osascript_ok.returncode = 0
+        with patch("flickr.proposal_applier.subprocess.run",
+                   side_effect=[pgrep_ok, osascript_ok]):
             self.assertTrue(_photos_is_responsive())
 
     def test_returns_false_when_osascript_nonzero(self):
         from unittest.mock import patch, MagicMock
         from flickr.proposal_applier import _photos_is_responsive
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        with patch("flickr.proposal_applier.subprocess.run", return_value=mock_result):
+        pgrep_ok = MagicMock()
+        pgrep_ok.returncode = 0
+        osascript_fail = MagicMock()
+        osascript_fail.returncode = 1
+        with patch("flickr.proposal_applier.subprocess.run",
+                   side_effect=[pgrep_ok, osascript_fail]):
             self.assertFalse(_photos_is_responsive())
 
     def test_returns_false_on_subprocess_timeout(self):
         import subprocess
-        from unittest.mock import patch
+        from unittest.mock import patch, MagicMock
         from flickr.proposal_applier import _photos_is_responsive
+        pgrep_ok = MagicMock()
+        pgrep_ok.returncode = 0
         with patch("flickr.proposal_applier.subprocess.run",
-                   side_effect=subprocess.TimeoutExpired("osascript", 3)):
+                   side_effect=[pgrep_ok,
+                                 subprocess.TimeoutExpired("osascript", 3)]):
             self.assertFalse(_photos_is_responsive())
+
+    def test_returns_false_when_photos_not_running(self):
+        from unittest.mock import patch, MagicMock
+        from flickr.proposal_applier import _photos_is_responsive
+        pgrep_fail = MagicMock()
+        pgrep_fail.returncode = 1
+        with patch("flickr.proposal_applier.subprocess.run",
+                   return_value=pgrep_fail) as mock_run:
+            result = _photos_is_responsive()
+        self.assertFalse(result)
+        self.assertEqual(mock_run.call_count, 1,
+                         "Should not send AppleScript when pgrep says Photos is not running")
 
 
 class TestRunWithTimeout(unittest.TestCase):
