@@ -7771,5 +7771,35 @@ class TestMetadataPullerPhotosIsResponsive(unittest.TestCase):
             self.assertFalse(_photos_is_responsive())
 
 
+class TestStateToPerms(unittest.TestCase):
+    """state_to_perms maps privacy_state to (is_public, is_friend, is_family) tuples."""
+
+    def _fn(self):
+        from flickr.flickr_client import state_to_perms
+        return state_to_perms
+
+    def test_approved_public_is_public(self):
+        self.assertEqual(self._fn()("approved_public"), (1, 0, 0))
+
+    def test_already_public_is_public(self):
+        self.assertEqual(self._fn()("already_public"), (1, 0, 0))
+
+    def test_approved_friends(self):
+        self.assertEqual(self._fn()("approved_friends"), (0, 1, 0))
+
+    def test_approved_family(self):
+        self.assertEqual(self._fn()("approved_family"), (0, 0, 1))
+
+    def test_approved_friends_family(self):
+        self.assertEqual(self._fn()("approved_friends_family"), (0, 1, 1))
+
+    def test_keep_private_is_all_zeros(self):
+        self.assertEqual(self._fn()("keep_private"), (0, 0, 0))
+
+    def test_unknown_state_is_all_zeros(self):
+        self.assertEqual(self._fn()("needs_review"), (0, 0, 0))
+        self.assertEqual(self._fn()(""), (0, 0, 0))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

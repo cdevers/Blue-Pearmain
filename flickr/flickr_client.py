@@ -475,3 +475,24 @@ class FlickrClient:
 
     def get_user_info(self, user_id: str = "me") -> dict:
         return self._call("flickr.people.getInfo", {"user_id": user_id})
+
+
+# ---------------------------------------------------------------------------
+# Privacy-state → Flickr permission flags
+# ---------------------------------------------------------------------------
+
+_STATE_PERMS: dict[str, tuple[int, int, int]] = {
+    "approved_public":         (1, 0, 0),
+    "already_public":          (1, 0, 0),
+    "approved_friends":        (0, 1, 0),
+    "approved_family":         (0, 0, 1),
+    "approved_friends_family": (0, 1, 1),
+}
+
+
+def state_to_perms(privacy_state: str) -> tuple[int, int, int]:
+    """Return (is_public, is_friend, is_family) for a DB privacy_state value.
+
+    Unknown / private states return (0, 0, 0).
+    """
+    return _STATE_PERMS.get(privacy_state, (0, 0, 0))
