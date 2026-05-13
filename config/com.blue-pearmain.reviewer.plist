@@ -12,8 +12,8 @@
     launchctl bootstrap gui/$(id -u) \
        ~/Library/LaunchAgents/com.blue-pearmain.reviewer.plist
 
-  The UI will then be available at http://localhost:5173 after login,
-  and launchd will restart it automatically if it crashes.
+  The UI will be available at http://localhost:5173 and, on LAN,
+  at http://blue-pearmain.local:5173 (via mDNS/Bonjour).
 
   Stop temporarily (survives reboot):
     launchctl stop com.blue-pearmain.reviewer
@@ -44,6 +44,8 @@
         <string>ui</string>
         <string>--config</string>
         <string>__REPO__/config/config.yml</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
     </array>
 
     <!-- Keep the UI running — restart automatically if it exits -->
