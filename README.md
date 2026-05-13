@@ -56,7 +56,7 @@ Nothing is written to Flickr or Apple Photos without explicit human confirmation
 # 1. Clone and install dependencies
 git clone https://github.com/cdevers/Blue-Pearmain.git
 cd Blue-Pearmain
-pip3 install requests requests-oauthlib pyyaml flask osxphotos
+uv sync   # install uv first if needed: https://docs.astral.sh/uv/
 
 # 2. Configure
 cp config/config.example.yml config/config.yml
