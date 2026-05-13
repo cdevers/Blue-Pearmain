@@ -242,6 +242,7 @@ def cmd_ui(args):
     _run(main, args, [
         ("--config", args.config),
         ("--port",   str(args.port)),
+        ("--host",   args.host),
         ("--debug",  args.debug),
     ])
 
@@ -760,6 +761,8 @@ def main():
     # ui
     p_ui = sub.add_parser("ui", help="Start the review UI")
     p_ui.add_argument("--port",  type=int, default=5173)
+    p_ui.add_argument("--host",  default=None,
+                      help="Interface to bind (default: 127.0.0.1). Use 0.0.0.0 for LAN access.")
     p_ui.add_argument("--debug", action="store_true")
 
     # sync-albums

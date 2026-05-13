@@ -1734,6 +1734,18 @@ class TestBpCli(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
 
+    def test_ui_help_includes_host_and_port(self):
+        stdout, _, code = self._run_bp("ui", "--help")
+        self.assertEqual(code, 0)
+        self.assertIn("--host", stdout)
+        self.assertIn("--port", stdout)
+
+    def test_ui_host_flag_accepted(self):
+        """bp ui --host 0.0.0.0 must not fail with 'unrecognized argument'."""
+        _, stderr, _ = self._run_bp("--config", "/nonexistent.yml",
+                                    "ui", "--host", "0.0.0.0")
+        self.assertNotIn("unrecognized", stderr.lower())
+
 
 # ---------------------------------------------------------------------------
 # updated_at stamping
