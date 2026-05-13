@@ -2,8 +2,6 @@
 
 A bidirectional sync and curation tool for photo libraries that span both Apple Photos and Flickr. It keeps metadata (titles, descriptions, tags) in sync between the two, automates privacy triage using Apple's ML analysis and geofencing, and serves a local web UI for reviewing photos, resolving metadata conflicts, and managing duplicates and albums.
 
-This project is named for the [Blue Pearmain apple](https://en.wikipedia.org/wiki/Blue_Pearmain), an American variety mentioned by Henry David Thoreau in his 1862 essay *Wild Apples*. Why? Three reasons. First off, like McIntosh, it’s a variety of apple, so it alludes to the company. But apples are commonly thought of as being red, or maybe yellow or green, so I liked that _this_ variety of apples is “blue”, harkening to the colors of the Flickr logo. Plus, it’s a meta-allusion to the proud literary & artistic history of Massachusetts. Yes, the name is a mouthful (ahem), so feel free to just call it “BP” if you prefer.
-
 ---
 
 ## The problem
@@ -26,6 +24,58 @@ Blue Pearmain addresses both:
 Nothing is written to Flickr or Apple Photos without explicit human confirmation or auto-apply rules you've opted into.
 
 **Scope and trust model** — Blue Pearmain is a personal tool designed for a single-user local environment. The reviewer UI binds to localhost by default and is intended for use on a trusted local network (e.g. LAN access from a personal device). It is not hardened for multi-user or internet-facing deployment, and the network-level protections in the reviewer UI reflect that assumption.
+
+## Screenshots
+
+<table>
+<tr>
+<td align="center"><img src="https://cdevers.github.io/assets/images/blog/2026-05-12/BP-1-home.png" alt="Dashboard" width="420"><br><em>Dashboard</em></td>
+<td align="center"><img src="https://cdevers.github.io/assets/images/blog/2026-05-12/BP-2-review.png" alt="Review grid" width="420"><br><em>Review grid</em></td>
+</tr>
+<tr>
+<td align="center"><img src="https://cdevers.github.io/assets/images/blog/2026-05-12/BP-3-faces.png" alt="Faces" width="420"><br><em>Faces</em></td>
+<td align="center"><img src="https://cdevers.github.io/assets/images/blog/2026-05-12/BP-4-geozones.png" alt="Geofence zones" width="420"><br><em>Geofence zones</em></td>
+</tr>
+<tr>
+<td align="center"><img src="https://cdevers.github.io/assets/images/blog/2026-05-12/BP-5-duplicates.png" alt="Duplicates" width="420"><br><em>Duplicates</em></td>
+<td align="center"><img src="https://cdevers.github.io/assets/images/blog/2026-05-12/BP-6-proposals.png" alt="Metadata sync proposals" width="420"><br><em>Metadata sync proposals</em></td>
+</tr>
+</table>
+
+## Requirements
+
+- macOS (Apple Photos integration via [osxphotos](https://github.com/RhetTbull/osxphotos))
+- Python 3.11+
+- A Flickr Pro account and API key (register at [flickr.com/services/apps](https://www.flickr.com/services/apps/create/))
+
+## Quickstart
+
+```bash
+# 1. Clone and install dependencies
+git clone https://github.com/cdevers/Blue-Pearmain.git
+cd Blue-Pearmain
+pip3 install requests requests-oauthlib pyyaml flask osxphotos
+
+# 2. Configure
+cp config/config.example.yml config/config.yml
+# Edit config/config.yml — add your Flickr API key, secret, and username
+
+# 3. Authorise with Flickr (one-time, opens browser)
+python flickr/flickr_auth.py --config config/config.yml
+
+# 4. Verify your setup
+bp doctor                          # Checks config, DB, Photos library, photoscript
+bp doctor --check-flickr           # Also makes a live Flickr API call
+
+# 5. Install git hooks (keeps uv.lock in sync when pyproject.toml changes)
+make install-hooks
+
+# 6. (Optional) Install background daemons — poller (hourly), pipeline (6h), reviewer UI (always on)
+mkdir -p ~/Library/Logs/BluePearmain
+bp install-daemons
+# Output shows the launchctl bootstrap commands to load each agent.
+# To remove later: bp uninstall-daemons (then launchctl bootout each one if loaded)
+```
 
 ## Architecture
 
@@ -59,69 +109,17 @@ Nothing is written to Flickr or Apple Photos without explicit human confirmation
 
 See [`docs/pipeline.md`](docs/pipeline.md) for the full pipeline reference: stage contracts, idempotency guarantees, what writes to external systems, and partial failure recovery.
 
-## Components
+## Operational guarantees
 
-| Path | Purpose |
-|---|---|
-| `db/schema.sql` | SQLite schema |
-| `db/db.py` | Database access layer |
-| `analyzer/privacy.py` | Privacy classification logic |
-| `analyzer/tagger.py` | Tag proposal logic |
-| `flickr/flickr_auth.py` | One-time Flickr OAuth setup |
-| `flickr/flickr_client.py` | Flickr API client (with retry/backoff) |
-| `poller/poller.py` | Scheduled sync: Flickr → local DB |
-| `poller/scanner.py` | Apple Photos → local DB sync and matching |
-| `poller/deduplicator.py` | Identify and classify duplicate photos |
-| `poller/thumbnailer.py` | Populate thumbnail paths for the review UI |
-| `poller/link_orphans.py` | Batch-link Photos-only / Flickr-only record pairs by capture timestamp |
-| `poller/reconcile.py` | Compare DB push state against actual Flickr state |
-| `flickr/sync_names_from_flickr.py` | `bp sync-names-from-flickr`; pull Flickr photoset/collection title changes back into Apple Photos |
-| `flickr/sync_metadata.py` | `bp sync-metadata` entry point; drift filter + sync engine dispatch |
-| `flickr/metadata_puller.py` | Cache-based sync engine: diff, classify, generate proposals |
-| `flickr/proposal_applier.py` | Apply approved proposals to Photos or Flickr with staleness re-checks |
-| `reviewer/app.py` | Flask web UI |
-| `reviewer/templates/` | Jinja2 templates (dashboard, review grid, photo detail, faces, zones, duplicates, conflicts, proposals) |
-| `config/` | Configuration templates and launchd plists |
-| `db/migrate_001_privacy_state_check.py` | DB migration: adds CHECK constraint on privacy_state |
-| `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at, indexes on push state and tags, schema_migrations table |
-| `db/migrate_003_dimensions_and_dedup.py` | DB migration: adds width/height columns and duplicate_groups table |
-| `bp` | Unified command-line entry point |
-| `tests/` | Unit tests (614 tests) |
+| Guarantee | Status |
+|-----------|--------|
+| Safe to re-run | ✓ All stages are idempotent — re-running `bp all` is always safe |
+| Safe after interruption | ✓ Resume by re-running `bp all`; applied work is skipped, remaining work continues |
+| Partial failures isolated | ✓ A failure in any stage is logged and the sequence continues |
+| Consistency after partial failure | ✓ `bp reconcile --fix` repairs Flickr drift caused by incomplete pushes |
+| Requires trusted local environment | Yes — not designed for multi-user or internet-facing deployment |
 
-## Requirements
-
-- macOS (Apple Photos integration via [osxphotos](https://github.com/RhetTbull/osxphotos))
-- Python 3.11+
-- A Flickr Pro account and API key (register at [flickr.com/services/apps](https://www.flickr.com/services/apps/create/))
-
-## Setup
-
-```bash
-# 1. Clone and install dependencies
-git clone https://github.com/cdevers/Blue-Pearmain.git
-cd Blue-Pearmain
-pip3 install requests requests-oauthlib pyyaml flask osxphotos
-
-# 2. Configure
-cp config/config.example.yml config/config.yml
-# Edit config/config.yml — add your Flickr API key, secret, and username
-
-# 3. Authorise with Flickr (one-time, opens browser)
-python flickr/flickr_auth.py --config config/config.yml
-
-# 4. Verify your setup
-bp doctor                          # Checks config, DB, Photos library, photoscript
-bp doctor --check-flickr           # Also makes a live Flickr API call
-
-# 5. Install git hooks (keeps uv.lock in sync when pyproject.toml changes)
-make install-hooks
-
-# 6. (Optional) Install background daemons — poller (hourly), pipeline (6h), reviewer UI (always on)
-mkdir -p ~/Library/Logs/BluePearmain
-bp install-daemons
-# Output shows the launchctl bootstrap commands to load each agent.
-# To remove later: bp uninstall-daemons (then launchctl bootout each one if loaded)
-```
+`bp doctor` performs a preflight check on config, DB, and environment. A passing doctor check means startup is likely to succeed — it does not guarantee that all runtime operations (network calls, Photos access, Flickr API) will complete without error.
 
 ## Running
 
@@ -218,6 +216,35 @@ If you get "Input/output error" from launchctl (stale state after an unclean sto
 launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.blue-pearmain.reviewer.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.blue-pearmain.reviewer.plist
 ```
+
+## Components
+
+| Path | Purpose |
+|---|---|
+| `db/schema.sql` | SQLite schema |
+| `db/db.py` | Database access layer |
+| `analyzer/privacy.py` | Privacy classification logic |
+| `analyzer/tagger.py` | Tag proposal logic |
+| `flickr/flickr_auth.py` | One-time Flickr OAuth setup |
+| `flickr/flickr_client.py` | Flickr API client (with retry/backoff) |
+| `poller/poller.py` | Scheduled sync: Flickr → local DB |
+| `poller/scanner.py` | Apple Photos → local DB sync and matching |
+| `poller/deduplicator.py` | Identify and classify duplicate photos |
+| `poller/thumbnailer.py` | Populate thumbnail paths for the review UI |
+| `poller/link_orphans.py` | Batch-link Photos-only / Flickr-only record pairs by capture timestamp |
+| `poller/reconcile.py` | Compare DB push state against actual Flickr state |
+| `flickr/sync_names_from_flickr.py` | `bp sync-names-from-flickr`; pull Flickr photoset/collection title changes back into Apple Photos |
+| `flickr/sync_metadata.py` | `bp sync-metadata` entry point; drift filter + sync engine dispatch |
+| `flickr/metadata_puller.py` | Cache-based sync engine: diff, classify, generate proposals |
+| `flickr/proposal_applier.py` | Apply approved proposals to Photos or Flickr with staleness re-checks |
+| `reviewer/app.py` | Flask web UI |
+| `reviewer/templates/` | Jinja2 templates (dashboard, review grid, photo detail, faces, zones, duplicates, conflicts, proposals) |
+| `config/` | Configuration templates and launchd plists |
+| `db/migrate_001_privacy_state_check.py` | DB migration: adds CHECK constraint on privacy_state |
+| `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at, indexes on push state and tags, schema_migrations table |
+| `db/migrate_003_dimensions_and_dedup.py` | DB migration: adds width/height columns and duplicate_groups table |
+| `bp` | Unified command-line entry point |
+| `tests/` | Unit tests (639 tests) |
 
 ## Review UI
 
@@ -548,18 +575,6 @@ All scripts are idempotent and safe to re-run.
 
 > **Note (migration 001):** If any photos have an unrecognised `privacy_state` value (e.g. from manual DB edits or a future code change), the migration will reset them to `needs_review` before adding the constraint. Check the output for any rows that are reset.
 
-## Operational guarantees
-
-| Guarantee | Status |
-|-----------|--------|
-| Safe to re-run | ✓ All stages are idempotent — re-running `bp all` is always safe |
-| Safe after interruption | ✓ Resume by re-running `bp all`; applied work is skipped, remaining work continues |
-| Partial failures isolated | ✓ A failure in any stage is logged and the sequence continues |
-| Consistency after partial failure | ✓ `bp reconcile --fix` repairs Flickr drift caused by incomplete pushes |
-| Requires trusted local environment | Yes — not designed for multi-user or internet-facing deployment |
-
-`bp doctor` performs a preflight check on config, DB, and environment. A passing doctor check means startup is likely to succeed — it does not guarantee that all runtime operations (network calls, Photos access, Flickr API) will complete without error.
-
 ## Tests
 
 ```bash
@@ -571,3 +586,7 @@ python -m pytest tests/ -q
 ## License
 
 MIT
+
+## About the name
+
+This project is named for the [Blue Pearmain apple](https://en.wikipedia.org/wiki/Blue_Pearmain), an American variety mentioned by Henry David Thoreau in his 1862 essay *Wild Apples*. Why? Three reasons. First off, like McIntosh, it's a variety of apple, so it alludes to the company. But apples are commonly thought of as being red, or maybe yellow or green, so I liked that _this_ variety of apples is "blue", harkening to the colors of the Flickr logo. Plus, it's a meta-allusion to the proud literary & artistic history of Massachusetts. Yes, the name is a mouthful (ahem), so feel free to just call it "BP" if you prefer.
