@@ -2,6 +2,8 @@
 
 A bidirectional sync and curation tool for photo libraries that span both Apple Photos and Flickr. It keeps metadata (titles, descriptions, tags) in sync between the two, automates privacy triage using Apple's ML analysis and geofencing, and serves a local web UI for reviewing photos, resolving metadata conflicts, and managing duplicates and albums.
 
+The motivation behind this project — archival stewardship, provenance, and what it means to preserve photos with their context intact — is written up in [Filing Vivian Maier](https://cdevers.github.io/2026/05/12/Filing-Vivian-Maier.html).
+
 ---
 
 ## The problem
