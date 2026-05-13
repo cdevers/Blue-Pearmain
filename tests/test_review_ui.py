@@ -967,3 +967,59 @@ class TestProposalRoutes:
         data = resp.get_json()
         assert data["ok"] is True
         assert data["applied"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# GH #3 — mDNS/Bonjour registration
+# ---------------------------------------------------------------------------
+
+class TestMDnsRegistration:
+    """Tests for _start_mdns: Bonjour _http._tcp registration on LAN startup."""
+
+    def _call(self, host, port, lan_ip, *, mock_zc_module=None):
+        from unittest.mock import patch
+        if mock_zc_module is None:
+            mock_zc_module = MagicMock()
+        with patch.dict("sys.modules", {"zeroconf": mock_zc_module}):
+            app_module._start_mdns(host, port, lan_ip)
+        return mock_zc_module
+
+    def test_skips_when_localhost(self):
+        """No mDNS registration when host is 127.0.0.1."""
+        m = self._call("127.0.0.1", 5173, "192.168.1.100")
+        m.Zeroconf.assert_not_called()
+
+    def test_skips_when_localhost_string(self):
+        """No mDNS registration when host is 'localhost'."""
+        m = self._call("localhost", 5173, "192.168.1.100")
+        m.Zeroconf.assert_not_called()
+
+    def test_skips_when_no_lan_ip(self):
+        """No mDNS registration when lan_ip is None."""
+        m = self._call("0.0.0.0", 5173, None)
+        m.Zeroconf.assert_not_called()
+
+    def test_registers_http_tcp_service(self):
+        """Registers a _http._tcp.local. service when binding on LAN."""
+        m = self._call("0.0.0.0", 5173, "192.168.1.100")
+        m.Zeroconf.return_value.register_service.assert_called_once()
+        type_arg = m.ServiceInfo.call_args[0][0]
+        assert type_arg == "_http._tcp.local."
+
+    def test_registers_blue_pearmain_name(self):
+        """Service name contains 'blue-pearmain'."""
+        m = self._call("0.0.0.0", 5173, "192.168.1.100")
+        name_arg = m.ServiceInfo.call_args[0][1]
+        assert "blue-pearmain" in name_arg
+
+    def test_registers_correct_port(self):
+        """ServiceInfo receives the port passed to _start_mdns."""
+        m = self._call("0.0.0.0", 8888, "10.0.0.5")
+        kwargs = m.ServiceInfo.call_args[1]
+        assert kwargs.get("port") == 8888
+
+    def test_survives_import_error(self):
+        """Missing zeroconf package is handled without raising."""
+        from unittest.mock import patch
+        with patch.dict("sys.modules", {"zeroconf": None}):
+            app_module._start_mdns("0.0.0.0", 5173, "192.168.1.100")

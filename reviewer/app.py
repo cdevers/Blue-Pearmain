@@ -1197,6 +1197,42 @@ def create_app(config_path: str) -> Flask:
     return app
 
 
+def _start_mdns(host: str, port: int, lan_ip: str | None) -> None:
+    """Register a Bonjour _http._tcp.local. service when binding on LAN.
+
+    Called from main() when host != localhost and lan_ip is known.
+    Handles missing zeroconf package gracefully (logs a warning and returns).
+    Registers an atexit handler to unregister the service on shutdown.
+    """
+    if host in ("127.0.0.1", "localhost") or lan_ip is None:
+        return
+    try:
+        import atexit
+        import socket as _socket
+        from zeroconf import ServiceInfo, Zeroconf
+
+        info = ServiceInfo(
+            "_http._tcp.local.",
+            "blue-pearmain._http._tcp.local.",
+            addresses=[_socket.inet_aton(lan_ip)],
+            port=port,
+            properties={"path": "/"},
+        )
+        zc = Zeroconf()
+        zc.register_service(info)
+        log.info("mDNS: registered blue-pearmain.local at http://blue-pearmain.local:%d", port)
+
+        def _shutdown() -> None:
+            zc.unregister_service(info)
+            zc.close()
+
+        atexit.register(_shutdown)
+    except ImportError:
+        log.warning("zeroconf not installed; mDNS registration skipped")
+    except Exception as exc:
+        log.warning("mDNS registration failed: %s", exc)
+
+
 def main():
     import argparse
     # Pre-parse --config so we can read reviewer defaults from the config file.
@@ -1246,6 +1282,7 @@ def main():
     create_app(args.config)
     log.info(f"Starting review UI at http://localhost:{args.port}"
              + (f"  (also http://{lan_ip}:{args.port} on LAN)" if lan_ip else ""))
+    _start_mdns(args.host, args.port, lan_ip)
     app.run(host=args.host, port=args.port, debug=args.debug)
 
 
