@@ -1012,6 +1012,12 @@ class TestMDnsRegistration:
         name_arg = m.ServiceInfo.call_args[0][1]
         assert "blue-pearmain" in name_arg
 
+    def test_registers_blue_pearmain_local_server(self):
+        """ServiceInfo server= is 'blue-pearmain.local.' so the hostname resolves."""
+        m = self._call("0.0.0.0", 5173, "192.168.1.100")
+        kwargs = m.ServiceInfo.call_args[1]
+        assert kwargs.get("server") == "blue-pearmain.local."
+
     def test_registers_correct_port(self):
         """ServiceInfo receives the port passed to _start_mdns."""
         m = self._call("0.0.0.0", 8888, "10.0.0.5")

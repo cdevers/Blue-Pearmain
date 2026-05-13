@@ -1217,9 +1217,15 @@ def _start_mdns(host: str, port: int, lan_ip: str | None) -> None:
             addresses=[_socket.inet_aton(lan_ip)],
             port=port,
             properties={"path": "/"},
+            server="blue-pearmain.local.",
         )
         zc = Zeroconf()
-        zc.register_service(info)
+        try:
+            zc.register_service(info)
+        except Exception:
+            # Name already registered (e.g. rapid daemon restart). Unregister first.
+            zc.unregister_service(info)
+            zc.register_service(info)
         log.info("mDNS: registered blue-pearmain.local at http://blue-pearmain.local:%d", port)
 
         def _shutdown() -> None:
