@@ -183,41 +183,7 @@ bp ui                             # Open http://localhost:5173 and start reviewi
 
 The thumbnailer populates `thumbnail_path` for each photo using the best available source: a locally cached Photos derivative JPEG, a stored Flickr URL, or nothing. When serving thumbnails, the review UI falls back to fetching directly from Flickr's CDN for any matched photo that has a Flickr ID but no local file — so photos that haven't been downloaded from iCloud will still display if they've been uploaded to Flickr. Purely local photos with no Flickr match will show a "no preview" placeholder until iCloud downloads them.
 
-For ongoing use, both the poller and the review UI run as launchd agents — no terminal window required. `bp install-daemons` writes the plists to `~/Library/LaunchAgents/` with all paths substituted for your install location:
-
-```bash
-mkdir -p ~/Library/Logs/BluePearmain
-bp install-daemons
-
-# Then load each agent (output from install-daemons shows the exact commands):
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.blue-pearmain.poller.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.blue-pearmain.reviewer.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.blue-pearmain.pipeline.plist
-```
-
-To remove: `bp uninstall-daemons` removes the plist files; then `launchctl bootout` each one if it was loaded.
-
-The reviewer starts immediately and restarts automatically if it crashes. The poller runs hourly. The pipeline runs every 6 hours: it diffs cached metadata against both sides, generates proposals, and auto-applies any non-conflict proposals (collision proposals are left for manual review in the UI). Logs are written to `~/Library/Logs/BluePearmain/` and are visible in Console.app:
-
-```bash
-tail -f ~/Library/Logs/BluePearmain/reviewer.log
-tail -f ~/Library/Logs/BluePearmain/poller.log
-tail -f ~/Library/Logs/BluePearmain/pipeline.log
-```
-
-To restart a service:
-
-```bash
-launchctl stop com.blue-pearmain.reviewer
-launchctl start com.blue-pearmain.reviewer
-```
-
-If you get "Input/output error" from launchctl (stale state after an unclean stop), use `bootout`/`bootstrap` instead of `unload`/`load`:
-
-```bash
-launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.blue-pearmain.reviewer.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.blue-pearmain.reviewer.plist
-```
+For ongoing use, all three services run as launchd agents — no terminal window required. The poller runs hourly, the pipeline every 6 hours, and the reviewer stays always-on. Run `bp install-daemons` to write the plists and get the exact `launchctl bootstrap` commands to load them. See [`docs/daemon-setup.md`](docs/daemon-setup.md) for full launchctl reference: loading, logs, restart, stale-state recovery, and uninstalling.
 
 ## Components
 
