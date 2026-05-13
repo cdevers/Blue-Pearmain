@@ -849,3 +849,121 @@ class TestProposalJsDefensiveHandling:
         idx = proposals_src.find("async function approveReverse")
         assert idx != -1
         assert "} catch" in proposals_src[idx:idx + 900]
+
+
+# ---------------------------------------------------------------------------
+# TestProposalRoutes — GH #80
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def client_with_proposals():
+    """Flask test client seeded with non-conflict, divergence, and collision proposals."""
+    with tempfile.TemporaryDirectory() as tmp:
+        test_db = Database(Path(tmp) / "test.db")
+        now = "2026-01-01T00:00:00+00:00"
+
+        photo_id = test_db.upsert_photo({
+            "uuid":              "uuid-prop-001",
+            "flickr_id":         "flickr-prop-001",
+            "original_filename": "IMG_prop.JPG",
+            "privacy_state":     "needs_review",
+            "proposed_tags":     [],
+            "apple_persons":     [],
+            "apple_labels":      [],
+            "photos_tags":       ["nature", "travel"],
+        })
+
+        def _ins(proposed_value, source, target, conflict_type):
+            test_db.conn.execute(
+                """INSERT INTO metadata_proposals
+                   (photo_id, field, proposed_value, source, target, conflict_type, status, created_at)
+                   VALUES (?, 'tags', ?, ?, ?, ?, 'pending', ?)""",
+                (photo_id, proposed_value, source, target, conflict_type, now),
+            )
+            return test_db.conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+
+        non_conflict_id  = _ins('["flickrtag"]',        "flickr", "photos", "non_conflict")
+        divergence_id    = _ins('["flickrtag","extra"]', "flickr", "photos", "divergence")
+        collision_f2p_id = _ins('["flickrcol"]',         "flickr", "photos", "collision")
+        collision_p2f_id = _ins('["photoscol"]',         "photos", "flickr", "collision")
+        test_db.conn.commit()
+
+        mock_flickr = MagicMock()
+        app_module._db = test_db
+        app_module._client = mock_flickr
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+
+        with app_module.app.test_client() as c:
+            yield c, test_db, non_conflict_id, divergence_id, collision_f2p_id, collision_p2f_id, mock_flickr
+
+        app_module._db = None
+        app_module._client = None
+
+
+class TestProposalRoutes:
+    """Route-level tests for the proposal API endpoints (GH #80)."""
+
+    def test_approve_non_conflict_returns_ok(self, client_with_proposals):
+        from unittest.mock import patch
+        c, db, nc_id, div_id, col_f2p, col_p2f, _ = client_with_proposals
+        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
+             patch("flickr.proposal_applier._run_with_timeout",
+                   return_value={"ok": True, "written": ["flickrtag"]}):
+            resp = c.post(f"/api/proposals/{nc_id}/approve")
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
+
+    def test_approve_returns_not_ok_when_photos_not_responding(self, client_with_proposals):
+        from unittest.mock import patch
+        c, db, nc_id, div_id, col_f2p, col_p2f, _ = client_with_proposals
+        with patch("flickr.proposal_applier._photos_is_responsive", return_value=False):
+            resp = c.post(f"/api/proposals/{nc_id}/approve")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is False
+        assert "not responding" in data.get("reason", "").lower()
+
+    def test_approve_resolves_collision_sibling(self, client_with_proposals):
+        from unittest.mock import patch
+        c, db, nc_id, div_id, col_f2p, col_p2f, _ = client_with_proposals
+        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
+             patch("flickr.proposal_applier._run_with_timeout",
+                   return_value={"ok": True, "written": ["flickrcol"]}):
+            resp = c.post(f"/api/proposals/{col_f2p}/approve")
+        assert resp.get_json()["ok"] is True
+        row = db.conn.execute(
+            "SELECT status FROM metadata_proposals WHERE id=?", (col_p2f,)
+        ).fetchone()
+        assert row["status"] == "rejected"
+
+    def test_approve_reverse_returns_ok(self, client_with_proposals):
+        c, db, nc_id, div_id, col_f2p, col_p2f, mock_flickr = client_with_proposals
+        resp = c.post(f"/api/proposals/{col_f2p}/approve-reverse")
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
+        mock_flickr.set_tags.assert_called_once()
+
+    def test_bulk_approve_non_conflict(self, client_with_proposals):
+        from unittest.mock import patch
+        c, db, nc_id, div_id, col_f2p, col_p2f, _ = client_with_proposals
+        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
+             patch("flickr.proposal_applier._run_with_timeout",
+                   return_value={"ok": True, "written": ["flickrtag"]}):
+            resp = c.post("/api/proposals/bulk-approve", json={"conflict_type": "non_conflict"})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert data["applied"] >= 1
+
+    def test_bulk_approve_divergence(self, client_with_proposals):
+        from unittest.mock import patch
+        c, db, nc_id, div_id, col_f2p, col_p2f, _ = client_with_proposals
+        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
+             patch("flickr.proposal_applier._run_with_timeout",
+                   return_value={"ok": True, "written": ["flickrtag", "extra"]}):
+            resp = c.post("/api/proposals/bulk-approve", json={"conflict_type": "divergence"})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert data["applied"] >= 1

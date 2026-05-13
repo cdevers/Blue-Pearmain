@@ -1,6 +1,6 @@
 [project]
 name = "blue-pearmain"
-version = "0.8.2"
+version = "0.8.3"
 description = "Privacy-aware tool for harmonizing Apple Photos and Flickr libraries"
 requires-python = ">=3.11"
 dependencies = [
