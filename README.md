@@ -29,16 +29,16 @@ Nothing is written to Flickr or Apple Photos without explicit human confirmation
 
 <table>
 <tr>
-<td align="center"><img src="https://cdevers.github.io/assets/images/blog/2026-05-12/BP-1-home.png" alt="Dashboard" width="420"><br><em>Dashboard</em></td>
-<td align="center"><img src="https://cdevers.github.io/assets/images/blog/2026-05-12/BP-2-review.png" alt="Review grid" width="420"><br><em>Review grid</em></td>
+<td align="center"><img src="docs/screenshots/BP-1-home.png" alt="Dashboard" width="420"><br><em>Dashboard</em></td>
+<td align="center"><img src="docs/screenshots/BP-2-review.png" alt="Review grid" width="420"><br><em>Review grid</em></td>
 </tr>
 <tr>
-<td align="center"><img src="https://cdevers.github.io/assets/images/blog/2026-05-12/BP-3-faces.png" alt="Faces" width="420"><br><em>Faces</em></td>
-<td align="center"><img src="https://cdevers.github.io/assets/images/blog/2026-05-12/BP-4-geozones.png" alt="Geofence zones" width="420"><br><em>Geofence zones</em></td>
+<td align="center"><img src="docs/screenshots/BP-3-faces.png" alt="Faces" width="420"><br><em>Faces</em></td>
+<td align="center"><img src="docs/screenshots/BP-4-geozones.png" alt="Geofence zones" width="420"><br><em>Geofence zones</em></td>
 </tr>
 <tr>
-<td align="center"><img src="https://cdevers.github.io/assets/images/blog/2026-05-12/BP-5-duplicates.png" alt="Duplicates" width="420"><br><em>Duplicates</em></td>
-<td align="center"><img src="https://cdevers.github.io/assets/images/blog/2026-05-12/BP-6-proposals.png" alt="Metadata sync proposals" width="420"><br><em>Metadata sync proposals</em></td>
+<td align="center"><img src="docs/screenshots/BP-5-duplicates.png" alt="Duplicates" width="420"><br><em>Duplicates</em></td>
+<td align="center"><img src="docs/screenshots/BP-6-proposals.png" alt="Metadata sync proposals" width="420"><br><em>Metadata sync proposals</em></td>
 </tr>
 </table>
 
