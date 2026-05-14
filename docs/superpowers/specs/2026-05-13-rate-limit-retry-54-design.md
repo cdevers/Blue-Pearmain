@@ -1,6 +1,6 @@
 # Flickr Rate-Limit Retry Hardening — Design Spec (GH #54)
 
-**Goal:** Prevent sustained HTTP 429 rate-limiting from permanently failing Flickr API calls during large overnight runs by extending the retry count and backoff ceiling in `FlickrClient._retry`.
+**Goal:** Prevent sustained HTTP 429 rate-limiting from permanently failing Flickr API calls during large overnight runs by extending the retry count and backoff ceiling for 429s, and honoring `Retry-After` headers when present.
 
 ---
 
@@ -19,20 +19,50 @@ Flickr's rate-limit window is ~1 minute. During sustained 429s (observed during 
 
 The same problem affects `flickr.photos.recentlyUpdated` in the poller (confirmed in logs).
 
+Exhausted retries are not treated as permanent failure — the pending DB row is preserved for the next run. This is the correct recovery model and is unchanged by this fix.
+
 ---
 
 ## Change
 
 **File:** `flickr/flickr_client.py`
 
-**`_retry` method** — two changes:
+### 1. Differentiated retry policy by error type
 
-1. **`max_retries` default: 4 → 8**
-2. **Backoff formula: add 60-second ceiling**
-   - Current: `2 ** attempt + random.uniform(0, 0.5)`
-   - New: `min(2 ** attempt, 60) + random.uniform(0, 0.5)`
+429s and other transient errors have different recovery profiles:
 
-New retry schedule:
+- **HTTP 429 (rate limit):** needs long backoff to outlast Flickr's ~1-minute window. Gets 8 retries with a 60s ceiling.
+- **Timeouts and connection errors:** transient network issues that typically recover in seconds. Keep the existing 4-retry / 8s-ceiling schedule.
+- **Permanent HTTP errors (400, 401, 403, etc.) and non-transient Flickr API errors:** raise immediately, no retry. Unchanged.
+
+`_retry` receives the `reason` string already. Use it to select the policy:
+
+```python
+if "429" in reason:
+    max_retries_effective = 8
+    backoff_cap = 60
+else:
+    max_retries_effective = max_retries  # caller's value (default 4)
+    backoff_cap = 8
+```
+
+### 2. Honor `Retry-After` header on 429 responses
+
+When Flickr sends a `Retry-After` header on a 429 response, sleep that duration instead of computing exponential backoff. Flickr does not send this header reliably, so it is best-effort with fallback to exponential.
+
+In `_call`, before calling `_retry` on a 429:
+
+```python
+if resp.status_code == 429:
+    retry_after = resp.headers.get("Retry-After")
+    if retry_after:
+        try:
+            sleep(float(retry_after))
+        except ValueError:
+            pass  # malformed header — fall through to normal retry
+```
+
+### 3. New 429 retry schedule
 
 | Attempt | Delay |
 |---------|-------|
@@ -45,17 +75,20 @@ New retry schedule:
 | 6 | ~60s ← rate-limit window resets here |
 | 7 | ~60s |
 
-Total max wait before giving up: ~183s (~3 minutes). This outlasts Flickr's ~1-minute rate-limit window by 3× before exhausting retries.
+Total max wait before giving up: ~183s (~3 minutes). Outlasts Flickr's ~1-minute rate-limit window by 3× before exhausting retries.
 
-The 60s cap prevents runaway waits at higher attempt numbers without needing to increase `max_retries` further.
+Timeout/connection errors retain the current schedule (attempts 0–3, ~15s total) — appropriate for transient network issues.
 
-The `max_retries` parameter remains a keyword argument on `_call` so individual call sites can still override it if needed.
+### Not in scope
+
+- **Process-wide cooldown after repeated 429s** — valid future consideration if the per-call fix proves insufficient. Would require shared mutable state across concurrent calls. Deferred.
+- **Summary output changes** (immediate / retried / exhausted counts) — a monitoring enhancement, tracked separately from this fix.
 
 ---
 
 ## Scope
 
-- One method (`_retry`), one formula change, one default change
+- One method (`_retry`), one call site in `_call` for `Retry-After`
 - Fixes all Flickr commands (sync-albums, poller, metadata sync, etc.) — not scoped to a single command
 - No schema changes, no new flags, no config changes
 
@@ -63,7 +96,8 @@ The `max_retries` parameter remains a keyword argument on `_call` so individual 
 
 ## Testing
 
-Two unit tests, no live Flickr calls:
+Three unit tests, no live Flickr calls:
 
-- Backoff values respect the 60s ceiling at high attempt numbers
-- `_retry` raises `FlickrError` after exactly `max_retries` attempts
+- 429 errors use 8-retry schedule with 60s backoff cap
+- Timeout/connection errors use 4-retry schedule with 8s cap
+- `_retry` raises `FlickrError` after the correct number of attempts for each error type
