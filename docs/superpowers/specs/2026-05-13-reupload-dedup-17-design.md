@@ -75,11 +75,17 @@ of thousands of rows.
 Explicit indexing structure to avoid accidental O(n²) behaviour:
 
 ```python
-# keyed by (normalised_filename, rounded_timestamp_second)
+# keyed by (normalised_filename, utc_second)
 by_filename_ts: dict[tuple[str | None, str], list[PhotoRow]]
-# keyed by rounded_timestamp_second alone (fallback)
+# keyed by utc_second alone (fallback)
 by_ts_only: dict[str, list[PhotoRow]]
 ```
+
+**Timestamp normalisation:** `date_taken` strings are parsed and converted to UTC,
+then truncated to whole-second precision (not rounded — truncation matches the existing
+behaviour in `normalise_dt()` in `scanner.py`). The resulting key format is
+`"YYYY-MM-DD HH:MM:SS"` in UTC. Both sides of the join must use identical
+normalisation to avoid false misses from sub-second or timezone differences.
 
 **Left side (candidates):**
 ```sql
@@ -138,17 +144,26 @@ Resolution-first with a bias toward the linked record within a threshold:
 REUPLOAD_KEEPER_PIXEL_RATIO = 1.5
 ```
 
-1. **Both records have dimensions:**
-   - Compute `ratio = max_pixels / min_pixels`
+1. **Both records have valid dimensions** (`width > 0` and `height > 0` on both):
+   - Compute `ratio = max_pixels / min_pixels` (both non-zero by construction)
    - If ratio ≥ `REUPLOAD_KEEPER_PIXEL_RATIO`: the dramatically-larger record is the
      keeper (strong signal it is the full-res original), regardless of which side is
      linked
    - If ratio < `REUPLOAD_KEEPER_PIXEL_RATIO`: linked record wins conservatively;
      group classified `reupload_uncertain`
-2. **Only one record has dimensions:** that record is tentatively the keeper; group
-   classified `reupload_uncertain`
-3. **Neither record has dimensions:** linked record is the keeper (conservative
-   default); group classified `reupload_uncertain`; flag added to `notes`
+2. **Only the linked record has valid dimensions:** linked record is tentatively the
+   keeper; group classified `reupload_uncertain`
+3. **Only the orphan has valid dimensions:** linked record is still the tentative
+   keeper — a Flickr-only orphan is never auto-promoted solely from its own unilateral
+   dimension data (a garbage metadata row with bogus dimensions should not steal
+   keeper status); group classified `reupload_uncertain`
+4. **Neither record has valid dimensions, or either has `width=0` / `height=0`:**
+   linked record is the keeper (conservative default); group classified
+   `reupload_uncertain`; `keeper_assumed: true` in notes
+
+`REUPLOAD_KEEPER_PIXEL_RATIO = 1.5` is the initial threshold. Snapbridge proxies are
+often dramatically smaller than full-res Nikon originals, so this may prove
+conservative — expect tuning after real-world runs.
 
 The linked record (Photos-imported) is *usually* the full-res import, but this is not
 guaranteed — see the iPhoto background note above. Resolution data wins when the
@@ -194,18 +209,28 @@ idempotency deterministic and avoids timezone-normalisation instability.
 
 ```json
 {
+  "keeper_flickr_id": "48922xxxxxx",
+  "discard_flickr_id": "54060xxxxxx",
   "filename_match": true,
   "timestamp_delta_s": 1,
   "upload_session_gap": 512345678,
   "dimension_ratio": 4.2,
-  "collision_count": 1,
+  "linked_match_count": 1,
+  "orphan_match_count": 1,
   "keeper_assumed": false,
   "summary": "DSC_0042.JPG | 2022-08-14T10:23:11 | linked flickr_id=48922xxxxxx → orphan flickr_id=54060xxxxxx | gap=512345678 | ratio=4.2×"
 }
 ```
 
-`keeper_assumed` is `true` when the keeper was chosen by fallback (no dimensions)
-rather than by evidence. The `summary` field provides a human-readable log line.
+- `keeper_flickr_id` / `discard_flickr_id`: explicit copies of the Flickr IDs even
+  though they appear in the match key, to make later analysis and export easier.
+- `linked_match_count`: number of linked records that matched this orphan's key
+  (> 1 means a collision on the linked side).
+- `orphan_match_count`: number of orphans that matched this linked record's key
+  (> 1 means a Nikon-firmware-style timestamp collision).
+- `keeper_assumed`: `true` when keeper was chosen by fallback (no usable dimensions)
+  rather than by resolution evidence.
+- `summary`: human-readable log line for the report and `--verbose` output.
 
 ### `photos` updates
 
@@ -242,13 +267,17 @@ any error — consistent with the existing deduplicator.
 New `--flickr` flag added to the existing `deduplicator.py` entry point:
 
 ```bash
-bp dedup --flickr --dry-run     # find pairs, print report, no writes (default)
-bp dedup --flickr --write       # find pairs and write to duplicate_groups
-bp dedup --flickr --write --verbose  # also log each matched pair individually
-bp dedup                        # existing filename+timestamp dedup (unchanged)
+bp dedup --flickr --dry-run           # find pairs, print report, no writes (default)
+bp dedup --flickr --write             # find pairs and write to duplicate_groups
+bp dedup --flickr --write --limit 200 # write at most 200 pairs (safe for first runs)
+bp dedup --flickr --write --verbose   # also log each matched pair individually
+bp dedup                              # existing filename+timestamp dedup (unchanged)
 ```
 
 No `--confirm` flag in Phase 1 — there are no Flickr API calls.
+
+`--limit N` caps the number of pairs written in a single run. Recommended for the
+first few live runs to allow spot-checking before committing to the full dataset.
 
 ### Report format
 
@@ -286,7 +315,9 @@ Confirmed `reupload` pairs are not listed individually at default verbosity.
 | One linked → many orphans | All `reupload_uncertain` |
 | One orphan → many linked | All `reupload_uncertain` |
 | NULL filename on either side | Timestamp-only match → always `reupload_uncertain` |
+| `width=0` or `height=0` on either record | Treated as no dimensions; keeper = linked, `reupload_uncertain` |
 | No dimensions on either record | Keeper = linked record; `keeper_assumed: true` in notes |
+| Only orphan has dimensions | Linked still wins; orphan never auto-promoted from unilateral data |
 | Pixel ratio < 1.5× (similar sizes) | Linked wins conservatively; `reupload_uncertain` |
 
 ---
@@ -308,8 +339,10 @@ New class `TestReuploadCandidates` in `tests/test_deduplicator.py`, using the ex
 | Test | Scenario | Expected |
 |------|----------|----------|
 | `test_exact_match_reupload` | Same filename + timestamp, gap > 100 K | `group_type='reupload'`, keeper=linked |
-| `test_keeper_by_pixels_orphan_wins` | Both have dimensions; orphan > 1.5× pixels | keeper = orphan |
+| `test_keeper_by_pixels_orphan_wins` | Both have valid dimensions; orphan > 1.5× pixels | keeper = orphan |
 | `test_keeper_within_ratio_linked_wins` | Both have dimensions; ratio < 1.5× | keeper = linked; `reupload_uncertain` |
+| `test_keeper_only_orphan_has_dims` | Only orphan has dimensions | keeper = linked; `reupload_uncertain` |
+| `test_keeper_zero_dimension_treated_as_none` | One record has `width=0` | treated as no dimensions; keeper = linked |
 | `test_small_gap_uncertain` | ID gap ≤ 100 K | `group_type='reupload_uncertain'` |
 | `test_one_to_many_uncertain` | Two orphans match same linked record | both `reupload_uncertain` |
 | `test_already_grouped_skipped` | Orphan already has `duplicate_group_id` | pair skipped, appears in conflicts |
