@@ -336,6 +336,14 @@ class FlickrClient:
             http_method="POST",
         )
 
+    def delete_photo(self, photo_id: str) -> None:
+        """Permanently delete a Flickr photo. Raises FlickrError on failure."""
+        self._call(
+            "flickr.photos.delete",
+            {"photo_id": photo_id},
+            http_method="POST",
+        )
+
     def get_photosets(self) -> list[dict]:
         """Return all photosets for the authenticated user."""
         data = self._call(

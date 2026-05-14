@@ -1602,6 +1602,17 @@ class TestFlickrCollectionsClient(unittest.TestCase):
             result = client.get_collections_flat()
         self.assertEqual(result, {"col-1": "Top", "col-2": "Nested"})
 
+    def test_delete_photo_calls_api(self):
+        from unittest.mock import patch
+        client = self._make_client()
+        with patch.object(client, "_call", return_value={}) as mock_call:
+            client.delete_photo("12345678")
+        mock_call.assert_called_once_with(
+            "flickr.photos.delete",
+            {"photo_id": "12345678"},
+            http_method="POST",
+        )
+
 # ---------------------------------------------------------------------------
 # Poller auto-push: approved Photos record matched to new Flickr upload
 # ---------------------------------------------------------------------------
