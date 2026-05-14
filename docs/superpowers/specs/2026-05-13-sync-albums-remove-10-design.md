@@ -48,7 +48,7 @@ The existing `upsert_photo_album()` must be updated to clear `removed_at` on re-
 
 Runs independently of `--limit` (album enumeration is cheap, ~200 albums):
 1. Fetch all current album UUIDs from `PhotosDB().album_info`
-2. **Plausibility guard:** if osxphotos returns zero albums and the DB has stored albums, abort without tombstoning — this indicates a transient osxphotos failure, not genuine deletion
+2. **Plausibility guard:** compare observed count against the count of non-deleted albums in the DB. If observed count is less than 50% of the stored baseline (and stored baseline > 0), abort without tombstoning and log a warning — this indicates a transient osxphotos failure, not genuine mass deletion. Zero observed albums always aborts regardless of threshold.
 3. Query all `albums` rows where `deleted_at IS NULL`
 4. For each stored album whose `apple_uuid` is not in the current set: set `deleted_at = now`
 5. Albums already marked `deleted_at IS NOT NULL` are left unchanged
@@ -89,6 +89,7 @@ Query: `photo_albums WHERE removed_at IS NOT NULL AND flickr_pushed = 1`, joined
 For each row:
 - Call `flickr.photosets.removePhoto(flickr_set_id, flickr_id)`
 - On success or `FLICKR_ERR_PHOTO_NOT_IN_SET`: hard-delete the `photo_albums` row
+- On `FLICKR_ERR_PHOTOSET_NOT_FOUND` (photoset was manually deleted on Flickr): treat as non-fatal — desired state achieved — hard-delete the `photo_albums` row and log a warning
 - On `FLICKR_ERR_NOT_FOUND` (photo deleted from Flickr): hard-delete the row (desired state achieved)
 - On other error: log and count as failed, leave row for retry
 
@@ -150,6 +151,7 @@ All new logic is testable without Flickr API calls (Flickr client mocked).
 - Album still present → no `deleted_at` written
 - Photo removed then re-added before sync → `removed_at` is cleared, no Flickr removal occurs
 - `sync_deleted_albums()` with osxphotos returning zero albums → no tombstones written (plausibility guard)
+- `sync_deleted_albums()` with osxphotos returning < 50% of stored album count → no tombstones written, warning logged
 
 **Removal sync:**
 - `--remove` without `--apply`: shows preview, no DB mutations, no Flickr calls
@@ -158,5 +160,6 @@ All new logic is testable without Flickr API calls (Flickr client mocked).
 - `FLICKR_ERR_PHOTO_NOT_IN_SET` → treated as success, row deleted
 - Deleted album: `photosets.delete` called, `albums` row hard-deleted, CASCADE removes `photo_albums`
 - `FLICKR_ERR_PHOTOSET_NOT_FOUND` → treated as success, `albums` row deleted
+- `FLICKR_ERR_PHOTOSET_NOT_FOUND` during `removePhoto` (photoset manually deleted on Flickr) → treated as non-fatal, row deleted, warning logged
 - `removePhoto` failure → row remains tombstoned, counted as failed, retried next run
 - Step 1 runs before Step 2: photos in a deleted album are not double-processed via `removePhoto`
