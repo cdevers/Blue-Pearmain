@@ -273,6 +273,102 @@ def _classify_group(photos: list[PhotoRow]) -> DuplicateGroup:
     return DuplicateGroup(match_key, "uncertain", photos, None, [], photos, notes)
 
 
+def _classify_reupload_pair(
+    linked: PhotoRow,
+    orphan: PhotoRow,
+    filename_match: bool,
+    linked_match_count: int,
+    orphan_match_count: int,
+) -> DuplicateGroup:
+    """Classify one linked+orphan pair as 'reupload' or 'reupload_uncertain'.
+
+    linked  — record with both uuid and flickr_id (Photos-linked)
+    orphan  — Flickr-only record (uuid IS NULL, candidate_public)
+    filename_match  — True when original_filename matched; False = timestamp-only fallback
+    linked_match_count  — how many linked records matched this orphan's key (>1 = Nikon collision)
+    orphan_match_count  — how many orphans matched this linked record's key (>1 = Nikon collision)
+    """
+    upload_session_gap = abs(int(linked.flickr_id) - int(orphan.flickr_id))
+
+    # Any of these conditions forces reupload_uncertain regardless of resolution
+    force_uncertain = (
+        not filename_match
+        or upload_session_gap <= CROSS_SESSION_THRESHOLD
+        or linked_match_count > 1
+        or orphan_match_count > 1
+    )
+
+    # Keeper determination — resolution-first, with conservative bias toward linked record.
+    # PhotoRow.pixels returns None when width/height is 0 or None, so the zero-dimension
+    # guard is implicit.
+    linked_px = linked.pixels
+    orphan_px = orphan.pixels
+    keeper_assumed = False
+
+    if linked_px and orphan_px:
+        ratio = max(linked_px, orphan_px) / min(linked_px, orphan_px)
+        if ratio >= REUPLOAD_KEEPER_PIXEL_RATIO:
+            keeper = linked if linked_px >= orphan_px else orphan
+        else:
+            keeper = linked
+            force_uncertain = True
+        dimension_ratio: float | None = round(ratio, 2)
+    elif linked_px:
+        # Only linked has valid dimensions — linked wins tentatively, but can't confirm
+        keeper = linked
+        force_uncertain = True
+        dimension_ratio = None
+    elif orphan_px:
+        # Only orphan has dims — never auto-promote orphan from its own unilateral data
+        keeper = linked
+        force_uncertain = True
+        dimension_ratio = None
+    else:
+        # Neither has dimensions — linked wins conservatively; keeper choice is assumed
+        keeper = linked
+        keeper_assumed = True
+        dimension_ratio = None
+
+    discard = orphan if keeper is linked else linked
+
+    # Timestamp delta for the evidence blob
+    linked_dt = _parse_dt(linked.date_taken)
+    orphan_dt = _parse_dt(orphan.date_taken)
+    timestamp_delta_s: int | None = None
+    if linked_dt and orphan_dt:
+        timestamp_delta_s = int(abs((linked_dt - orphan_dt).total_seconds()))
+
+    notes = json.dumps({
+        "keeper_flickr_id": keeper.flickr_id,
+        "discard_flickr_id": discard.flickr_id,
+        "filename_match": filename_match,
+        "timestamp_delta_s": timestamp_delta_s,
+        "upload_session_gap": upload_session_gap,
+        "dimension_ratio": dimension_ratio,
+        "linked_match_count": linked_match_count,
+        "orphan_match_count": orphan_match_count,
+        "keeper_assumed": keeper_assumed,
+        "summary": (
+            f"{linked.original_filename or '(no filename)'} | "
+            f"{linked.date_taken} | "
+            f"linked flickr_id={linked.flickr_id} → "
+            f"orphan flickr_id={orphan.flickr_id} | "
+            f"gap={upload_session_gap}"
+            + (f" | ratio={dimension_ratio}×" if dimension_ratio else "")
+        ),
+    })
+
+    return DuplicateGroup(
+        match_key=_reupload_match_key(linked.flickr_id, orphan.flickr_id),
+        group_type="reupload" if not force_uncertain else "reupload_uncertain",
+        photos=[keeper, discard],
+        keeper=keeper,
+        discards=[discard],
+        review=[],
+        notes=notes,
+    )
+
+
 # ---------------------------------------------------------------------------
 # DB queries
 # ---------------------------------------------------------------------------

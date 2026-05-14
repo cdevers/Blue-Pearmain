@@ -2,6 +2,7 @@
 tests/test_deduplicator.py — unit tests for poller/deduplicator.py
 """
 
+import json
 import sys
 import unittest
 from datetime import datetime, timezone
@@ -241,6 +242,146 @@ class TestReuploadMatchKey(unittest.TestCase):
             _reupload_match_key("54000", "48000"),
             _reupload_match_key("48000", "54000"),
         )
+
+
+class TestClassifyReuploadPair(unittest.TestCase):
+    """Tests for _classify_reupload_pair().
+
+    linked  = record with both uuid and flickr_id (Photos-linked, possibly low-res)
+    orphan  = Flickr-only record with no uuid (candidate_public, possibly re-upload)
+
+    Flickr IDs: linked=48922000000, orphan=54060000000 → gap=5138000000 >> CROSS_SESSION_THRESHOLD
+    """
+
+    def _linked(self, **kwargs):
+        return make_photo(
+            id=1, flickr_id="48922000000", uuid="AAAA-1111",
+            original_filename="DSC_0042.JPG",
+            date_taken="2022-08-14T10:23:11+00:00",
+            **kwargs,
+        )
+
+    def _orphan(self, **kwargs):
+        defaults = dict(
+            id=2, flickr_id="54060000000", uuid=None,
+            original_filename="DSC_0042.JPG",
+            date_taken="2022-08-14T10:23:11+00:00",
+            privacy_state="candidate_public",
+        )
+        defaults.update(kwargs)
+        return make_photo(**defaults)
+
+    def test_filename_match_large_gap_is_reupload(self):
+        from poller.deduplicator import _classify_reupload_pair
+        group = _classify_reupload_pair(self._linked(), self._orphan(),
+                                        filename_match=True,
+                                        linked_match_count=1, orphan_match_count=1)
+        self.assertEqual(group.group_type, "reupload")
+
+    def test_small_gap_is_uncertain(self):
+        from poller.deduplicator import _classify_reupload_pair
+        # gap = 50, well below CROSS_SESSION_THRESHOLD=100_000
+        orphan = self._orphan(flickr_id="48922000050")
+        group = _classify_reupload_pair(self._linked(), orphan,
+                                        filename_match=True,
+                                        linked_match_count=1, orphan_match_count=1)
+        self.assertEqual(group.group_type, "reupload_uncertain")
+
+    def test_timestamp_only_fallback_always_uncertain(self):
+        from poller.deduplicator import _classify_reupload_pair
+        group = _classify_reupload_pair(self._linked(), self._orphan(),
+                                        filename_match=False,
+                                        linked_match_count=1, orphan_match_count=1)
+        self.assertEqual(group.group_type, "reupload_uncertain")
+
+    def test_multiple_linked_candidates_forces_uncertain(self):
+        from poller.deduplicator import _classify_reupload_pair
+        group = _classify_reupload_pair(self._linked(), self._orphan(),
+                                        filename_match=True,
+                                        linked_match_count=2, orphan_match_count=1)
+        self.assertEqual(group.group_type, "reupload_uncertain")
+
+    def test_multiple_orphan_candidates_forces_uncertain(self):
+        from poller.deduplicator import _classify_reupload_pair
+        group = _classify_reupload_pair(self._linked(), self._orphan(),
+                                        filename_match=True,
+                                        linked_match_count=1, orphan_match_count=2)
+        self.assertEqual(group.group_type, "reupload_uncertain")
+
+    def test_orphan_dramatically_larger_wins_keeper(self):
+        from poller.deduplicator import _classify_reupload_pair
+        # orphan 6000×4000 (24M px) vs linked 1620×1080 (1.75M px) → ratio ≈ 13.7×
+        linked = self._linked(width=1620, height=1080)
+        orphan = self._orphan(width=6000, height=4000)
+        group = _classify_reupload_pair(linked, orphan,
+                                        filename_match=True,
+                                        linked_match_count=1, orphan_match_count=1)
+        self.assertEqual(group.group_type, "reupload")
+        self.assertIs(group.keeper, orphan)
+        self.assertEqual(group.discards, [linked])
+
+    def test_similar_sizes_linked_wins_and_group_is_uncertain(self):
+        from poller.deduplicator import _classify_reupload_pair
+        # ratio = 1050²/1000² ≈ 1.1, below REUPLOAD_KEEPER_PIXEL_RATIO=1.5
+        linked = self._linked(width=1000, height=1000)
+        orphan = self._orphan(width=1050, height=1050)
+        group = _classify_reupload_pair(linked, orphan,
+                                        filename_match=True,
+                                        linked_match_count=1, orphan_match_count=1)
+        self.assertEqual(group.group_type, "reupload_uncertain")
+        self.assertIs(group.keeper, linked)
+
+    def test_only_orphan_has_dims_linked_still_wins(self):
+        from poller.deduplicator import _classify_reupload_pair
+        linked = self._linked(width=None, height=None)
+        orphan = self._orphan(width=6000, height=4000)
+        group = _classify_reupload_pair(linked, orphan,
+                                        filename_match=True,
+                                        linked_match_count=1, orphan_match_count=1)
+        self.assertEqual(group.group_type, "reupload_uncertain")
+        self.assertIs(group.keeper, linked)
+
+    def test_no_dims_keeper_assumed_true_in_notes(self):
+        from poller.deduplicator import _classify_reupload_pair
+        # make_photo() defaults width=None, height=None
+        group = _classify_reupload_pair(self._linked(), self._orphan(),
+                                        filename_match=True,
+                                        linked_match_count=1, orphan_match_count=1)
+        data = json.loads(group.notes)
+        self.assertTrue(data["keeper_assumed"])
+
+    def test_zero_width_treated_as_no_dims(self):
+        from poller.deduplicator import _classify_reupload_pair
+        # width=0 → pixels property returns None → treated as no dimensions
+        linked = self._linked(width=0, height=0)
+        orphan = self._orphan(width=6000, height=4000)
+        group = _classify_reupload_pair(linked, orphan,
+                                        filename_match=True,
+                                        linked_match_count=1, orphan_match_count=1)
+        self.assertIs(group.keeper, linked)
+        self.assertEqual(group.group_type, "reupload_uncertain")
+
+    def test_match_key_smaller_flickr_id_first(self):
+        from poller.deduplicator import _classify_reupload_pair
+        group = _classify_reupload_pair(self._linked(), self._orphan(),
+                                        filename_match=True,
+                                        linked_match_count=1, orphan_match_count=1)
+        self.assertEqual(group.match_key, "reupload:48922000000:54060000000")
+
+    def test_evidence_blob_contains_required_fields(self):
+        from poller.deduplicator import _classify_reupload_pair
+        linked = self._linked(width=1620, height=1080)
+        orphan = self._orphan(width=6000, height=4000)
+        group = _classify_reupload_pair(linked, orphan,
+                                        filename_match=True,
+                                        linked_match_count=1, orphan_match_count=1)
+        data = json.loads(group.notes)
+        for key in ("keeper_flickr_id", "discard_flickr_id", "filename_match",
+                    "timestamp_delta_s", "upload_session_gap", "dimension_ratio",
+                    "linked_match_count", "orphan_match_count", "keeper_assumed", "summary"):
+            self.assertIn(key, data, f"missing key: {key}")
+        self.assertEqual(data["keeper_flickr_id"], orphan.flickr_id)
+        self.assertEqual(data["discard_flickr_id"], linked.flickr_id)
 
 
 if __name__ == "__main__":
