@@ -39,16 +39,24 @@ may be imported to a computer, synced to iCloud Photos, and uploaded to Flickr m
 later — gaps of 6–12 months are expected, producing Flickr ID gaps in the hundreds of
 millions.
 
-Two important constraints that shape the design:
+Important constraints that shape the design:
 
-1. **Resolution is not a reliable primary signal.** Snapbridge explicitly generates
-   low-res proxies with different dimensions. Dimension data may also be absent for
-   many records until the scanner backfill runs.
+1. **Resolution is not a reliable primary signal for candidate loading.** Snapbridge
+   explicitly generates low-res proxies with different dimensions. Dimension data may
+   also be absent for many records until the scanner backfill runs.
 
 2. **Nikon firmware bug.** Still images captured during a video recording session all
    receive the same `date_taken` timestamp as the first frame of the video. A
    timestamp-only match could therefore produce false-positive groups from unrelated
    photos sharing a coincident timestamp.
+
+3. **The linked record is not always the high-res original.** For photos taken during
+   the iPhoto era (before iCloud Photo Library), the full-res image may still live on
+   the old computer and have never been imported into iCloud Photos. In those cases the
+   record with a `uuid` in BP may actually be the Snapbridge *low-res* proxy — the one
+   that made it into iCloud — while the high-res original is a Flickr-only record.
+   Issue #12 (iPhoto merge) will surface more of these cases. Neither side should be
+   presumed canonical without evidence.
 
 ---
 
@@ -63,6 +71,15 @@ calls only the new function.
 **Load strategy:** consistent with `link_orphans.py` — both sides loaded into memory
 and matched in Python (dict lookups), avoiding a full SQL cross-join across hundreds
 of thousands of rows.
+
+Explicit indexing structure to avoid accidental O(n²) behaviour:
+
+```python
+# keyed by (normalised_filename, rounded_timestamp_second)
+by_filename_ts: dict[tuple[str | None, str], list[PhotoRow]]
+# keyed by rounded_timestamp_second alone (fallback)
+by_ts_only: dict[str, list[PhotoRow]]
+```
 
 **Left side (candidates):**
 ```sql
@@ -87,49 +104,70 @@ WHERE uuid IS NOT NULL
 
 Match on `original_filename` (exact) AND `date_taken` within ±2 seconds.
 
-When `original_filename IS NULL` on either record, fall back to timestamp-only matching.
+**Timestamp-only fallback:** when `original_filename IS NULL` on either record, a
+timestamp-only match is attempted but the result is **always classified
+`reupload_uncertain`** regardless of ID gap. A NULL filename removes the primary
+false-positive guard; auto-grouping is too risky.
 
-This approach is chosen over timestamp-only (too many false positives from the Nikon
-firmware bug) and dimension-based matching (dimensions unavailable or unreliable for
-Snapbridge proxies).
+### Upload-session gap classification
 
-### ID gap classification
+```python
+CROSS_SESSION_THRESHOLD = 100_000  # Flickr IDs
 
+upload_session_gap = abs(int(flickr_only.flickr_id) - int(linked.flickr_id))
 ```
-gap = abs(int(flickr_only.flickr_id) - int(linked.flickr_id))
-```
 
-| Gap | Classification |
-|-----|---------------|
-| > 100,000 | `reupload` — auto-grouped |
-| ≤ 100,000 | `reupload_uncertain` — flagged for manual review |
+The gap is evidence of **separate upload sessions**, not of duplication itself. A
+large gap combined with a filename+timestamp match produces a confident pair; the gap
+alone means nothing.
 
-Note: the gap threshold distinguishes upload *sessions* from burst-shot *batches*.
-Actual session gaps of 6–12 months produce gaps in the hundreds of millions; the
-100 K threshold is conservative by design.
+| Condition | Classification |
+|-----------|---------------|
+| filename+timestamp match AND gap > `CROSS_SESSION_THRESHOLD` | `reupload` — auto-grouped |
+| filename+timestamp match AND gap ≤ `CROSS_SESSION_THRESHOLD` | `reupload_uncertain` |
+| timestamp-only match (NULL filename), any gap | `reupload_uncertain` |
+
+Note: session gaps of 6–12 months produce gaps in the hundreds of millions; 100 K is
+conservative by design.
 
 ### Keeper determination
 
-Resolution-first, with fallback:
+Resolution-first with a bias toward the linked record within a threshold:
 
-1. **Both records have dimensions** → keeper = record with higher `width × height`
-2. **Only one record has dimensions** → keeper = the record with dimensions
-3. **Neither has dimensions** → keeper = the linked record (has `uuid`); a flag is
-   added to `notes` indicating this assumption could not be verified
+```python
+REUPLOAD_KEEPER_PIXEL_RATIO = 1.5
+```
 
-The linked record (Photos-imported) is usually the full-res original, but this is
-treated as an assumption, not a guarantee — resolution data always wins when available.
+1. **Both records have dimensions:**
+   - Compute `ratio = max_pixels / min_pixels`
+   - If ratio ≥ `REUPLOAD_KEEPER_PIXEL_RATIO`: the dramatically-larger record is the
+     keeper (strong signal it is the full-res original), regardless of which side is
+     linked
+   - If ratio < `REUPLOAD_KEEPER_PIXEL_RATIO`: linked record wins conservatively;
+     group classified `reupload_uncertain`
+2. **Only one record has dimensions:** that record is tentatively the keeper; group
+   classified `reupload_uncertain`
+3. **Neither record has dimensions:** linked record is the keeper (conservative
+   default); group classified `reupload_uncertain`; flag added to `notes`
+
+The linked record (Photos-imported) is *usually* the full-res import, but this is not
+guaranteed — see the iPhoto background note above. Resolution data wins when the
+evidence is clear (ratio ≥ 1.5×); within that band the linked record is preferred.
 
 ### Collision handling
 
-Collisions in either direction are classified `reupload_uncertain` regardless of ID gap.
+Collisions in either direction are classified `reupload_uncertain` regardless of gap.
 No auto-grouping fires for any ambiguous match.
 
-- **One linked record → multiple Flickr-only records:** Nikon firmware scenario — multiple
-  stills share the same timestamp. All candidate orphans are flagged uncertain.
-- **One Flickr-only record → multiple linked records:** rare, but possible if the same
-  photo was imported into Photos more than once. The orphan is flagged uncertain; the
-  correct linked counterpart requires human review.
+- **One linked record → multiple Flickr-only records:** Nikon firmware scenario —
+  multiple stills share the same timestamp. All candidate orphans flagged uncertain.
+- **One Flickr-only record → multiple linked records:** rare (photo imported into
+  Photos more than once). The orphan is flagged uncertain; correct counterpart
+  requires human review.
+
+A future `reupload_multi` group type could handle the case where one linked record has
+two clearly low-res orphans (both large gap, both smaller resolution) — but this is
+explicitly out of scope for Phase 1.
 
 ---
 
@@ -142,15 +180,32 @@ The existing `duplicate_groups` table and `photos` columns (`duplicate_group_id`
 
 | Column | Value |
 |--------|-------|
-| `match_key` | `"{filename}\|{date_taken_sec}\|reupload"` |
+| `match_key` | `"reupload:{keeper_flickr_id}:{discard_flickr_id}"` |
 | `group_type` | `'reupload'` or `'reupload_uncertain'` |
 | `keeper_id` | `photos.id` of the keeper record |
 | `photo_count` | `2` |
-| `notes` | Human-readable: filenames, Flickr IDs, ID gap, upload date delta, any flags |
+| `notes` | JSON evidence blob + human-readable summary (see below) |
 | `resolved` | `0` (Phase 2 flips this when it acts on privacy) |
 
-The match key includes `\|reupload` suffix to avoid colliding with existing
-filename+timestamp dedup groups.
+Using Flickr IDs in the match key (rather than filename+timestamp strings) makes
+idempotency deterministic and avoids timezone-normalisation instability.
+
+### Structured evidence in `notes`
+
+```json
+{
+  "filename_match": true,
+  "timestamp_delta_s": 1,
+  "upload_session_gap": 512345678,
+  "dimension_ratio": 4.2,
+  "collision_count": 1,
+  "keeper_assumed": false,
+  "summary": "DSC_0042.JPG | 2022-08-14T10:23:11 | linked flickr_id=48922xxxxxx → orphan flickr_id=54060xxxxxx | gap=512345678 | ratio=4.2×"
+}
+```
+
+`keeper_assumed` is `true` when the keeper was chosen by fallback (no dimensions)
+rather than by evidence. The `summary` field provides a human-readable log line.
 
 ### `photos` updates
 
@@ -164,14 +219,16 @@ until Phase 2 acts on it.
 
 ### Already-grouped records
 
-If either record already has a `duplicate_group_id` (from a prior run or the existing
-filename+timestamp deduplicator), the pair is **skipped** and a warning is logged. No
-existing group is overwritten.
+If either record already has a `duplicate_group_id`, the pair is **skipped** — no
+existing group is overwritten. These conflicts are collected and printed as a dedicated
+**Conflicts** section in the report so they are visible rather than silently dropped.
+A future `--reconcile-groups` flag could re-evaluate them.
 
 ### Idempotency
 
 The existing `ON CONFLICT(match_key) DO UPDATE` upsert in `_write_groups()` handles
-re-runs without duplication.
+re-runs. The Flickr-ID-based match key makes this deterministic across runs even if
+timestamps are re-normalised.
 
 ### Transaction
 
@@ -198,20 +255,24 @@ No `--confirm` flag in Phase 1 — there are no Flickr API calls.
 ```
 Reupload pairs found: 583
 
-  reupload            541 pairs   (auto-grouped)
-  reupload_uncertain   42 pairs   (flagged — small ID gap or 1-to-many match)
+  reupload            541 pairs   92.8%   (auto-grouped)
+  reupload_uncertain   42 pairs    7.2%   (flagged — small gap, timestamp-only, or collision)
 
 ── REUPLOAD_UNCERTAIN (42 pairs) ──────────────────────────────────────
   DSC_0042.JPG | 2022-08-14T10:23:11
     linked:  flickr_id=48922xxxxxx  uuid=XXXX-...
-    orphan:  flickr_id=48922xxxxxx+80  id_gap=80  (small gap — possible burst shot)
+    orphan:  flickr_id=48922xxxxxx+80  upload_session_gap=80  (small gap — possible burst)
+  ...
+
+── CONFLICTS (3 records already in a group) ───────────────────────────
+  flickr_id=54060xxxxxx  already in duplicate_group_id=17  — skipped
   ...
 
 Dry run — no changes written. Use --write to persist.
 ```
 
-Confirmed `reupload` pairs are not listed individually at default verbosity (there may
-be hundreds). `--verbose` dumps each one.
+Confirmed `reupload` pairs are not listed individually at default verbosity.
+`--verbose` dumps each one. Percentages are included to aid threshold tuning.
 
 ---
 
@@ -219,11 +280,14 @@ be hundreds). `--verbose` dumps each one.
 
 | Case | Handling |
 |------|----------|
-| Negative gap (Flickr-only ID < linked ID) | `abs()` for threshold; keeper by pixels as usual |
-| Already has `duplicate_group_id` | Skip pair, log warning |
-| NULL `flickr_id` on either side | Skip (shouldn't pass the query filters, but guarded) |
-| Multiple linked records at same timestamp | All matches → `reupload_uncertain` |
-| No dimensions on either record | Keeper = linked record; note flag added |
+| Negative gap (orphan ID < linked ID) | `abs()` for threshold; keeper by pixel ratio as usual |
+| Already has `duplicate_group_id` | Skip, surface in Conflicts report section |
+| NULL `flickr_id` on either side | Skip (filtered by query, but guarded defensively) |
+| One linked → many orphans | All `reupload_uncertain` |
+| One orphan → many linked | All `reupload_uncertain` |
+| NULL filename on either side | Timestamp-only match → always `reupload_uncertain` |
+| No dimensions on either record | Keeper = linked record; `keeper_assumed: true` in notes |
+| Pixel ratio < 1.5× (similar sizes) | Linked wins conservatively; `reupload_uncertain` |
 
 ---
 
@@ -231,7 +295,7 @@ be hundreds). `--verbose` dumps each one.
 
 | File | Change |
 |------|--------|
-| `poller/deduplicator.py` | Add `_fetch_reupload_candidates()`; add `--flickr` CLI flag; extend `main()` to dispatch to new function |
+| `poller/deduplicator.py` | Add `_fetch_reupload_candidates()` + classification helpers; add `--flickr` CLI flag; extend `main()` to dispatch to new function |
 | `tests/test_deduplicator.py` | Add `TestReuploadCandidates` test class (8 tests) |
 
 ---
@@ -244,13 +308,24 @@ New class `TestReuploadCandidates` in `tests/test_deduplicator.py`, using the ex
 | Test | Scenario | Expected |
 |------|----------|----------|
 | `test_exact_match_reupload` | Same filename + timestamp, gap > 100 K | `group_type='reupload'`, keeper=linked |
-| `test_keeper_by_pixels` | Both have dimensions; linked is low-res | keeper = Flickr-only |
+| `test_keeper_by_pixels_orphan_wins` | Both have dimensions; orphan > 1.5× pixels | keeper = orphan |
+| `test_keeper_within_ratio_linked_wins` | Both have dimensions; ratio < 1.5× | keeper = linked; `reupload_uncertain` |
 | `test_small_gap_uncertain` | ID gap ≤ 100 K | `group_type='reupload_uncertain'` |
-| `test_one_to_many_uncertain` | Two Flickr-only records match same linked record | both `reupload_uncertain` |
-| `test_already_grouped_skipped` | Flickr-only already has `duplicate_group_id` | pair skipped |
-| `test_null_filename_fallback` | `original_filename` NULL on Flickr-only | matches on timestamp only |
-| `test_negative_gap_abs` | Flickr-only has lower Flickr ID than linked | classified correctly; keeper by pixels |
-| `test_no_dimensions_defaults_to_linked` | Neither record has dimensions | keeper=linked, note flag set |
+| `test_one_to_many_uncertain` | Two orphans match same linked record | both `reupload_uncertain` |
+| `test_already_grouped_skipped` | Orphan already has `duplicate_group_id` | pair skipped, appears in conflicts |
+| `test_null_filename_fallback_uncertain` | `original_filename` NULL on orphan | timestamp-only match → `reupload_uncertain` regardless of gap |
+| `test_no_dimensions_defaults_to_linked` | Neither record has dimensions | keeper=linked, `keeper_assumed=true` in notes |
+
+---
+
+## Implementation notes
+
+- Constants `CROSS_SESSION_THRESHOLD` and `REUPLOAD_KEEPER_PIXEL_RATIO` should be
+  module-level named constants (not magic numbers inline) so they are easy to tune.
+- Variable names in implementation should use `upload_session_gap` (not bare `gap`) to
+  preserve the semantic meaning of the threshold.
+- Index structures (`by_filename_ts`, `by_ts_only`) should be built explicitly before
+  the match loop to guarantee O(n + m) behaviour.
 
 ---
 
