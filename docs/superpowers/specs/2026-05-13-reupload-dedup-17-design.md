@@ -234,7 +234,7 @@ idempotency deterministic and avoids timezone-normalisation instability.
   (> 1 means a Nikon-firmware-style timestamp collision).
 - `keeper_assumed`: `true` when keeper was chosen by fallback (no usable dimensions)
   rather than by resolution evidence.
-- `summary`: human-readable log line for the report and `--verbose` output.
+- `summary`: human-readable log line for the report and `--verbose` output. Downstream tooling must not parse this field — use the structured fields above instead.
 
 ### `photos` updates
 

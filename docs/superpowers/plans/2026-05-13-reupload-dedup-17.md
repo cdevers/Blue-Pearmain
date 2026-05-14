@@ -130,10 +130,17 @@ def _normalise_to_utc_second(s: str) -> str | None:
     Returns 'YYYY-MM-DD HH:MM:SS' in UTC, or None on parse failure.
     Uses truncation (not rounding) to match normalise_dt() in scanner.py.
     Both sides of the reupload join must use identical normalisation.
+
+    Note: _parse_dt() already attaches tzinfo=UTC for naive datetimes, so
+    .astimezone(timezone.utc) below is a no-op in that case.  The explicit
+    guard is kept here so this function is correct even if refactored to
+    not go through _parse_dt().
     """
     dt = _parse_dt(s)
     if dt is None:
         return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
     utc = dt.astimezone(timezone.utc)
     return utc.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -163,7 +170,7 @@ Expected: 8 passed.
 python -m pytest tests/ -q
 ```
 
-Expected: 639 passed (same as before).
+Expected: all passed (same count as before).
 
 - [ ] **Step 7: Commit**
 
@@ -446,7 +453,7 @@ Expected: 12 passed.
 python -m pytest tests/ -q
 ```
 
-Expected: all passed.
+Expected: all passed (no regressions).
 
 - [ ] **Step 6: Commit**
 
@@ -796,7 +803,7 @@ Expected: 6 passed.
 python -m pytest tests/ -q
 ```
 
-Expected: all passed.
+Expected: all passed (no regressions).
 
 - [ ] **Step 6: Commit**
 
@@ -937,7 +944,7 @@ yet — that's fine). No errors.
 python -m pytest tests/ -q
 ```
 
-Expected: all passed.
+Expected: all passed (no regressions).
 
 - [ ] **Step 6: Commit**
 
