@@ -415,6 +415,12 @@ def cmd_deduplicator(args):
         pairs.append(("--dry-run", True))
     if args.confirm:
         pairs.append(("--confirm", True))
+    if args.flickr:
+        pairs.append(("--flickr", True))
+    if args.limit is not None:
+        pairs.append(("--limit", str(args.limit)))
+    if args.verbose:
+        pairs.append(("--verbose", True))
     _inject_argv(args, pairs)
     dedup_main()
 
@@ -862,6 +868,10 @@ def main():
     p_dedup.add_argument("--write", action="store_true", help="Write results to the DB")
     p_dedup.add_argument("--confirm", action="store_true", help="Delete Flickr discards (requires --write)")
     p_dedup.add_argument("--dry-run", action="store_true", help="Report without writing (default behaviour)")
+    p_dedup.add_argument("--flickr", action="store_true", help="Detect Flickr re-upload duplicates")
+    p_dedup.add_argument("--limit", type=int, default=None, metavar="N",
+                         help="Maximum pairs to write (recommended for first live runs)")
+    p_dedup.add_argument("--verbose", "-v", action="store_true", help="Show all uncertain pairs in report")
 
     # prune-proposals
     p_prune = sub.add_parser(

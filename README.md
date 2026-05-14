@@ -467,7 +467,7 @@ Photos are automatically classified into one of these states:
 
 The deduplicator (`poller/deduplicator.py`) identifies photos that share the same original filename and capture timestamp but represent the same shot uploaded or imported more than once.
 
-Three duplicate types are recognised:
+Five duplicate types are recognised:
 
 **snapbridge** — A Nikon Snapbridge low-resolution preview paired with the full-resolution original from the card reader. Identified by different file fingerprints and different pixel dimensions. The higher-resolution copy is always kept; the lower-resolution preview is marked for discard. Run after `bp scan --all` to ensure dimensions are populated.
 
@@ -475,7 +475,11 @@ Three duplicate types are recognised:
 
 **uncertain** — Same filename and timestamp, but the available signals don't cleanly fit either pattern (same dimensions, missing fingerprint data, or three or more copies). Flagged for manual review in the UI.
 
-Run the deduplicator after scanning:
+**reupload** — A Flickr-only orphan (no Apple Photos UUID) that matches a linked record by filename and timestamp but was uploaded in a separate session (Flickr IDs more than 100,000 apart, indicating a separate upload event). Detected by `bp deduplicator --flickr`. The linked record (Photos-matched) is assumed to be the keeper unless the orphan is significantly higher resolution (>1.5× pixel ratio).
+
+**reupload_uncertain** — Same as `reupload` but one or more conditions prevented confident classification: timestamp-only match (no filename), small upload-session gap, more than one candidate on either side, or similar resolutions. Requires human review.
+
+Run the standard deduplicator (Snapbridge / device-upload / uncertain):
 
 ```bash
 python poller/deduplicator.py --config config/config.yml --dry-run   # preview
@@ -483,7 +487,15 @@ python poller/deduplicator.py --config config/config.yml --write     # write gro
 python poller/deduplicator.py --config config/config.yml --write --confirm  # also delete from Flickr
 ```
 
-The `--confirm` flag is required to actually delete anything from Flickr. Without it, discard candidates are only marked in the local DB.
+Run the Flickr re-upload detector:
+
+```bash
+bp deduplicator --flickr --dry-run           # preview — no changes written
+bp deduplicator --flickr --write             # write reupload groups to DB
+bp deduplicator --flickr --write --limit 10  # write only first 10 pairs (safe first run)
+```
+
+The `--confirm` flag is required to actually delete anything from Flickr for Snapbridge/device-upload groups. Without it, discard candidates are only marked in the local DB. `--confirm` is not supported with `--flickr` (Flickr deletion of reupload orphans is handled by a separate phase).
 
 **Review UI (`/duplicates`):** After running `--write`, open the Duplicates page in the review UI to inspect each group before taking any action. Groups are shown in three sections — Snapbridge, Device Upload, Uncertain — with side-by-side thumbnails, dimensions, capture date, and Flickr links for each photo.
 
