@@ -118,7 +118,7 @@ def run(
 
         if not dry_run:
             db.conn.execute(
-                "UPDATE photos SET thumbnail_path = ? WHERE id = ?",
+                "UPDATE photos SET thumbnail_path = ?, display_rotation = 0 WHERE id = ?",
                 (thumb, row_id),
             )
 

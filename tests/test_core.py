@@ -859,6 +859,46 @@ class TestThumbnailer(unittest.TestCase):
             self.assertIn("/a/", result.lower())
             self.assertIn("ABCD1234-0000-0000-0000-000000000000_4_5005_c.jpeg", result)
 
+    def test_run_clears_display_rotation_on_success(self):
+        """Successful thumbnail write must reset display_rotation to 0."""
+        import os, tempfile
+        from unittest import mock
+        from poller.thumbnailer import run
+
+        fd, db_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        db = Database(db_path)
+
+        # Insert a Photos-only record with display_rotation=90 and no thumbnail
+        photo_id = db.upsert_photo({
+            "uuid": "AAAAAAAA-0000-0000-0000-000000000000",
+            "display_rotation": 90,
+        })
+
+        # Mock derivative_path so the thumbnailer resolves the local source
+        with mock.patch("poller.thumbnailer.derivative_path", return_value="/fake/thumb.jpeg"):
+            run(
+                db=db,
+                library_path="/fake/library",
+                thumb_root=None,
+                flickr_download=False,
+                client=None,
+                limit=None,
+                dry_run=False,
+            )
+
+        row = db.conn.execute(
+            "SELECT thumbnail_path, display_rotation FROM photos WHERE id = ?",
+            (photo_id,),
+        ).fetchone()
+
+        self.assertEqual(row["thumbnail_path"], "/fake/thumb.jpeg")
+        self.assertEqual(row["display_rotation"], 0,
+            "display_rotation must be 0 after thumbnailer sets thumbnail_path")
+
+        db.close()
+        os.unlink(db_path)
+
 
 # ---------------------------------------------------------------------------
 # Poller: download_thumb URL preference
