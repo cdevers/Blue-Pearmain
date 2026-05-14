@@ -698,6 +698,61 @@ def _print_report(groups: list[DuplicateGroup]) -> None:
         print()
 
 
+def _print_reupload_report(
+    groups: list[DuplicateGroup],
+    conflicts: list[dict],
+    verbose: bool = False,
+) -> None:
+    total = len(groups)
+    if total == 0 and not conflicts:
+        print("No re-upload pairs found.")
+        return
+
+    print(f"\nReupload pairs found: {total}")
+
+    by_type: dict[str, list[DuplicateGroup]] = {}
+    for g in groups:
+        by_type.setdefault(g.group_type, []).append(g)
+
+    for gtype, glist in sorted(by_type.items()):
+        pct = 100.0 * len(glist) / total if total else 0.0
+        label = (
+            "auto-grouped" if gtype == "reupload"
+            else "flagged — small gap, timestamp-only, or collision"
+        )
+        print(f"  {gtype:<22} {len(glist):>5} pairs  {pct:5.1f}%   ({label})")
+
+    uncertain = by_type.get("reupload_uncertain", [])
+    if uncertain:
+        show = uncertain if verbose else uncertain[:10]
+        print(f"\n── REUPLOAD_UNCERTAIN ({len(uncertain)} pairs) " + "─" * 40)
+        for g in show:
+            try:
+                data = json.loads(g.notes)
+                print(f"  {data['summary']}")
+                if g.keeper:
+                    print(f"    keeper:  flickr_id={g.keeper.flickr_id}  uuid={g.keeper.uuid}")
+                if g.discards:
+                    gap = data.get("upload_session_gap", "?")
+                    print(f"    discard: flickr_id={g.discards[0].flickr_id}"
+                          f"  upload_session_gap={gap}")
+            except (json.JSONDecodeError, KeyError):
+                print(f"  {g.match_key}  (notes unparseable)")
+        if not verbose and len(uncertain) > 10:
+            print(f"  ... and {len(uncertain) - 10} more (use --verbose to see all)")
+
+    if conflicts:
+        print(f"\n── CONFLICTS ({len(conflicts)} records already in a group) " + "─" * 30)
+        for c in conflicts[:20]:
+            print(f"  flickr_id={c['flickr_id']}"
+                  f"  already in duplicate_group_id={c['existing_group_id']}"
+                  f"  ({c['side']}) — skipped")
+        if len(conflicts) > 20:
+            print(f"  ... and {len(conflicts) - 20} more")
+
+    print()
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -711,6 +766,10 @@ def main() -> None:
                         help="Write duplicate groups to DB")
     parser.add_argument("--confirm", action="store_true",
                         help="Delete discard photos from Flickr (requires --write)")
+    parser.add_argument("--flickr", action="store_true",
+                        help="Detect Flickr re-upload duplicates (orphan paired with linked record)")
+    parser.add_argument("--limit", type=int, default=None,
+                        help="Maximum pairs to write (recommended for first live runs)")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -733,6 +792,33 @@ def main() -> None:
     db_path = config.get("database", {}).get("path", "data/curator.db")
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+
+    if args.flickr:
+        log.info("Scanning for re-upload duplicates in %s …", db_path)
+        groups, conflicts = _fetch_reupload_candidates(conn)
+        _print_reupload_report(groups, conflicts, verbose=args.verbose)
+
+        if args.dry_run:
+            print("Dry run — no changes written. Use --write to persist.")
+            conn.close()
+            return
+
+        if args.limit is not None:
+            groups = groups[: args.limit]
+            log.info("--limit %d: writing first %d pairs", args.limit, len(groups))
+
+        log.info("Writing %d reupload group(s) to DB …", len(groups))
+        conn.execute("BEGIN")
+        try:
+            counts = _write_groups(conn, groups)
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+        print(f"Written: {counts}")
+        conn.close()
+        return
 
     log.info("Scanning for duplicates in %s …", db_path)
     groups = _fetch_duplicate_candidates(conn)
