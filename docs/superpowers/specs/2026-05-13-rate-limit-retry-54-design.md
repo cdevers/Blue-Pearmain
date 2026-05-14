@@ -57,10 +57,17 @@ if resp.status_code == 429:
     retry_after = resp.headers.get("Retry-After")
     if retry_after:
         try:
-            sleep(float(retry_after))
+            delay = float(retry_after)
+            delay = max(0, min(delay, 120))  # clamp: negative → 0, absurd → 2 min cap
+            sleep(delay)
         except ValueError:
-            pass  # malformed header — fall through to normal retry
+            pass  # non-numeric header — fall through to exponential backoff
 ```
+
+Validation rules:
+- Non-numeric value: ignored, fall through to exponential backoff
+- Negative value: clamped to 0 (sleep immediately, then retry)
+- Values > 120s: capped at 120s — prevents a bad upstream header (e.g. `Retry-After: 86400`) from stalling a bulk run for hours
 
 ### 3. New 429 retry schedule
 
