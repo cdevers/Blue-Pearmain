@@ -794,6 +794,9 @@ def main() -> None:
     conn.row_factory = sqlite3.Row
 
     if args.flickr:
+        if args.confirm:
+            log.error("--confirm is not supported with --flickr (use --flickr --write to group only)")
+            sys.exit(1)
         log.info("Scanning for re-upload duplicates in %s …", db_path)
         groups, conflicts = _fetch_reupload_candidates(conn)
         _print_reupload_report(groups, conflicts, verbose=args.verbose)
