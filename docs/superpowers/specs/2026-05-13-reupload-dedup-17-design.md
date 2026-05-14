@@ -171,14 +171,18 @@ evidence is clear (ratio ≥ 1.5×); within that band the linked record is prefe
 
 ### Collision handling
 
-Collisions in either direction are classified `reupload_uncertain` regardless of gap.
-No auto-grouping fires for any ambiguous match.
+Collisions in either direction are classified `reupload_uncertain` regardless of gap
+or resolution evidence. No auto-grouping fires for any ambiguous match.
 
 - **One linked record → multiple Flickr-only records:** Nikon firmware scenario —
   multiple stills share the same timestamp. All candidate orphans flagged uncertain.
 - **One Flickr-only record → multiple linked records:** rare (photo imported into
   Photos more than once). The orphan is flagged uncertain; correct counterpart
   requires human review.
+
+Even if one candidate appears to win clearly on resolution, `linked_match_count > 1`
+or `orphan_match_count > 1` forces `reupload_uncertain`. Multi-candidate situations
+are where unexpected edge cases cluster; human confirmation is required.
 
 A future `reupload_multi` group type could handle the case where one linked record has
 two clearly low-res orphans (both large gap, both smaller resolution) — but this is
@@ -195,7 +199,7 @@ The existing `duplicate_groups` table and `photos` columns (`duplicate_group_id`
 
 | Column | Value |
 |--------|-------|
-| `match_key` | `"reupload:{keeper_flickr_id}:{discard_flickr_id}"` |
+| `match_key` | `"reupload:{smaller_flickr_id}:{larger_flickr_id}"` — always ordered smallest-first, independent of which record is keeper, to prevent reversed-key collisions across runs |
 | `group_type` | `'reupload'` or `'reupload_uncertain'` |
 | `keeper_id` | `photos.id` of the keeper record |
 | `photo_count` | `2` |
