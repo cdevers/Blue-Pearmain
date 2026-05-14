@@ -193,5 +193,55 @@ class TestPhotoRowPixels(unittest.TestCase):
         self.assertIsNone(p.pixels)
 
 
+class TestNormaliseUtcSecond(unittest.TestCase):
+    def test_iso_with_negative_offset_converts_to_utc(self):
+        from poller.deduplicator import _normalise_to_utc_second
+        # 14:12:43 at -04:00 is 18:12:43 UTC
+        self.assertEqual(
+            _normalise_to_utc_second("2024-09-28T14:12:43.000000-04:00"),
+            "2024-09-28 18:12:43",
+        )
+
+    def test_naive_string_treated_as_utc(self):
+        from poller.deduplicator import _normalise_to_utc_second
+        self.assertEqual(
+            _normalise_to_utc_second("2024-09-28 14:12:43"),
+            "2024-09-28 14:12:43",
+        )
+
+    def test_truncation_not_rounding(self):
+        from poller.deduplicator import _normalise_to_utc_second
+        # .999999 should truncate to :43, not round to :44
+        self.assertEqual(
+            _normalise_to_utc_second("2024-09-28T14:12:43.999999+00:00"),
+            "2024-09-28 14:12:43",
+        )
+
+    def test_invalid_returns_none(self):
+        from poller.deduplicator import _normalise_to_utc_second
+        self.assertIsNone(_normalise_to_utc_second("not-a-date"))
+
+    def test_empty_returns_none(self):
+        from poller.deduplicator import _normalise_to_utc_second
+        self.assertIsNone(_normalise_to_utc_second(""))
+
+
+class TestReuploadMatchKey(unittest.TestCase):
+    def test_smaller_id_first(self):
+        from poller.deduplicator import _reupload_match_key
+        self.assertEqual(_reupload_match_key("54000", "48000"), "reupload:48000:54000")
+
+    def test_already_in_order(self):
+        from poller.deduplicator import _reupload_match_key
+        self.assertEqual(_reupload_match_key("48000", "54000"), "reupload:48000:54000")
+
+    def test_commutative(self):
+        from poller.deduplicator import _reupload_match_key
+        self.assertEqual(
+            _reupload_match_key("54000", "48000"),
+            _reupload_match_key("48000", "54000"),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

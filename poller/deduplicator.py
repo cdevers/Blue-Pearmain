@@ -33,11 +33,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sqlite3
 import sys
+from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +54,12 @@ DEVICE_GAP_MINUTES = 5
 # as not_duplicate (clearly different images — crops, firmware quirks, edits).
 # True duplicates always have identical dimensions (ratio = 1.0).
 NOT_DUPLICATE_PIXEL_RATIO = 1.1
+
+# Re-upload detection: Flickr IDs this far apart indicate separate upload sessions
+CROSS_SESSION_THRESHOLD = 100_000
+
+# Re-upload detection: orphan must exceed linked pixel count by this ratio to displace it as keeper
+REUPLOAD_KEEPER_PIXEL_RATIO = 1.5
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +136,38 @@ def _parse_dt(s: str) -> datetime | None:
         return dt
     except ValueError:
         return None
+
+
+def _normalise_to_utc_second(s: str) -> str | None:
+    """Parse date_taken, convert to UTC, truncate to whole second.
+
+    Returns 'YYYY-MM-DD HH:MM:SS' in UTC, or None on parse failure.
+    Uses truncation (not rounding) to match normalise_dt() in scanner.py.
+    Both sides of the reupload join must use identical normalisation.
+
+    Note: _parse_dt() already attaches tzinfo=UTC for naive datetimes, so
+    .astimezone(timezone.utc) below is a no-op in that case.  The explicit
+    guard is kept here so this function is correct even if refactored to
+    not go through _parse_dt().
+    """
+    dt = _parse_dt(s)
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    utc = dt.astimezone(timezone.utc)
+    return utc.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _reupload_match_key(flickr_id_a: str, flickr_id_b: str) -> str:
+    """Return canonical match key with smaller Flickr ID first.
+
+    Ordering is independent of argument order so re-runs produce identical keys
+    regardless of which record was discovered first.
+    """
+    a, b = int(flickr_id_a), int(flickr_id_b)
+    lo, hi = min(a, b), max(a, b)
+    return f"reupload:{lo}:{hi}"
 
 
 def _pixels_ratio(photos: list[PhotoRow]) -> float | None:
