@@ -1,5 +1,9 @@
 # flickr-curator: EXIF machine tag backfill idea ([GH #8](https://github.com/cdevers/Blue-Pearmain/issues/8), [GH #9](https://github.com/cdevers/Blue-Pearmain/issues/9))
 
+**Status: Closed as wontfix (May 2026).** Machine tags still exist on Flickr but the ecosystem has effectively collapsed — see decision note below.
+
+---
+
 ## Background
 
 Years ago, a Perl script scanned EXIF tags and wrote them to Flickr as **machine tags** — structured `namespace:predicate=value` tags that made photos searchable by camera, lens, focal length, aperture, etc.
@@ -21,21 +25,27 @@ Example from [5691165623](https://www.flickr.com/photos/cdevers/5691165623/):
     exif:vari_program=Auto(Flash Off)
     meta:exif=1350394705
 
-## Current state
+## Current state (as of April–May 2026)
 
 - Tags still **display** on photo pages (confirmed via screenshot, April 2026)
 - Clicking a machine tag (e.g. `flickr.com/photos/tags/camera:model=nikond7000`) goes to a **blank page** — even for a user with many matching photos
 - Machine tag search appears **broken on the web UI** as of April 2026
-- **Still to test:** whether the `flickr.photos.search` API with `machine_tags=` parameter returns results (API and web UI don't always match)
-  - Try: `machine_tags=camera:model=NIKON+D7000`
-  - Try: scoped to `user_id=me` in case global index is broken but per-user isn't
-  - Try older web URL: `flickr.com/photos/search/?machine_tags=camera:model=NIKOND7000`
+- The `flickr.photos.search` API with `machine_tags=` was not tested, but given the broader ecosystem status (see below), not expected to meaningfully change the decision
 
-**Preliminary conclusion:** machine tag search may be dead, even though the tags are stored and displayed. If the API also returns nothing, the searchability use case is gone.
+## Why we closed this
 
-**Residual value if search is dead:** tags still survive as durable structured metadata attached to the photo record, visible in the UI, and present in Flickr exports. Not nothing, but much less useful than intended.
+Machine tags are **not dead** — they still exist on Flickr and existing tags remain stored and visible. But the ecosystem around them has effectively collapsed:
 
-## Proposed feature for flickr-curator (Blue Pearlmain)
+- Flickr no longer actively develops or promotes the feature
+- Machine tag search is broken in the web UI (tags function as plain text tags)
+- The third-party services that once made machine tags valuable (MusicBrainz integrations, semantic web tooling, etc.) have largely faded
+- No meaningful audience is consuming machine tags as structured metadata today
+
+Building a backfill pipeline would be ongoing maintenance cost for zero practical benefit. The existing tags on old photos are harmless to leave in place.
+
+**If Flickr ever meaningfully revives machine tag search**, this design doc provides a solid starting point for re-evaluation.
+
+## Original proposed feature
 
 Add a **machine tag backfill** mode that:
 
@@ -43,8 +53,6 @@ Add a **machine tag backfill** mode that:
 2. Formats tags using the established `namespace:predicate=value` schema
 3. Calls `flickr.photos.addTags` to write them back
 4. Skips photos that already have machine tags (idempotent)
-
-**Priority:** low until machine tag search is confirmed working or Flickr fixes it. Investigation tracked in [GH #8](https://github.com/cdevers/Blue-Pearmain/issues/8); backfill feature in [GH #9](https://github.com/cdevers/Blue-Pearmain/issues/9) (blocked on #8).
 
 ### Minimum viable tag set
 
@@ -61,12 +69,6 @@ Add a **machine tag backfill** mode that:
 
 ### Notes
 
-- Flickr also exposes EXIF via `flickr.photos.getExif` — could use as source for photos without local files (backfill from what Flickr already knows), and to detect what is already tagged
-- Reference project: [FlickrExifTagger](https://github.com/languitar/FlickrExifTagger) — probably easier to build from scratch within flickr-curator's existing architecture
+- Flickr also exposes EXIF via `flickr.photos.getExif` — could use as source for photos without local files
+- Reference project: [FlickrExifTagger](https://github.com/languitar/FlickrExifTagger)
 - Tag format should match historical schema exactly so old searches still work if/when Flickr fixes search
-
-## Open questions
-
-- **Are machine tags still honored in Flickr API search?** Test with `flickr.photos.search(machine_tags='camera:model=NIKON D7000', user_id='me')`
-- Does Flickr deduplicate tags on write, or will repeated runs accumulate duplicates?
-- Should this be a one-shot CLI subcommand or integrated into the main curation workflow?
