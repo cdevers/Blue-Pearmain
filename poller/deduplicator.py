@@ -415,6 +415,179 @@ def _fetch_duplicate_candidates(conn: sqlite3.Connection) -> list[DuplicateGroup
     return [_classify_group(photos) for photos in groups.values()]
 
 
+def _fetch_reupload_candidates(
+    conn: sqlite3.Connection,
+) -> tuple[list[DuplicateGroup], list[dict]]:
+    """Find Flickr-only re-upload candidates matched to linked records.
+
+    Matches on original_filename (exact) + date_taken within ±2 seconds.
+    Falls back to timestamp-only when filename is NULL on either side.
+
+    Returns:
+        groups     — DuplicateGroup list (reupload or reupload_uncertain)
+        conflicts  — dicts for pairs skipped because a record was already grouped
+    """
+    # Load orphans: Flickr-only candidate_public records
+    orphan_rows = conn.execute("""
+        SELECT id, flickr_id, uuid, original_filename, date_taken,
+               date_added_photos, date_uploaded_flickr, fingerprint,
+               width, height, privacy_state, duplicate_group_id
+        FROM photos
+        WHERE uuid IS NULL
+          AND flickr_id IS NOT NULL
+          AND privacy_state = 'candidate_public'
+    """).fetchall()
+
+    orphans = [
+        PhotoRow(
+            id=r["id"], flickr_id=r["flickr_id"], uuid=r["uuid"],
+            original_filename=r["original_filename"], date_taken=r["date_taken"],
+            date_added_photos=r["date_added_photos"],
+            date_uploaded_flickr=r["date_uploaded_flickr"],
+            fingerprint=r["fingerprint"],
+            width=r["width"], height=r["height"],
+            privacy_state=r["privacy_state"],
+            duplicate_group_id=r["duplicate_group_id"],
+        )
+        for r in orphan_rows
+    ]
+
+    # Load linked records: have both uuid and flickr_id
+    linked_rows = conn.execute("""
+        SELECT id, flickr_id, uuid, original_filename, date_taken,
+               date_added_photos, date_uploaded_flickr, fingerprint,
+               width, height, privacy_state, duplicate_group_id
+        FROM photos
+        WHERE uuid IS NOT NULL
+          AND flickr_id IS NOT NULL
+    """).fetchall()
+
+    linked_records = [
+        PhotoRow(
+            id=r["id"], flickr_id=r["flickr_id"], uuid=r["uuid"],
+            original_filename=r["original_filename"], date_taken=r["date_taken"],
+            date_added_photos=r["date_added_photos"],
+            date_uploaded_flickr=r["date_uploaded_flickr"],
+            fingerprint=r["fingerprint"],
+            width=r["width"], height=r["height"],
+            privacy_state=r["privacy_state"],
+            duplicate_group_id=r["duplicate_group_id"],
+        )
+        for r in linked_rows
+    ]
+
+    log.info("Reupload scan: %d orphans, %d linked records", len(orphans), len(linked_records))
+
+    # Build O(1) lookup indexes keyed by UTC second
+    linked_by_filename_ts: dict[tuple[str, str], list[PhotoRow]] = defaultdict(list)
+    linked_by_ts: dict[str, list[PhotoRow]] = defaultdict(list)
+
+    for p in linked_records:
+        ts = _normalise_to_utc_second(p.date_taken)
+        if not ts:
+            continue
+        if p.original_filename:
+            linked_by_filename_ts[(p.original_filename, ts)].append(p)
+        linked_by_ts[ts].append(p)
+
+    # Pass 1: match each orphan to candidates
+    # Each entry: (orphan, ungrouped_candidates, filename_match)
+    raw_matches: list[tuple[PhotoRow, list[PhotoRow], bool]] = []
+    conflicts: list[dict] = []
+
+    for orphan in orphans:
+        ts = _normalise_to_utc_second(orphan.date_taken)
+        if not ts:
+            continue
+
+        ts_dt = datetime.fromisoformat(ts).replace(tzinfo=timezone.utc)
+
+        # Try filename+timestamp match first (±2 seconds)
+        fn_candidates: list[PhotoRow] = []
+        seen_ids: set[int] = set()
+        if orphan.original_filename:
+            for delta in range(-2, 3):
+                shifted = (ts_dt + timedelta(seconds=delta)).strftime("%Y-%m-%d %H:%M:%S")
+                for p in linked_by_filename_ts.get((orphan.original_filename, shifted), []):
+                    if p.id not in seen_ids:
+                        fn_candidates.append(p)
+                        seen_ids.add(p.id)
+
+        if fn_candidates:
+            candidates, filename_match = fn_candidates, True
+        else:
+            # Timestamp-only fallback — will force reupload_uncertain in classification
+            ts_candidates: list[PhotoRow] = []
+            seen_ids = set()
+            for delta in range(-2, 3):
+                shifted = (ts_dt + timedelta(seconds=delta)).strftime("%Y-%m-%d %H:%M:%S")
+                for p in linked_by_ts.get(shifted, []):
+                    if p.id not in seen_ids:
+                        ts_candidates.append(p)
+                        seen_ids.add(p.id)
+            candidates, filename_match = ts_candidates, False
+
+        if not candidates:
+            continue
+
+        # Skip orphans already in a group
+        if orphan.duplicate_group_id:
+            conflicts.append({"flickr_id": orphan.flickr_id,
+                               "existing_group_id": orphan.duplicate_group_id,
+                               "side": "orphan"})
+            continue
+
+        # Filter already-grouped linked records; surface them as conflicts
+        ungrouped: list[PhotoRow] = []
+        for p in candidates:
+            if p.duplicate_group_id:
+                conflicts.append({"flickr_id": p.flickr_id,
+                                   "existing_group_id": p.duplicate_group_id,
+                                   "side": "linked"})
+            else:
+                ungrouped.append(p)
+
+        if not ungrouped:
+            continue
+
+        raw_matches.append((orphan, ungrouped, filename_match))
+
+    # Pass 2: count how many orphans each linked record was matched to
+    orphan_count_by_linked_id: dict[int, int] = defaultdict(int)
+    for _, candidates, _ in raw_matches:
+        for linked in candidates:
+            orphan_count_by_linked_id[linked.id] += 1
+
+    # Pass 3: classify — one group per orphan, picking the best linked candidate
+    groups: list[DuplicateGroup] = []
+    used_ids: set[int] = set()  # prevent a record appearing in multiple groups
+
+    for orphan, candidates, filename_match in raw_matches:
+        if orphan.id in used_ids:
+            continue
+
+        # Best candidate = largest upload_session_gap (strongest evidence of different session)
+        best_linked = max(
+            candidates,
+            key=lambda p: abs(int(orphan.flickr_id) - int(p.flickr_id)),
+        )
+        if best_linked.id in used_ids:
+            continue
+
+        group = _classify_reupload_pair(
+            linked=best_linked,
+            orphan=orphan,
+            filename_match=filename_match,
+            linked_match_count=len(candidates),
+            orphan_match_count=orphan_count_by_linked_id[best_linked.id],
+        )
+        groups.append(group)
+        used_ids.add(orphan.id)
+        used_ids.add(best_linked.id)
+
+    return groups, conflicts
+
+
 def _write_groups(conn: sqlite3.Connection, groups: list[DuplicateGroup]) -> dict[str, int]:
     """Write duplicate_groups rows and update photos. Returns type counts."""
     counts: dict[str, int] = {"snapbridge": 0, "device_upload": 0, "uncertain": 0, "not_duplicate": 0}

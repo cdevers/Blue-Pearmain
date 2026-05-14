@@ -3,6 +3,7 @@ tests/test_deduplicator.py — unit tests for poller/deduplicator.py
 """
 
 import json
+import sqlite3 as _sqlite3
 import sys
 import unittest
 from datetime import datetime, timezone
@@ -382,6 +383,129 @@ class TestClassifyReuploadPair(unittest.TestCase):
             self.assertIn(key, data, f"missing key: {key}")
         self.assertEqual(data["keeper_flickr_id"], orphan.flickr_id)
         self.assertEqual(data["discard_flickr_id"], linked.flickr_id)
+
+
+def _make_db() -> _sqlite3.Connection:
+    """Return an in-memory DB with the minimal photos schema for reupload tests."""
+    conn = _sqlite3.connect(":memory:")
+    conn.row_factory = _sqlite3.Row
+    conn.execute("""
+        CREATE TABLE photos (
+            id INTEGER PRIMARY KEY,
+            flickr_id TEXT,
+            uuid TEXT,
+            original_filename TEXT,
+            date_taken TEXT,
+            date_added_photos TEXT,
+            date_uploaded_flickr TEXT,
+            fingerprint TEXT,
+            width INTEGER,
+            height INTEGER,
+            privacy_state TEXT DEFAULT 'candidate_public',
+            duplicate_group_id INTEGER
+        )
+    """)
+    return conn
+
+
+def _insert(conn, **kwargs):
+    cols = ", ".join(kwargs.keys())
+    placeholders = ", ".join("?" for _ in kwargs)
+    conn.execute(f"INSERT INTO photos ({cols}) VALUES ({placeholders})", list(kwargs.values()))
+
+
+class TestFetchReuploadCandidates(unittest.TestCase):
+
+    def test_matched_pair_produces_one_group(self):
+        from poller.deduplicator import _fetch_reupload_candidates
+        conn = _make_db()
+        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
+                original_filename="DSC_0042.JPG",
+                date_taken="2022-08-14T10:23:11+00:00",
+                privacy_state="approved_public")
+        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
+                original_filename="DSC_0042.JPG",
+                date_taken="2022-08-14T10:23:11+00:00",
+                privacy_state="candidate_public")
+        groups, conflicts = _fetch_reupload_candidates(conn)
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(len(conflicts), 0)
+        self.assertEqual(groups[0].group_type, "reupload")
+
+    def test_already_grouped_orphan_goes_to_conflicts(self):
+        from poller.deduplicator import _fetch_reupload_candidates
+        conn = _make_db()
+        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
+                original_filename="DSC_0042.JPG",
+                date_taken="2022-08-14T10:23:11+00:00",
+                privacy_state="approved_public")
+        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
+                original_filename="DSC_0042.JPG",
+                date_taken="2022-08-14T10:23:11+00:00",
+                privacy_state="candidate_public",
+                duplicate_group_id=99)
+        groups, conflicts = _fetch_reupload_candidates(conn)
+        self.assertEqual(len(groups), 0)
+        self.assertEqual(len(conflicts), 1)
+        self.assertEqual(conflicts[0]["flickr_id"], "54060000000")
+        self.assertEqual(conflicts[0]["side"], "orphan")
+
+    def test_null_filename_fallback_produces_uncertain(self):
+        from poller.deduplicator import _fetch_reupload_candidates
+        conn = _make_db()
+        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
+                original_filename=None,
+                date_taken="2022-08-14T10:23:11+00:00",
+                privacy_state="approved_public")
+        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
+                original_filename=None,
+                date_taken="2022-08-14T10:23:11+00:00",
+                privacy_state="candidate_public")
+        groups, conflicts = _fetch_reupload_candidates(conn)
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0].group_type, "reupload_uncertain")
+
+    def test_no_timestamp_overlap_produces_no_groups(self):
+        from poller.deduplicator import _fetch_reupload_candidates
+        conn = _make_db()
+        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
+                original_filename="DSC_0042.JPG",
+                date_taken="2022-08-14T10:23:11+00:00",
+                privacy_state="approved_public")
+        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
+                original_filename="DSC_0042.JPG",
+                date_taken="2023-01-01T00:00:00+00:00",  # completely different date
+                privacy_state="candidate_public")
+        groups, conflicts = _fetch_reupload_candidates(conn)
+        self.assertEqual(len(groups), 0)
+
+    def test_two_second_window_matches(self):
+        from poller.deduplicator import _fetch_reupload_candidates
+        conn = _make_db()
+        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
+                original_filename="DSC_0042.JPG",
+                date_taken="2022-08-14T10:23:11+00:00",
+                privacy_state="approved_public")
+        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
+                original_filename="DSC_0042.JPG",
+                date_taken="2022-08-14T10:23:13+00:00",  # 2 seconds later
+                privacy_state="candidate_public")
+        groups, conflicts = _fetch_reupload_candidates(conn)
+        self.assertEqual(len(groups), 1)
+
+    def test_three_second_gap_does_not_match(self):
+        from poller.deduplicator import _fetch_reupload_candidates
+        conn = _make_db()
+        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
+                original_filename="DSC_0042.JPG",
+                date_taken="2022-08-14T10:23:11+00:00",
+                privacy_state="approved_public")
+        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
+                original_filename="DSC_0042.JPG",
+                date_taken="2022-08-14T10:23:14+00:00",  # 3 seconds later — outside window
+                privacy_state="candidate_public")
+        groups, conflicts = _fetch_reupload_candidates(conn)
+        self.assertEqual(len(groups), 0)
 
 
 if __name__ == "__main__":
