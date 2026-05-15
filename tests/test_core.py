@@ -8409,6 +8409,55 @@ class TestSyncDeletedPhotos(unittest.TestCase):
                 self.db.conn.execute("SELECT id FROM photos WHERE id = ?", (pid,)).fetchone()
             )
 
+    def test_not_called_during_incremental_scan(self):
+        import sys
+        from unittest.mock import MagicMock, patch
+        from poller.scanner import scan
+        from datetime import datetime, timezone
+
+        mock_photo = MagicMock()
+        mock_photo.uuid = "KEEP-0001"
+        mock_photo.original_filename = "IMG_001.JPG"
+        mock_photo.date = None
+        mock_photo.date_added = None
+        mock_photo.exif_info = None
+        mock_photo.latitude = None
+        mock_photo.place = None
+        mock_photo.media_analysis = {}
+        mock_photo.score = None
+        mock_photo.labels = []
+        mock_photo.persons = []
+        mock_photo.fingerprint = ""
+        mock_photo.width = None
+        mock_photo.height = None
+        mock_photo.screenshot = False
+        mock_photo.selfie = False
+        mock_photo.live_photo = False
+        mock_photo.album_info = []
+        mock_photo.title = ""
+        mock_photo.description = ""
+        mock_photo.keywords = []
+
+        mock_photosdb = MagicMock()
+        mock_photosdb.photos.return_value = [mock_photo]
+
+        mock_osxphotos = MagicMock()
+        mock_osxphotos.PhotosDB.return_value = mock_photosdb
+
+        with patch.dict(sys.modules, {"osxphotos": mock_osxphotos}), \
+             patch("poller.scanner.sync_deleted_photos") as mock_sync:
+            since = datetime(2026, 1, 1, tzinfo=timezone.utc)
+            scanned, matched, enriched, inserted, linked, deleted = scan(
+                library_path="/fake/library",
+                db=self.db,
+                since=since,
+                dry_run=True,
+                self_name="Test User",
+            )
+
+        mock_sync.assert_not_called()
+        self.assertEqual(deleted, 0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

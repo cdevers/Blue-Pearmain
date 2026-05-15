@@ -446,10 +446,12 @@ def scan(
     since: datetime | None,
     dry_run: bool,
     self_name: str,
-) -> tuple[int, int, int, int]:
+) -> tuple[int, int, int, int, int, int]:
     """
     Scan the Photos library and sync to DB.
-    Returns (scanned, matched, enriched, inserted) counts.
+
+    Returns (scanned, matched, enriched, inserted, linked, deleted) counts.
+    `deleted` is always 0 for incremental scans (only runs during --all).
     """
     try:
         import osxphotos
@@ -466,6 +468,7 @@ def scan(
     enriched  = 0
     inserted  = 0
     linked    = 0  # Photos-only records late-linked to a Flickr record
+    deleted   = 0
 
     # Build a query — osxphotos supports filtering by date
     if since:
@@ -591,7 +594,10 @@ def scan(
                 sync_photo_albums(photo, row_id, db, dry_run)
             inserted += 1
 
-    return scanned, matched, enriched, inserted, linked
+    if since is None:
+        deleted = sync_deleted_photos(photosdb, db, dry_run)
+
+    return scanned, matched, enriched, inserted, linked, deleted
 
 
 # ---------------------------------------------------------------------------
@@ -760,7 +766,7 @@ def main():
     run_id = None if args.dry_run else db.start_sync_run("photos_scan")
 
     try:
-        scanned, matched, enriched, inserted, linked = scan(
+        scanned, matched, enriched, inserted, linked, deleted = scan(
             library_path=library_path,
             db=db,
             since=since,
@@ -768,10 +774,13 @@ def main():
             self_name=self_name,
         )
 
-        log.info(
+        base_msg = (
             f"Scan complete: {scanned} scanned, {matched} matched to Flickr, "
             f"{linked} late-linked, {enriched} re-enriched, {inserted} Photos-only inserted"
         )
+        if since is None:
+            base_msg += f", {deleted} deleted (Photos removed)"
+        log.info(base_msg)
 
         if run_id:
             db.finish_sync_run(
