@@ -6,12 +6,10 @@ import json
 import sqlite3 as _sqlite3
 import sys
 import unittest
-from datetime import datetime, timezone
 
 sys.path.insert(0, ".")
 
 from poller.deduplicator import (
-    DuplicateGroup,
     PhotoRow,
     _classify_group,
     _is_snapbridge_pair,
@@ -42,11 +40,12 @@ def make_photo(**kwargs) -> PhotoRow:
 # _is_snapbridge_pair
 # ---------------------------------------------------------------------------
 
-class TestIsSnapbridgePair(unittest.TestCase):
 
+class TestIsSnapbridgePair(unittest.TestCase):
     def _pair(self, fp_a="FP-A", fp_b="FP-B", pixels_a=None, pixels_b=None):
         def make(id, fp, w, h):
             return make_photo(id=id, fingerprint=fp, width=w, height=h)
+
         # Compute width/height from pixel count for convenience
         w_a, h_a = (pixels_a, 1) if pixels_a else (None, None)
         w_b, h_b = (pixels_b, 1) if pixels_b else (None, None)
@@ -82,8 +81,8 @@ class TestIsSnapbridgePair(unittest.TestCase):
 # _upload_gap_minutes
 # ---------------------------------------------------------------------------
 
-class TestUploadGapMinutes(unittest.TestCase):
 
+class TestUploadGapMinutes(unittest.TestCase):
     def test_gap_calculation(self):
         a = make_photo(id=1, date_uploaded_flickr="2026-04-10T14:00:00+00:00")
         b = make_photo(id=2, date_uploaded_flickr="2026-04-10T14:33:00+00:00")
@@ -105,16 +104,22 @@ class TestUploadGapMinutes(unittest.TestCase):
 # _classify_group
 # ---------------------------------------------------------------------------
 
-class TestClassifyGroup(unittest.TestCase):
 
+class TestClassifyGroup(unittest.TestCase):
     def _snapbridge_pair(self):
         lo = make_photo(
-            id=1, uuid="UUID-LO", fingerprint="FP-LO",
-            width=1620, height=1080,
+            id=1,
+            uuid="UUID-LO",
+            fingerprint="FP-LO",
+            width=1620,
+            height=1080,
         )
         hi = make_photo(
-            id=2, uuid="UUID-HI", fingerprint="FP-HI",
-            width=6048, height=4024,
+            id=2,
+            uuid="UUID-HI",
+            fingerprint="FP-HI",
+            width=6048,
+            height=4024,
         )
         return [lo, hi]
 
@@ -134,11 +139,13 @@ class TestClassifyGroup(unittest.TestCase):
 
     def test_device_upload_classification(self):
         a = make_photo(
-            id=1, flickr_id="111",
+            id=1,
+            flickr_id="111",
             date_uploaded_flickr="2026-04-10T14:00:00+00:00",
         )
         b = make_photo(
-            id=2, flickr_id="222",
+            id=2,
+            flickr_id="222",
             date_uploaded_flickr="2026-04-10T14:33:00+00:00",
         )
         group = _classify_group([a, b])
@@ -146,11 +153,13 @@ class TestClassifyGroup(unittest.TestCase):
 
     def test_device_upload_keeper_is_earliest(self):
         a = make_photo(
-            id=1, flickr_id="111",
+            id=1,
+            flickr_id="111",
             date_uploaded_flickr="2026-04-10T14:00:00+00:00",
         )
         b = make_photo(
-            id=2, flickr_id="222",
+            id=2,
+            flickr_id="222",
             date_uploaded_flickr="2026-04-10T14:33:00+00:00",
         )
         group = _classify_group([a, b])
@@ -167,10 +176,8 @@ class TestClassifyGroup(unittest.TestCase):
     def test_snapbridge_without_dimensions_stays_uncertain(self):
         # Different fingerprints but no dimensions yet — must stay uncertain
         # until scanner backfill populates width/height
-        lo = make_photo(id=1, uuid="UUID-LO", fingerprint="FP-LO",
-                        width=None, height=None)
-        hi = make_photo(id=2, uuid="UUID-HI", fingerprint="FP-HI",
-                        width=None, height=None)
+        lo = make_photo(id=1, uuid="UUID-LO", fingerprint="FP-LO", width=None, height=None)
+        hi = make_photo(id=2, uuid="UUID-HI", fingerprint="FP-HI", width=None, height=None)
         group = _classify_group([lo, hi])
         self.assertEqual(group.group_type, "uncertain")
         self.assertIsNone(group.keeper)
@@ -180,8 +187,8 @@ class TestClassifyGroup(unittest.TestCase):
 # PhotoRow.pixels
 # ---------------------------------------------------------------------------
 
-class TestPhotoRowPixels(unittest.TestCase):
 
+class TestPhotoRowPixels(unittest.TestCase):
     def test_pixels_computed(self):
         p = make_photo(width=6048, height=4024)
         self.assertEqual(p.pixels, 6048 * 4024)
@@ -198,6 +205,7 @@ class TestPhotoRowPixels(unittest.TestCase):
 class TestNormaliseUtcSecond(unittest.TestCase):
     def test_iso_with_negative_offset_converts_to_utc(self):
         from poller.deduplicator import _normalise_to_utc_second
+
         # 14:12:43 at -04:00 is 18:12:43 UTC
         self.assertEqual(
             _normalise_to_utc_second("2024-09-28T14:12:43.000000-04:00"),
@@ -206,6 +214,7 @@ class TestNormaliseUtcSecond(unittest.TestCase):
 
     def test_naive_string_treated_as_utc(self):
         from poller.deduplicator import _normalise_to_utc_second
+
         self.assertEqual(
             _normalise_to_utc_second("2024-09-28 14:12:43"),
             "2024-09-28 14:12:43",
@@ -213,6 +222,7 @@ class TestNormaliseUtcSecond(unittest.TestCase):
 
     def test_truncation_not_rounding(self):
         from poller.deduplicator import _normalise_to_utc_second
+
         # .999999 should truncate to :43, not round to :44
         self.assertEqual(
             _normalise_to_utc_second("2024-09-28T14:12:43.999999+00:00"),
@@ -221,24 +231,29 @@ class TestNormaliseUtcSecond(unittest.TestCase):
 
     def test_invalid_returns_none(self):
         from poller.deduplicator import _normalise_to_utc_second
+
         self.assertIsNone(_normalise_to_utc_second("not-a-date"))
 
     def test_empty_returns_none(self):
         from poller.deduplicator import _normalise_to_utc_second
+
         self.assertIsNone(_normalise_to_utc_second(""))
 
 
 class TestReuploadMatchKey(unittest.TestCase):
     def test_smaller_id_first(self):
         from poller.deduplicator import _reupload_match_key
+
         self.assertEqual(_reupload_match_key("54000", "48000"), "reupload:48000:54000")
 
     def test_already_in_order(self):
         from poller.deduplicator import _reupload_match_key
+
         self.assertEqual(_reupload_match_key("48000", "54000"), "reupload:48000:54000")
 
     def test_commutative(self):
         from poller.deduplicator import _reupload_match_key
+
         self.assertEqual(
             _reupload_match_key("54000", "48000"),
             _reupload_match_key("48000", "54000"),
@@ -256,7 +271,9 @@ class TestClassifyReuploadPair(unittest.TestCase):
 
     def _linked(self, **kwargs):
         return make_photo(
-            id=1, flickr_id="48922000000", uuid="AAAA-1111",
+            id=1,
+            flickr_id="48922000000",
+            uuid="AAAA-1111",
             original_filename="DSC_0042.JPG",
             date_taken="2022-08-14T10:23:11+00:00",
             **kwargs,
@@ -264,7 +281,9 @@ class TestClassifyReuploadPair(unittest.TestCase):
 
     def _orphan(self, **kwargs):
         defaults = dict(
-            id=2, flickr_id="54060000000", uuid=None,
+            id=2,
+            flickr_id="54060000000",
+            uuid=None,
             original_filename="DSC_0042.JPG",
             date_taken="2022-08-14T10:23:11+00:00",
             privacy_state="candidate_public",
@@ -274,112 +293,157 @@ class TestClassifyReuploadPair(unittest.TestCase):
 
     def test_filename_match_large_gap_is_reupload(self):
         from poller.deduplicator import _classify_reupload_pair
-        group = _classify_reupload_pair(self._linked(), self._orphan(),
-                                        filename_match=True,
-                                        linked_match_count=1, orphan_match_count=1)
+
+        group = _classify_reupload_pair(
+            self._linked(),
+            self._orphan(),
+            filename_match=True,
+            linked_match_count=1,
+            orphan_match_count=1,
+        )
         self.assertEqual(group.group_type, "reupload")
 
     def test_small_gap_is_uncertain(self):
         from poller.deduplicator import _classify_reupload_pair
+
         # gap = 50, well below CROSS_SESSION_THRESHOLD=100_000
         orphan = self._orphan(flickr_id="48922000050")
-        group = _classify_reupload_pair(self._linked(), orphan,
-                                        filename_match=True,
-                                        linked_match_count=1, orphan_match_count=1)
+        group = _classify_reupload_pair(
+            self._linked(), orphan, filename_match=True, linked_match_count=1, orphan_match_count=1
+        )
         self.assertEqual(group.group_type, "reupload_uncertain")
 
     def test_timestamp_only_fallback_always_uncertain(self):
         from poller.deduplicator import _classify_reupload_pair
-        group = _classify_reupload_pair(self._linked(), self._orphan(),
-                                        filename_match=False,
-                                        linked_match_count=1, orphan_match_count=1)
+
+        group = _classify_reupload_pair(
+            self._linked(),
+            self._orphan(),
+            filename_match=False,
+            linked_match_count=1,
+            orphan_match_count=1,
+        )
         self.assertEqual(group.group_type, "reupload_uncertain")
 
     def test_multiple_linked_candidates_forces_uncertain(self):
         from poller.deduplicator import _classify_reupload_pair
-        group = _classify_reupload_pair(self._linked(), self._orphan(),
-                                        filename_match=True,
-                                        linked_match_count=2, orphan_match_count=1)
+
+        group = _classify_reupload_pair(
+            self._linked(),
+            self._orphan(),
+            filename_match=True,
+            linked_match_count=2,
+            orphan_match_count=1,
+        )
         self.assertEqual(group.group_type, "reupload_uncertain")
 
     def test_multiple_orphan_candidates_forces_uncertain(self):
         from poller.deduplicator import _classify_reupload_pair
-        group = _classify_reupload_pair(self._linked(), self._orphan(),
-                                        filename_match=True,
-                                        linked_match_count=1, orphan_match_count=2)
+
+        group = _classify_reupload_pair(
+            self._linked(),
+            self._orphan(),
+            filename_match=True,
+            linked_match_count=1,
+            orphan_match_count=2,
+        )
         self.assertEqual(group.group_type, "reupload_uncertain")
 
     def test_orphan_dramatically_larger_wins_keeper(self):
         from poller.deduplicator import _classify_reupload_pair
+
         # orphan 6000×4000 (24M px) vs linked 1620×1080 (1.75M px) → ratio ≈ 13.7×
         linked = self._linked(width=1620, height=1080)
         orphan = self._orphan(width=6000, height=4000)
-        group = _classify_reupload_pair(linked, orphan,
-                                        filename_match=True,
-                                        linked_match_count=1, orphan_match_count=1)
+        group = _classify_reupload_pair(
+            linked, orphan, filename_match=True, linked_match_count=1, orphan_match_count=1
+        )
         self.assertEqual(group.group_type, "reupload")
         self.assertIs(group.keeper, orphan)
         self.assertEqual(group.discards, [linked])
 
     def test_similar_sizes_linked_wins_and_group_is_uncertain(self):
         from poller.deduplicator import _classify_reupload_pair
+
         # ratio = 1050²/1000² ≈ 1.1, below REUPLOAD_KEEPER_PIXEL_RATIO=1.5
         linked = self._linked(width=1000, height=1000)
         orphan = self._orphan(width=1050, height=1050)
-        group = _classify_reupload_pair(linked, orphan,
-                                        filename_match=True,
-                                        linked_match_count=1, orphan_match_count=1)
+        group = _classify_reupload_pair(
+            linked, orphan, filename_match=True, linked_match_count=1, orphan_match_count=1
+        )
         self.assertEqual(group.group_type, "reupload_uncertain")
         self.assertIs(group.keeper, linked)
 
     def test_only_orphan_has_dims_linked_still_wins(self):
         from poller.deduplicator import _classify_reupload_pair
+
         linked = self._linked(width=None, height=None)
         orphan = self._orphan(width=6000, height=4000)
-        group = _classify_reupload_pair(linked, orphan,
-                                        filename_match=True,
-                                        linked_match_count=1, orphan_match_count=1)
+        group = _classify_reupload_pair(
+            linked, orphan, filename_match=True, linked_match_count=1, orphan_match_count=1
+        )
         self.assertEqual(group.group_type, "reupload_uncertain")
         self.assertIs(group.keeper, linked)
 
     def test_no_dims_keeper_assumed_true_in_notes(self):
         from poller.deduplicator import _classify_reupload_pair
+
         # make_photo() defaults width=None, height=None
-        group = _classify_reupload_pair(self._linked(), self._orphan(),
-                                        filename_match=True,
-                                        linked_match_count=1, orphan_match_count=1)
+        group = _classify_reupload_pair(
+            self._linked(),
+            self._orphan(),
+            filename_match=True,
+            linked_match_count=1,
+            orphan_match_count=1,
+        )
         data = json.loads(group.notes)
         self.assertTrue(data["keeper_assumed"])
 
     def test_zero_width_treated_as_no_dims(self):
         from poller.deduplicator import _classify_reupload_pair
+
         # width=0 → pixels property returns None → treated as no dimensions
         linked = self._linked(width=0, height=0)
         orphan = self._orphan(width=6000, height=4000)
-        group = _classify_reupload_pair(linked, orphan,
-                                        filename_match=True,
-                                        linked_match_count=1, orphan_match_count=1)
+        group = _classify_reupload_pair(
+            linked, orphan, filename_match=True, linked_match_count=1, orphan_match_count=1
+        )
         self.assertIs(group.keeper, linked)
         self.assertEqual(group.group_type, "reupload_uncertain")
 
     def test_match_key_smaller_flickr_id_first(self):
         from poller.deduplicator import _classify_reupload_pair
-        group = _classify_reupload_pair(self._linked(), self._orphan(),
-                                        filename_match=True,
-                                        linked_match_count=1, orphan_match_count=1)
+
+        group = _classify_reupload_pair(
+            self._linked(),
+            self._orphan(),
+            filename_match=True,
+            linked_match_count=1,
+            orphan_match_count=1,
+        )
         self.assertEqual(group.match_key, "reupload:48922000000:54060000000")
 
     def test_evidence_blob_contains_required_fields(self):
         from poller.deduplicator import _classify_reupload_pair
+
         linked = self._linked(width=1620, height=1080)
         orphan = self._orphan(width=6000, height=4000)
-        group = _classify_reupload_pair(linked, orphan,
-                                        filename_match=True,
-                                        linked_match_count=1, orphan_match_count=1)
+        group = _classify_reupload_pair(
+            linked, orphan, filename_match=True, linked_match_count=1, orphan_match_count=1
+        )
         data = json.loads(group.notes)
-        for key in ("keeper_flickr_id", "discard_flickr_id", "filename_match",
-                    "timestamp_delta_s", "upload_session_gap", "dimension_ratio",
-                    "linked_match_count", "orphan_match_count", "keeper_assumed", "summary"):
+        for key in (
+            "keeper_flickr_id",
+            "discard_flickr_id",
+            "filename_match",
+            "timestamp_delta_s",
+            "upload_session_gap",
+            "dimension_ratio",
+            "linked_match_count",
+            "orphan_match_count",
+            "keeper_assumed",
+            "summary",
+        ):
             self.assertIn(key, data, f"missing key: {key}")
         self.assertEqual(data["keeper_flickr_id"], orphan.flickr_id)
         self.assertEqual(data["discard_flickr_id"], linked.flickr_id)
@@ -415,18 +479,28 @@ def _insert(conn, **kwargs):
 
 
 class TestFetchReuploadCandidates(unittest.TestCase):
-
     def test_matched_pair_produces_one_group(self):
         from poller.deduplicator import _fetch_reupload_candidates
+
         conn = _make_db()
-        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
-                original_filename="DSC_0042.JPG",
-                date_taken="2022-08-14T10:23:11+00:00",
-                privacy_state="approved_public")
-        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
-                original_filename="DSC_0042.JPG",
-                date_taken="2022-08-14T10:23:11+00:00",
-                privacy_state="candidate_public")
+        _insert(
+            conn,
+            id=1,
+            flickr_id="48922000000",
+            uuid="AAAA",
+            original_filename="DSC_0042.JPG",
+            date_taken="2022-08-14T10:23:11+00:00",
+            privacy_state="approved_public",
+        )
+        _insert(
+            conn,
+            id=2,
+            flickr_id="54060000000",
+            uuid=None,
+            original_filename="DSC_0042.JPG",
+            date_taken="2022-08-14T10:23:11+00:00",
+            privacy_state="candidate_public",
+        )
         groups, conflicts = _fetch_reupload_candidates(conn)
         self.assertEqual(len(groups), 1)
         self.assertEqual(len(conflicts), 0)
@@ -434,16 +508,27 @@ class TestFetchReuploadCandidates(unittest.TestCase):
 
     def test_already_grouped_orphan_goes_to_conflicts(self):
         from poller.deduplicator import _fetch_reupload_candidates
+
         conn = _make_db()
-        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
-                original_filename="DSC_0042.JPG",
-                date_taken="2022-08-14T10:23:11+00:00",
-                privacy_state="approved_public")
-        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
-                original_filename="DSC_0042.JPG",
-                date_taken="2022-08-14T10:23:11+00:00",
-                privacy_state="candidate_public",
-                duplicate_group_id=99)
+        _insert(
+            conn,
+            id=1,
+            flickr_id="48922000000",
+            uuid="AAAA",
+            original_filename="DSC_0042.JPG",
+            date_taken="2022-08-14T10:23:11+00:00",
+            privacy_state="approved_public",
+        )
+        _insert(
+            conn,
+            id=2,
+            flickr_id="54060000000",
+            uuid=None,
+            original_filename="DSC_0042.JPG",
+            date_taken="2022-08-14T10:23:11+00:00",
+            privacy_state="candidate_public",
+            duplicate_group_id=99,
+        )
         groups, conflicts = _fetch_reupload_candidates(conn)
         self.assertEqual(len(groups), 0)
         self.assertEqual(len(conflicts), 1)
@@ -452,103 +537,180 @@ class TestFetchReuploadCandidates(unittest.TestCase):
 
     def test_null_filename_fallback_produces_uncertain(self):
         from poller.deduplicator import _fetch_reupload_candidates
+
         conn = _make_db()
-        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
-                original_filename=None,
-                date_taken="2022-08-14T10:23:11+00:00",
-                privacy_state="approved_public")
-        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
-                original_filename=None,
-                date_taken="2022-08-14T10:23:11+00:00",
-                privacy_state="candidate_public")
+        _insert(
+            conn,
+            id=1,
+            flickr_id="48922000000",
+            uuid="AAAA",
+            original_filename=None,
+            date_taken="2022-08-14T10:23:11+00:00",
+            privacy_state="approved_public",
+        )
+        _insert(
+            conn,
+            id=2,
+            flickr_id="54060000000",
+            uuid=None,
+            original_filename=None,
+            date_taken="2022-08-14T10:23:11+00:00",
+            privacy_state="candidate_public",
+        )
         groups, conflicts = _fetch_reupload_candidates(conn)
         self.assertEqual(len(groups), 1)
         self.assertEqual(groups[0].group_type, "reupload_uncertain")
 
     def test_no_timestamp_overlap_produces_no_groups(self):
         from poller.deduplicator import _fetch_reupload_candidates
+
         conn = _make_db()
-        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
-                original_filename="DSC_0042.JPG",
-                date_taken="2022-08-14T10:23:11+00:00",
-                privacy_state="approved_public")
-        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
-                original_filename="DSC_0042.JPG",
-                date_taken="2023-01-01T00:00:00+00:00",  # completely different date
-                privacy_state="candidate_public")
+        _insert(
+            conn,
+            id=1,
+            flickr_id="48922000000",
+            uuid="AAAA",
+            original_filename="DSC_0042.JPG",
+            date_taken="2022-08-14T10:23:11+00:00",
+            privacy_state="approved_public",
+        )
+        _insert(
+            conn,
+            id=2,
+            flickr_id="54060000000",
+            uuid=None,
+            original_filename="DSC_0042.JPG",
+            date_taken="2023-01-01T00:00:00+00:00",  # completely different date
+            privacy_state="candidate_public",
+        )
         groups, conflicts = _fetch_reupload_candidates(conn)
         self.assertEqual(len(groups), 0)
 
     def test_two_second_window_matches(self):
         from poller.deduplicator import _fetch_reupload_candidates
+
         conn = _make_db()
-        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
-                original_filename="DSC_0042.JPG",
-                date_taken="2022-08-14T10:23:11+00:00",
-                privacy_state="approved_public")
-        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
-                original_filename="DSC_0042.JPG",
-                date_taken="2022-08-14T10:23:13+00:00",  # 2 seconds later
-                privacy_state="candidate_public")
+        _insert(
+            conn,
+            id=1,
+            flickr_id="48922000000",
+            uuid="AAAA",
+            original_filename="DSC_0042.JPG",
+            date_taken="2022-08-14T10:23:11+00:00",
+            privacy_state="approved_public",
+        )
+        _insert(
+            conn,
+            id=2,
+            flickr_id="54060000000",
+            uuid=None,
+            original_filename="DSC_0042.JPG",
+            date_taken="2022-08-14T10:23:13+00:00",  # 2 seconds later
+            privacy_state="candidate_public",
+        )
         groups, conflicts = _fetch_reupload_candidates(conn)
         self.assertEqual(len(groups), 1)
 
     def test_three_second_gap_does_not_match(self):
         from poller.deduplicator import _fetch_reupload_candidates
+
         conn = _make_db()
-        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
-                original_filename="DSC_0042.JPG",
-                date_taken="2022-08-14T10:23:11+00:00",
-                privacy_state="approved_public")
-        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
-                original_filename="DSC_0042.JPG",
-                date_taken="2022-08-14T10:23:14+00:00",  # 3 seconds later — outside window
-                privacy_state="candidate_public")
+        _insert(
+            conn,
+            id=1,
+            flickr_id="48922000000",
+            uuid="AAAA",
+            original_filename="DSC_0042.JPG",
+            date_taken="2022-08-14T10:23:11+00:00",
+            privacy_state="approved_public",
+        )
+        _insert(
+            conn,
+            id=2,
+            flickr_id="54060000000",
+            uuid=None,
+            original_filename="DSC_0042.JPG",
+            date_taken="2022-08-14T10:23:14+00:00",  # 3 seconds later — outside window
+            privacy_state="candidate_public",
+        )
         groups, conflicts = _fetch_reupload_candidates(conn)
         self.assertEqual(len(groups), 0)
 
     def test_include_approved_adds_approved_public(self):
         from poller.deduplicator import _fetch_reupload_candidates
+
         conn = _make_db()
         # linked record (approved_public, has uuid)
-        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
-                original_filename="DSC_0042.JPG",
-                date_taken="2022-08-14T10:23:11+00:00",
-                privacy_state="approved_public")
+        _insert(
+            conn,
+            id=1,
+            flickr_id="48922000000",
+            uuid="AAAA",
+            original_filename="DSC_0042.JPG",
+            date_taken="2022-08-14T10:23:11+00:00",
+            privacy_state="approved_public",
+        )
         # orphan with approved_public (orientation duplicate)
-        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
-                original_filename="DSC_0042.JPG",
-                date_taken="2022-08-14T10:23:11+00:00",
-                privacy_state="approved_public")
+        _insert(
+            conn,
+            id=2,
+            flickr_id="54060000000",
+            uuid=None,
+            original_filename="DSC_0042.JPG",
+            date_taken="2022-08-14T10:23:11+00:00",
+            privacy_state="approved_public",
+        )
         groups, conflicts = _fetch_reupload_candidates(conn, include_approved=True)
         self.assertEqual(len(groups), 1)
 
     def test_include_approved_off_excludes_approved_public(self):
         from poller.deduplicator import _fetch_reupload_candidates
+
         conn = _make_db()
-        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
-                original_filename="DSC_0042.JPG",
-                date_taken="2022-08-14T10:23:11+00:00",
-                privacy_state="approved_public")
-        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
-                original_filename="DSC_0042.JPG",
-                date_taken="2022-08-14T10:23:11+00:00",
-                privacy_state="approved_public")
+        _insert(
+            conn,
+            id=1,
+            flickr_id="48922000000",
+            uuid="AAAA",
+            original_filename="DSC_0042.JPG",
+            date_taken="2022-08-14T10:23:11+00:00",
+            privacy_state="approved_public",
+        )
+        _insert(
+            conn,
+            id=2,
+            flickr_id="54060000000",
+            uuid=None,
+            original_filename="DSC_0042.JPG",
+            date_taken="2022-08-14T10:23:11+00:00",
+            privacy_state="approved_public",
+        )
         # Without include_approved, the approved_public orphan is excluded
         groups, conflicts = _fetch_reupload_candidates(conn)
         self.assertEqual(len(groups), 0)
 
     def test_include_approved_null_filename_classified_uncertain(self):
         from poller.deduplicator import _fetch_reupload_candidates
+
         conn = _make_db()
-        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
-                original_filename=None,
-                date_taken="2022-08-14T10:23:11+00:00",
-                privacy_state="approved_public")
-        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
-                original_filename=None,
-                date_taken="2022-08-14T10:23:11+00:00",
-                privacy_state="approved_public")
+        _insert(
+            conn,
+            id=1,
+            flickr_id="48922000000",
+            uuid="AAAA",
+            original_filename=None,
+            date_taken="2022-08-14T10:23:11+00:00",
+            privacy_state="approved_public",
+        )
+        _insert(
+            conn,
+            id=2,
+            flickr_id="54060000000",
+            uuid=None,
+            original_filename=None,
+            date_taken="2022-08-14T10:23:11+00:00",
+            privacy_state="approved_public",
+        )
         groups, conflicts = _fetch_reupload_candidates(conn, include_approved=True)
         self.assertEqual(len(groups), 1)
         self.assertEqual(groups[0].group_type, "reupload_uncertain")
@@ -557,6 +719,7 @@ class TestFetchReuploadCandidates(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # _delete_discards helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_dedup_db():
     """In-memory DB with photos + duplicate_groups tables for delete-discards tests."""
@@ -600,14 +763,25 @@ def _insert_group_and_discard(
 ):
     """Insert a keeper + discard pair into a duplicate_group for testing."""
     import json as _json
-    default_notes = _json.dumps({
-        "keeper_flickr_id": "48922000000",
-        "discard_flickr_id": discard_flickr_id,
-        "summary": f"DSC_0042.JPG | 2022-08-14T10:23:11 | linked=48922000000 → orphan={discard_flickr_id}",
-    })
+
+    default_notes = _json.dumps(
+        {
+            "keeper_flickr_id": "48922000000",
+            "discard_flickr_id": discard_flickr_id,
+            "summary": f"DSC_0042.JPG | 2022-08-14T10:23:11 | linked=48922000000 → orphan={discard_flickr_id}",
+        }
+    )
     conn.execute(
         "INSERT INTO duplicate_groups (id, match_key, group_type, keeper_id, photo_count, resolved, notes) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (group_id, f"reupload:48922000000:{discard_flickr_id}", "reupload_uncertain", 10, 2, resolved, notes or default_notes),
+        (
+            group_id,
+            f"reupload:48922000000:{discard_flickr_id}",
+            "reupload_uncertain",
+            10,
+            2,
+            resolved,
+            notes or default_notes,
+        ),
     )
     conn.execute(
         "INSERT INTO photos (id, flickr_id, uuid, privacy_state, duplicate_role, duplicate_group_id, flickr_deleted) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -623,11 +797,12 @@ def _insert_group_and_discard(
 # TestDeleteDiscards
 # ---------------------------------------------------------------------------
 
-class TestDeleteDiscards(unittest.TestCase):
 
+class TestDeleteDiscards(unittest.TestCase):
     def test_dry_run_no_api_calls(self):
         from unittest.mock import MagicMock
         from poller.deduplicator import _delete_discards
+
         conn = _make_dedup_db()
         _insert_group_and_discard(conn)
         client = MagicMock()
@@ -640,6 +815,7 @@ class TestDeleteDiscards(unittest.TestCase):
     def test_apply_success_sets_flickr_deleted_and_resolved(self):
         from unittest.mock import MagicMock
         from poller.deduplicator import _delete_discards
+
         conn = _make_dedup_db()
         _insert_group_and_discard(conn)
         client = MagicMock()
@@ -652,15 +828,14 @@ class TestDeleteDiscards(unittest.TestCase):
             "SELECT flickr_deleted FROM photos WHERE flickr_id = '54060000000'"
         ).fetchone()
         self.assertEqual(row["flickr_deleted"], 1)
-        group = conn.execute(
-            "SELECT resolved FROM duplicate_groups WHERE id = 1"
-        ).fetchone()
+        group = conn.execute("SELECT resolved FROM duplicate_groups WHERE id = 1").fetchone()
         self.assertEqual(group["resolved"], 1)
 
     def test_flickr_error_1_treated_as_success(self):
         from unittest.mock import MagicMock
         from flickr.flickr_client import FlickrError
         from poller.deduplicator import _delete_discards
+
         conn = _make_dedup_db()
         _insert_group_and_discard(conn)
         client = MagicMock()
@@ -673,15 +848,14 @@ class TestDeleteDiscards(unittest.TestCase):
             "SELECT flickr_deleted FROM photos WHERE flickr_id = '54060000000'"
         ).fetchone()
         self.assertEqual(row["flickr_deleted"], 1)
-        group = conn.execute(
-            "SELECT resolved FROM duplicate_groups WHERE id = 1"
-        ).fetchone()
+        group = conn.execute("SELECT resolved FROM duplicate_groups WHERE id = 1").fetchone()
         self.assertEqual(group["resolved"], 1)
 
     def test_other_flickr_error_leaves_record_untouched(self):
         from unittest.mock import MagicMock
         from flickr.flickr_client import FlickrError
         from poller.deduplicator import _delete_discards
+
         conn = _make_dedup_db()
         _insert_group_and_discard(conn)
         client = MagicMock()
@@ -694,14 +868,13 @@ class TestDeleteDiscards(unittest.TestCase):
             "SELECT flickr_deleted FROM photos WHERE flickr_id = '54060000000'"
         ).fetchone()
         self.assertEqual(row["flickr_deleted"], 0)
-        group = conn.execute(
-            "SELECT resolved FROM duplicate_groups WHERE id = 1"
-        ).fetchone()
+        group = conn.execute("SELECT resolved FROM duplicate_groups WHERE id = 1").fetchone()
         self.assertEqual(group["resolved"], 0)
 
     def test_candidate_public_discard_excluded(self):
         from unittest.mock import MagicMock
         from poller.deduplicator import _delete_discards
+
         conn = _make_dedup_db()
         _insert_group_and_discard(conn, privacy_state="candidate_public")
         client = MagicMock()
@@ -712,6 +885,7 @@ class TestDeleteDiscards(unittest.TestCase):
     def test_already_flickr_deleted_excluded(self):
         from unittest.mock import MagicMock
         from poller.deduplicator import _delete_discards
+
         conn = _make_dedup_db()
         _insert_group_and_discard(conn, flickr_deleted=1)
         client = MagicMock()
@@ -722,6 +896,7 @@ class TestDeleteDiscards(unittest.TestCase):
     def test_resolved_group_excluded(self):
         from unittest.mock import MagicMock
         from poller.deduplicator import _delete_discards
+
         conn = _make_dedup_db()
         _insert_group_and_discard(conn, resolved=1)
         client = MagicMock()

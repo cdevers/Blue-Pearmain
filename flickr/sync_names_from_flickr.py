@@ -31,8 +31,7 @@ def _rename_photos_album(apple_uuid: str, new_name: str) -> bool:
     """Rename an Apple Photos album via AppleScript. Requires Photos.app to be running."""
     safe = new_name.replace("\\", "\\\\").replace('"', '\\"')
     script = f'tell application "Photos" to set name of album id "{apple_uuid}" to "{safe}"'
-    r = subprocess.run(["osascript", "-e", script],
-                       capture_output=True, text=True, timeout=10)
+    r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=10)
     if r.returncode != 0:
         log.warning("Photos rename failed for album %r: %s", new_name, r.stderr.strip())
     return r.returncode == 0
@@ -42,8 +41,7 @@ def _rename_photos_folder(apple_uuid: str, new_name: str) -> bool:
     """Rename an Apple Photos folder via AppleScript. Requires Photos.app to be running."""
     safe = new_name.replace("\\", "\\\\").replace('"', '\\"')
     script = f'tell application "Photos" to set name of folder id "{apple_uuid}" to "{safe}"'
-    r = subprocess.run(["osascript", "-e", script],
-                       capture_output=True, text=True, timeout=10)
+    r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=10)
     if r.returncode != 0:
         log.warning("Photos rename failed for folder %r: %s", new_name, r.stderr.strip())
     return r.returncode == 0
@@ -51,6 +49,7 @@ def _rename_photos_folder(apple_uuid: str, new_name: str) -> bool:
 
 def _now_iso() -> str:
     from datetime import datetime, timezone
+
     return datetime.now(timezone.utc).isoformat()
 
 
@@ -91,7 +90,7 @@ def sync_names_from_flickr(db, flickr, dry_run: bool = False) -> dict:
             albums_skipped += 1
             continue
 
-        photos_name    = row["name"]
+        photos_name = row["name"]
         photos_changed = photos_name != baseline
         flickr_changed = flickr_title != baseline
 
@@ -102,7 +101,9 @@ def sync_names_from_flickr(db, flickr, dry_run: bool = False) -> dict:
         if photos_changed:
             log.info(
                 "conflict: album %r renamed on both sides (Photos=%r, Flickr=%r) — Photos wins",
-                baseline, photos_name, flickr_title,
+                baseline,
+                photos_name,
+                flickr_title,
             )
             albums_skipped += 1
             continue
@@ -111,7 +112,8 @@ def sync_names_from_flickr(db, flickr, dry_run: bool = False) -> dict:
         log.info(
             "%salbum %r → %r (Flickr-side rename)",
             "[dry-run] would rename " if dry_run else "renaming ",
-            photos_name, flickr_title,
+            photos_name,
+            flickr_title,
         )
         if dry_run:
             albums_renamed += 1
@@ -147,7 +149,7 @@ def sync_names_from_flickr(db, flickr, dry_run: bool = False) -> dict:
                 folders_skipped += 1
                 continue
 
-            photos_name    = row["name"]
+            photos_name = row["name"]
             photos_changed = photos_name != baseline
             flickr_changed = flickr_title != baseline
 
@@ -158,7 +160,9 @@ def sync_names_from_flickr(db, flickr, dry_run: bool = False) -> dict:
             if photos_changed:
                 log.info(
                     "conflict: folder %r renamed on both sides (Photos=%r, Flickr=%r) — Photos wins",
-                    baseline, photos_name, flickr_title,
+                    baseline,
+                    photos_name,
+                    flickr_title,
                 )
                 folders_skipped += 1
                 continue
@@ -166,7 +170,8 @@ def sync_names_from_flickr(db, flickr, dry_run: bool = False) -> dict:
             log.info(
                 "%sfolder %r → %r (Flickr-side rename)",
                 "[dry-run] would rename " if dry_run else "renaming ",
-                photos_name, flickr_title,
+                photos_name,
+                flickr_title,
             )
             if dry_run:
                 folders_renamed += 1
@@ -184,11 +189,14 @@ def sync_names_from_flickr(db, flickr, dry_run: bool = False) -> dict:
 
     log.info(
         "sync-names-from-flickr done — albums renamed=%d skipped=%d  folders renamed=%d skipped=%d",
-        albums_renamed, albums_skipped, folders_renamed, folders_skipped,
+        albums_renamed,
+        albums_skipped,
+        folders_renamed,
+        folders_skipped,
     )
     return {
-        "albums_renamed":  albums_renamed,
-        "albums_skipped":  albums_skipped,
+        "albums_renamed": albums_renamed,
+        "albums_skipped": albums_skipped,
         "folders_renamed": folders_renamed,
         "folders_skipped": folders_skipped,
     }
@@ -198,7 +206,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Sync Flickr photoset/Collection renames → Apple Photos"
     )
-    parser.add_argument("--config",  default="config/config.yml")
+    parser.add_argument("--config", default="config/config.yml")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
@@ -219,6 +227,7 @@ def main() -> int:
 
     try:
         from db.db import Database
+
         db = Database(Path(config["database"]["path"]).expanduser())
     except Exception as e:
         log.error("Cannot open database: %s", e)
@@ -226,6 +235,7 @@ def main() -> int:
 
     try:
         from flickr.flickr_client import FlickrClient
+
         flickr = FlickrClient.from_config(config)
     except Exception as e:
         log.error("Cannot initialise Flickr client: %s", e)

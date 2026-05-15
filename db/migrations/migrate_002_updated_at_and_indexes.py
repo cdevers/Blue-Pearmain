@@ -15,7 +15,6 @@ Usage:
 
 import argparse
 import sqlite3
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -66,7 +65,7 @@ def run(db_path: str, dry_run: bool = False):
     def record_migration(name):
         conn.execute(
             "INSERT OR IGNORE INTO schema_migrations (name, applied_at) VALUES (?, ?)",
-            (name, now_iso())
+            (name, now_iso()),
         )
         conn.commit()
 
@@ -88,22 +87,17 @@ def run(db_path: str, dry_run: bool = False):
     # 3. Indexes
     # ------------------------------------------------------------------
     existing_indexes = {
-        r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='index'"
-        ).fetchall()
+        r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
     }
 
     new_indexes = {
         "idx_photos_push_state": (
-            "CREATE INDEX idx_photos_push_state "
-            "ON photos(privacy_state, perms_pushed_flickr)"
+            "CREATE INDEX idx_photos_push_state ON photos(privacy_state, perms_pushed_flickr)"
         ),
         "idx_photos_tags_pushed": (
             "CREATE INDEX idx_photos_tags_pushed ON photos(tags_pushed_flickr)"
         ),
-        "idx_photos_updated": (
-            "CREATE INDEX idx_photos_updated ON photos(updated_at)"
-        ),
+        "idx_photos_updated": ("CREATE INDEX idx_photos_updated ON photos(updated_at)"),
     }
 
     for idx_name, ddl in new_indexes.items():
@@ -126,7 +120,7 @@ def run(db_path: str, dry_run: bool = False):
             if not dry_run:
                 conn.execute(
                     "INSERT OR IGNORE INTO schema_migrations (name, applied_at) VALUES (?, ?)",
-                    ("migrate_001_privacy_state_check", now_iso())
+                    ("migrate_001_privacy_state_check", now_iso()),
                 )
                 conn.commit()
             steps_applied.append("Recorded migrate_001 as applied")
@@ -150,7 +144,7 @@ def run(db_path: str, dry_run: bool = False):
 
 def main():
     parser = argparse.ArgumentParser(description="Blue Pearmain DB migration 002")
-    parser.add_argument("--config",  default="config/config.yml")
+    parser.add_argument("--config", default="config/config.yml")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 

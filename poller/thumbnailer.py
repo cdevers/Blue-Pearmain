@@ -58,7 +58,14 @@ def derivative_path(uuid: str, library_path: str) -> str | None:
     if not uuid:
         return None
     shard = uuid[0].lower()
-    p = Path(library_path) / "resources" / "derivatives" / "masters" / shard / f"{uuid}_4_5005_c.jpeg"
+    p = (
+        Path(library_path)
+        / "resources"
+        / "derivatives"
+        / "masters"
+        / shard
+        / f"{uuid}_4_5005_c.jpeg"
+    )
     return str(p) if p.exists() else None
 
 
@@ -100,10 +107,7 @@ def run(
         photos_only_uuids = [r["uuid"] for r in rows if r["uuid"] and not r["flickr_id"]]
         if photos_only_uuids:
             photosdb = osxphotos.PhotosDB(dbfile=library_path)
-            uuid_to_photo = {
-                p.uuid: p
-                for p in photosdb.photos(uuid=photos_only_uuids)
-            }
+            uuid_to_photo = {p.uuid: p for p in photosdb.photos(uuid=photos_only_uuids)}
             tmpdir = tempfile.mkdtemp()
             log.debug(
                 "iCloud lookup ready: %d Photos-only records, %d found in library",
@@ -112,11 +116,11 @@ def run(
             )
 
     for row in rows:
-        row_id    = row["id"]
-        uuid      = row["uuid"] or ""
+        row_id = row["id"]
+        uuid = row["uuid"] or ""
         flickr_id = row["flickr_id"] or ""
-        secret    = row["flickr_secret"] or ""
-        server    = row["flickr_server"] or ""
+        secret = row["flickr_secret"] or ""
+        server = row["flickr_server"] or ""
 
         thumb = None
 
@@ -191,17 +195,26 @@ def run(
 
 def main():
     parser = argparse.ArgumentParser(description="Blue Pearmain thumbnailer")
-    parser.add_argument("--config",           default="config/config.yml")
-    parser.add_argument("--flickr-download",  action="store_true",
-                        help="Download Flickr thumbnails instead of storing URLs")
-    parser.add_argument("--icloud",           action="store_true",
-                        help="Trigger sequential AppleScript export for iCloud-only photos (requires Photos.app)")
-    parser.add_argument("--icloud-limit",     type=int, default=50,
-                        help="Max iCloud exports per run when --icloud is set (default: 50)")
-    parser.add_argument("--limit",            type=int, default=None,
-                        help="Process at most N records")
-    parser.add_argument("--dry-run",          action="store_true")
-    parser.add_argument("--verbose",          action="store_true")
+    parser.add_argument("--config", default="config/config.yml")
+    parser.add_argument(
+        "--flickr-download",
+        action="store_true",
+        help="Download Flickr thumbnails instead of storing URLs",
+    )
+    parser.add_argument(
+        "--icloud",
+        action="store_true",
+        help="Trigger sequential AppleScript export for iCloud-only photos (requires Photos.app)",
+    )
+    parser.add_argument(
+        "--icloud-limit",
+        type=int,
+        default=50,
+        help="Max iCloud exports per run when --icloud is set (default: 50)",
+    )
+    parser.add_argument("--limit", type=int, default=None, help="Process at most N records")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
     setup_logging(args.verbose)
@@ -214,9 +227,7 @@ def main():
     db_path = Path(config["database"]["path"]).expanduser()
     db = Database(db_path)
 
-    library_path = str(
-        Path(config.get("photos_library", {}).get("path", "")).expanduser()
-    )
+    library_path = str(Path(config.get("photos_library", {}).get("path", "")).expanduser())
 
     thumb_root: Path | None = None
     client: FlickrClient | None = None

@@ -81,9 +81,9 @@ def sync_collections(db, flickr, dry_run: bool = False) -> dict:
 
     # Pass 2: set memberships (all collection IDs now known)
     for folder in ordered:
-        folder_id     = folder["id"]
+        folder_id = folder["id"]
         collection_id = folder["flickr_collection_id"]
-        name          = folder["name"]
+        name = folder["name"]
 
         photoset_rows = db.conn.execute(
             "SELECT flickr_set_id FROM albums WHERE folder_id = ? AND flickr_set_id IS NOT NULL",
@@ -101,13 +101,16 @@ def sync_collections(db, flickr, dry_run: bool = False) -> dict:
             flickr.edit_collection_sets(collection_id, photoset_ids, sub_collection_ids)
             log.debug(
                 "updated collection %r — %d photosets, %d sub-collections",
-                name, len(photoset_ids), len(sub_collection_ids),
+                name,
+                len(photoset_ids),
+                len(sub_collection_ids),
             )
         except FlickrError as e:
             if "not found" in str(e).lower():
                 log.warning(
                     "collection %r (id=%s) not found on Flickr — recreating",
-                    name, collection_id,
+                    name,
+                    collection_id,
                 )
                 db.clear_folder_flickr_collection_id(folder_id)
                 collection_id = flickr.create_collection(name, description="")
@@ -118,14 +121,14 @@ def sync_collections(db, flickr, dry_run: bool = False) -> dict:
 
     log.info(
         "sync-album-collections done — created=%d  updated=%d  skipped=%d",
-        totals["created"], totals["updated"], totals["skipped"],
+        totals["created"],
+        totals["updated"],
+        totals["skipped"],
     )
     return totals
 
 
-def remove_orphaned_collections(
-    db, flickr, library_path: str, force: bool = False
-) -> dict:
+def remove_orphaned_collections(db, flickr, library_path: str, force: bool = False) -> dict:
     """
     Find DB folders whose apple_uuid no longer exists in the live Photos library,
     delete their Flickr Collections, and remove the DB rows.
@@ -156,7 +159,9 @@ def remove_orphaned_collections(
             node = getattr(node, "parent", None)
 
     folders = db.get_all_folders()
-    orphans = [f for f in folders if f["apple_uuid"] not in live_uuids and f["flickr_collection_id"]]
+    orphans = [
+        f for f in folders if f["apple_uuid"] not in live_uuids and f["flickr_collection_id"]
+    ]
 
     if not orphans:
         log.info("sync-album-collections --remove: no orphaned collections found")
@@ -166,10 +171,14 @@ def remove_orphaned_collections(
     skipped = 0
     for folder in orphans:
         if not force:
-            answer = input(
-                f"Delete Flickr Collection {folder['flickr_collection_id']!r} "
-                f"for removed folder {folder['name']!r}? [y/N] "
-            ).strip().lower()
+            answer = (
+                input(
+                    f"Delete Flickr Collection {folder['flickr_collection_id']!r} "
+                    f"for removed folder {folder['name']!r}? [y/N] "
+                )
+                .strip()
+                .lower()
+            )
             if answer != "y":
                 log.info("skipped removal of folder %r", folder["name"])
                 skipped += 1
@@ -192,10 +201,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Sync Apple Photos folder hierarchy → Flickr Collections"
     )
-    parser.add_argument("--config",  default="config/config.yml")
-    parser.add_argument("--dry-run", action="store_true", help="Show what would be synced, don't write")
-    parser.add_argument("--remove",  action="store_true", help="Remove Flickr Collections for deleted Photos folders")
-    parser.add_argument("--force",   action="store_true", help="Skip confirmation prompts with --remove")
+    parser.add_argument("--config", default="config/config.yml")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would be synced, don't write"
+    )
+    parser.add_argument(
+        "--remove", action="store_true", help="Remove Flickr Collections for deleted Photos folders"
+    )
+    parser.add_argument(
+        "--force", action="store_true", help="Skip confirmation prompts with --remove"
+    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -215,6 +230,7 @@ def main() -> int:
 
     try:
         from db.db import Database
+
         db = Database(Path(config["database"]["path"]).expanduser())
     except Exception as e:
         log.error("Cannot open database: %s", e)
@@ -222,15 +238,17 @@ def main() -> int:
 
     try:
         from flickr.flickr_client import FlickrClient
+
         flickr = FlickrClient.from_config(config)
     except Exception as e:
         log.error("Cannot initialise Flickr client: %s", e)
         return 2
 
     try:
-        totals = sync_collections(db, flickr, dry_run=args.dry_run)
+        sync_collections(db, flickr, dry_run=args.dry_run)
     except Exception as e:
         from flickr.flickr_client import FlickrError
+
         if isinstance(e, FlickrError) and "pro" in str(e).lower():
             log.error("Flickr Collections require a Pro account — skipping")
             return 0

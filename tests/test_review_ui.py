@@ -26,6 +26,7 @@ from flickr.flickr_client import FlickrError
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def client():
     """Flask test client wired to a temporary in-memory-equivalent database."""
@@ -34,16 +35,18 @@ def client():
 
         # Seed enough photos to get multiple pages (per_page default = 120)
         for i in range(1, 26):
-            test_db.upsert_photo({
-                "uuid": f"uuid-{i:04d}",
-                "original_filename": f"IMG_{i:04d}.JPG",
-                "privacy_state": "needs_review",
-                "proposed_tags": ["tag1", "tag2"],
-                "apple_persons": [],
-                "apple_labels": [],
-                "apple_unknown_faces": 0,
-                "apple_named_faces": 0,
-            })
+            test_db.upsert_photo(
+                {
+                    "uuid": f"uuid-{i:04d}",
+                    "original_filename": f"IMG_{i:04d}.JPG",
+                    "privacy_state": "needs_review",
+                    "proposed_tags": ["tag1", "tag2"],
+                    "apple_persons": [],
+                    "apple_labels": [],
+                    "apple_unknown_faces": 0,
+                    "apple_named_faces": 0,
+                }
+            )
 
         app_module._db = test_db
         app_module.app.config["TESTING"] = True
@@ -58,6 +61,7 @@ def client():
 # ---------------------------------------------------------------------------
 # Bug 1 — Reload ↺ pagination link (stays on current page, not page+1)
 # ---------------------------------------------------------------------------
+
 
 class TestPaginationReloadLink:
     # Use per_page=10 so that 25 seeded photos span 3 pages
@@ -106,6 +110,7 @@ class TestPaginationReloadLink:
 # Bug 2 — Scroll to top on page load
 # ---------------------------------------------------------------------------
 
+
 class TestScrollToTop:
     def test_scroll_to_top_on_load(self, client):
         """The page must include a window.scrollTo call on load."""
@@ -144,6 +149,7 @@ class TestScrollToTop:
 # Bug 3 — Mobile / iOS focus behaviour
 # ---------------------------------------------------------------------------
 
+
 class TestMobileViewport:
     def test_prevent_scroll_focus(self, client):
         """selectCard must use preventScroll: true to avoid iOS scroll-on-focus."""
@@ -168,21 +174,24 @@ class TestMobileViewport:
 # Album display — photo detail page
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def client_with_albums():
     """Flask test client with a photo that has album membership."""
     with tempfile.TemporaryDirectory() as tmp:
         test_db = Database(Path(tmp) / "test.db")
 
-        photo_id = test_db.upsert_photo({
-            "uuid": "uuid-album-test",
-            "original_filename": "IMG_album.JPG",
-            "privacy_state": "candidate_public",
-            "flickr_id": "flickr123",
-            "proposed_tags": ["tag1"],
-            "apple_persons": [],
-            "apple_labels": [],
-        })
+        photo_id = test_db.upsert_photo(
+            {
+                "uuid": "uuid-album-test",
+                "original_filename": "IMG_album.JPG",
+                "privacy_state": "candidate_public",
+                "flickr_id": "flickr123",
+                "proposed_tags": ["tag1"],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
         album_id = test_db.upsert_album("apple-uuid-album", "Summer 2024")
         test_db.upsert_photo_album(photo_id, album_id)
 
@@ -235,6 +244,7 @@ class TestPhotoDetailAlbums:
 # Album badge — review grid
 # ---------------------------------------------------------------------------
 
+
 class TestReviewGridAlbumBadge:
     def test_album_badge_shown_for_photos_with_albums(self, client_with_albums):
         """Grid should show an album count badge for photos that have albums."""
@@ -259,22 +269,25 @@ class TestReviewGridAlbumBadge:
 # Pagination page count — reflects per_page
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def client_for_pagination():
     """Isolated function-scoped client with a known photo count (25 needs_review)."""
     with tempfile.TemporaryDirectory() as tmp:
         test_db = Database(Path(tmp) / "test.db")
         for i in range(1, 26):
-            test_db.upsert_photo({
-                "uuid": f"uuid-pg-{i:04d}",
-                "original_filename": f"IMG_pg_{i:04d}.JPG",
-                "privacy_state": "needs_review",
-                "proposed_tags": [],
-                "apple_persons": [],
-                "apple_labels": [],
-                "apple_unknown_faces": 0,
-                "apple_named_faces": 0,
-            })
+            test_db.upsert_photo(
+                {
+                    "uuid": f"uuid-pg-{i:04d}",
+                    "original_filename": f"IMG_pg_{i:04d}.JPG",
+                    "privacy_state": "needs_review",
+                    "proposed_tags": [],
+                    "apple_persons": [],
+                    "apple_labels": [],
+                    "apple_unknown_faces": 0,
+                    "apple_named_faces": 0,
+                }
+            )
 
         app_module._db = test_db
         app_module.app.config["TESTING"] = True
@@ -322,6 +335,7 @@ class TestPaginationPageCount:
 # Push approved — graceful handling of Flickr "photo not found"
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def client_with_approved_photos():
     """Flask test client with two approved_public photos that have Flickr IDs."""
@@ -329,19 +343,19 @@ def client_with_approved_photos():
         test_db = Database(Path(tmp) / "test.db")
 
         for i in range(1, 3):
-            pid = test_db.upsert_photo({
-                "uuid": f"uuid-push-{i}",
-                "original_filename": f"IMG_push_{i}.JPG",
-                "privacy_state": "approved_public",
-                "flickr_id": f"5555000000{i}",
-                "proposed_tags": ["tag1"],
-                "apple_persons": [],
-                "apple_labels": [],
-            })
-            # Mark as not yet pushed
-            test_db.conn.execute(
-                "UPDATE photos SET perms_pushed_flickr = 0 WHERE id = ?", (pid,)
+            pid = test_db.upsert_photo(
+                {
+                    "uuid": f"uuid-push-{i}",
+                    "original_filename": f"IMG_push_{i}.JPG",
+                    "privacy_state": "approved_public",
+                    "flickr_id": f"5555000000{i}",
+                    "proposed_tags": ["tag1"],
+                    "apple_persons": [],
+                    "apple_labels": [],
+                }
             )
+            # Mark as not yet pushed
+            test_db.conn.execute("UPDATE photos SET perms_pushed_flickr = 0 WHERE id = ?", (pid,))
             test_db.conn.commit()
 
         app_module._db = test_db
@@ -362,7 +376,7 @@ class TestPushApprovedNotFound:
         """When Flickr returns error 1 (not found), the photo is skipped, not failed."""
         c, _ = client_with_approved_photos
         mock_flickr = MagicMock()
-        mock_flickr.set_permissions.side_effect = FlickrError(1, 'Photo not found')
+        mock_flickr.set_permissions.side_effect = FlickrError(1, "Photo not found")
         app_module._client = mock_flickr
 
         resp = c.post("/api/push_approved")
@@ -376,7 +390,7 @@ class TestPushApprovedNotFound:
         """A not-found photo must be flagged pushed so it is not retried next time."""
         c, test_db = client_with_approved_photos
         mock_flickr = MagicMock()
-        mock_flickr.set_permissions.side_effect = FlickrError(1, 'Photo not found')
+        mock_flickr.set_permissions.side_effect = FlickrError(1, "Photo not found")
         app_module._client = mock_flickr
 
         c.post("/api/push_approved")
@@ -396,7 +410,7 @@ class TestPushApprovedNotFound:
             call_count += 1
             # Only fail the first photo
             if call_count == 1:
-                raise FlickrError(1, 'Photo not found')
+                raise FlickrError(1, "Photo not found")
 
         mock_flickr = MagicMock()
         mock_flickr.set_permissions.side_effect = fake_set_permissions
@@ -412,7 +426,7 @@ class TestPushApprovedNotFound:
         """Non-404 Flickr errors must still be counted as failures, not skipped."""
         c, _ = client_with_approved_photos
         mock_flickr = MagicMock()
-        mock_flickr.set_permissions.side_effect = FlickrError(100, 'Invalid API Key')
+        mock_flickr.set_permissions.side_effect = FlickrError(100, "Invalid API Key")
         app_module._client = mock_flickr
 
         resp = c.post("/api/push_approved")
@@ -425,20 +439,23 @@ class TestPushApprovedNotFound:
 # Background push — file descriptor leak
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def client_for_fd_leak():
     """Flask test client with a single needs_review photo that has a Flickr ID."""
     with tempfile.TemporaryDirectory() as tmp:
         test_db = Database(Path(tmp) / "test.db")
-        pid = test_db.upsert_photo({
-            "uuid": "uuid-fd-leak",
-            "original_filename": "IMG_fd.JPG",
-            "privacy_state": "needs_review",
-            "flickr_id": "9990000001",
-            "proposed_tags": ["tag1"],
-            "apple_persons": [],
-            "apple_labels": [],
-        })
+        pid = test_db.upsert_photo(
+            {
+                "uuid": "uuid-fd-leak",
+                "original_filename": "IMG_fd.JPG",
+                "privacy_state": "needs_review",
+                "flickr_id": "9990000001",
+                "proposed_tags": ["tag1"],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
 
         app_module._db = test_db
         app_module.app.config["TESTING"] = True
@@ -478,11 +495,14 @@ class TestBackgroundPushClosesConnection:
 
         test_db.close = tracking_close
 
-        resp = c.post("/api/decide", json={
-            "photo_id": photo_id,
-            "decision": "make_public",
-            "push": True,
-        })
+        resp = c.post(
+            "/api/decide",
+            json={
+                "photo_id": photo_id,
+                "decision": "make_public",
+                "push": True,
+            },
+        )
         assert resp.status_code == 200
 
         close_done.wait(timeout=5)
@@ -512,49 +532,57 @@ class TestBackgroundPushClosesConnection:
 # GH #76 — Screenshot special-casing in review UI
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def client_with_screenshots():
     """DB with one normal candidate_public and one screenshot candidate_public."""
     with tempfile.TemporaryDirectory() as tmp:
         from db.migrations.migrate_013_screenshot_flag import run as migrate
+
         db_path = Path(tmp) / "test.db"
         test_db = Database(db_path)
         migrate(str(db_path))
 
-        test_db.upsert_photo({
-            "uuid": "uuid-normal-001",
-            "original_filename": "IMG_normal.JPG",
-            "privacy_state": "candidate_public",
-            "proposed_tags": [],
-            "apple_persons": [],
-            "apple_labels": [],
-            "apple_unknown_faces": 0,
-            "apple_named_faces": 0,
-            "is_screenshot": 0,
-        })
-        test_db.upsert_photo({
-            "uuid": "uuid-screenshot-001",
-            "original_filename": "Screenshot_2024.PNG",
-            "privacy_state": "candidate_public",
-            "proposed_tags": [],
-            "apple_persons": [],
-            "apple_labels": [],
-            "apple_unknown_faces": 0,
-            "apple_named_faces": 0,
-            "is_screenshot": 1,
-        })
+        test_db.upsert_photo(
+            {
+                "uuid": "uuid-normal-001",
+                "original_filename": "IMG_normal.JPG",
+                "privacy_state": "candidate_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+                "apple_unknown_faces": 0,
+                "apple_named_faces": 0,
+                "is_screenshot": 0,
+            }
+        )
+        test_db.upsert_photo(
+            {
+                "uuid": "uuid-screenshot-001",
+                "original_filename": "Screenshot_2024.PNG",
+                "privacy_state": "candidate_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+                "apple_unknown_faces": 0,
+                "apple_named_faces": 0,
+                "is_screenshot": 1,
+            }
+        )
         # One screenshot in auto_private for the unreviewed queue
-        test_db.upsert_photo({
-            "uuid": "uuid-screenshot-002",
-            "original_filename": "Screenshot_2024b.PNG",
-            "privacy_state": "auto_private",
-            "proposed_tags": [],
-            "apple_persons": [],
-            "apple_labels": [],
-            "apple_unknown_faces": 0,
-            "apple_named_faces": 0,
-            "is_screenshot": 1,
-        })
+        test_db.upsert_photo(
+            {
+                "uuid": "uuid-screenshot-002",
+                "original_filename": "Screenshot_2024b.PNG",
+                "privacy_state": "auto_private",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+                "apple_unknown_faces": 0,
+                "apple_named_faces": 0,
+                "is_screenshot": 1,
+            }
+        )
 
         app_module._db = test_db
         app_module.app.config["TESTING"] = True
@@ -630,32 +658,37 @@ def client_with_confirmed_screenshot():
     """DB with one approved_public screenshot and one already_public screenshot."""
     with tempfile.TemporaryDirectory() as tmp:
         from db.migrations.migrate_013_screenshot_flag import run as migrate
+
         db_path = Path(tmp) / "test.db"
         test_db = Database(db_path)
         migrate(str(db_path))
 
-        test_db.upsert_photo({
-            "uuid": "uuid-ss-approved",
-            "original_filename": "SS_approved.PNG",
-            "privacy_state": "approved_public",
-            "proposed_tags": [],
-            "apple_persons": [],
-            "apple_labels": [],
-            "apple_unknown_faces": 0,
-            "apple_named_faces": 0,
-            "is_screenshot": 1,
-        })
-        test_db.upsert_photo({
-            "uuid": "uuid-ss-confirmed",
-            "original_filename": "SS_confirmed.PNG",
-            "privacy_state": "already_public",
-            "proposed_tags": [],
-            "apple_persons": [],
-            "apple_labels": [],
-            "apple_unknown_faces": 0,
-            "apple_named_faces": 0,
-            "is_screenshot": 1,
-        })
+        test_db.upsert_photo(
+            {
+                "uuid": "uuid-ss-approved",
+                "original_filename": "SS_approved.PNG",
+                "privacy_state": "approved_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+                "apple_unknown_faces": 0,
+                "apple_named_faces": 0,
+                "is_screenshot": 1,
+            }
+        )
+        test_db.upsert_photo(
+            {
+                "uuid": "uuid-ss-confirmed",
+                "original_filename": "SS_confirmed.PNG",
+                "privacy_state": "already_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+                "apple_unknown_faces": 0,
+                "apple_named_faces": 0,
+                "is_screenshot": 1,
+            }
+        )
 
         app_module._db = test_db
         app_module.app.config["TESTING"] = True
@@ -700,10 +733,13 @@ class TestScreenshotPublicQueue:
         photo = test_db.conn.execute(
             "SELECT id FROM photos WHERE uuid='uuid-ss-approved'"
         ).fetchone()
-        resp = c.post("/api/decide", json={
-            "photo_id": photo["id"],
-            "decision": "confirm_public",
-        })
+        resp = c.post(
+            "/api/decide",
+            json={
+                "photo_id": photo["id"],
+                "decision": "confirm_public",
+            },
+        )
         assert resp.status_code == 200
         row = test_db.conn.execute(
             "SELECT privacy_state FROM photos WHERE uuid='uuid-ss-approved'"
@@ -716,32 +752,39 @@ def client_with_merge_group():
     """DB with one unresolved snapbridge group: Flickr-only donor + Photos-linked target."""
     with tempfile.TemporaryDirectory() as tmp:
         from db.migrations.migrate_003_dimensions_and_dedup import run as migrate_003
+
         db_path = Path(tmp) / "test.db"
         test_db = Database(db_path)
-        migrate_003(str(db_path))  # creates duplicate_groups table + duplicate_role/duplicate_group_id
+        migrate_003(
+            str(db_path)
+        )  # creates duplicate_groups table + duplicate_role/duplicate_group_id
 
         # Flickr-only donor
-        donor_id = test_db.upsert_photo({
-            "flickr_id":         "F001",
-            "flickr_secret":     "sec",
-            "flickr_server":     "65535",
-            "original_filename": "IMG_999.JPG",
-            "date_taken":        "2024-06-15 12:00:00",
-            "privacy_state":     "candidate_public",
-        })
+        donor_id = test_db.upsert_photo(
+            {
+                "flickr_id": "F001",
+                "flickr_secret": "sec",
+                "flickr_server": "65535",
+                "original_filename": "IMG_999.JPG",
+                "date_taken": "2024-06-15 12:00:00",
+                "privacy_state": "candidate_public",
+            }
+        )
 
         # Photos-linked target (higher-res)
-        target_id = test_db.upsert_photo({
-            "uuid":              "U001",
-            "original_filename": "IMG_999.JPG",
-            "date_taken":        "2024-06-15T12:00:00-04:00",
-            "privacy_state":     "candidate_public",
-            "width":             4000,
-            "height":            3000,
-            "apple_labels":      [],
-            "apple_persons":     [],
-            "proposed_tags":     [],
-        })
+        target_id = test_db.upsert_photo(
+            {
+                "uuid": "U001",
+                "original_filename": "IMG_999.JPG",
+                "date_taken": "2024-06-15T12:00:00-04:00",
+                "privacy_state": "candidate_public",
+                "width": 4000,
+                "height": 3000,
+                "apple_labels": [],
+                "apple_persons": [],
+                "proposed_tags": [],
+            }
+        )
 
         # Link both to a duplicate group
         test_db.conn.execute(
@@ -815,6 +858,7 @@ class TestMergeUI:
 # TestProposalJsDefensiveHandling — GH #79
 # ---------------------------------------------------------------------------
 
+
 class TestProposalJsDefensiveHandling:
     """JS handlers in proposals.html must have try-catch, AbortController timeout,
     and correct button-text restoration on error."""
@@ -842,18 +886,19 @@ class TestProposalJsDefensiveHandling:
         # bulkApprove must also have AbortController timeout protection
         idx = proposals_src.find("async function bulkApprove")
         assert idx != -1
-        assert "AbortController" in proposals_src[idx:idx + 600]
+        assert "AbortController" in proposals_src[idx : idx + 600]
 
     def test_approve_reverse_has_try_catch(self, proposals_src):
         # approveReverse must also wrap in try-catch
         idx = proposals_src.find("async function approveReverse")
         assert idx != -1
-        assert "} catch" in proposals_src[idx:idx + 900]
+        assert "} catch" in proposals_src[idx : idx + 900]
 
 
 # ---------------------------------------------------------------------------
 # TestProposalRoutes — GH #80
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def client_with_proposals():
@@ -862,16 +907,18 @@ def client_with_proposals():
         test_db = Database(Path(tmp) / "test.db")
         now = "2026-01-01T00:00:00+00:00"
 
-        photo_id = test_db.upsert_photo({
-            "uuid":              "uuid-prop-001",
-            "flickr_id":         "flickr-prop-001",
-            "original_filename": "IMG_prop.JPG",
-            "privacy_state":     "needs_review",
-            "proposed_tags":     [],
-            "apple_persons":     [],
-            "apple_labels":      [],
-            "photos_tags":       ["nature", "travel"],
-        })
+        photo_id = test_db.upsert_photo(
+            {
+                "uuid": "uuid-prop-001",
+                "flickr_id": "flickr-prop-001",
+                "original_filename": "IMG_prop.JPG",
+                "privacy_state": "needs_review",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+                "photos_tags": ["nature", "travel"],
+            }
+        )
 
         def _ins(proposed_value, source, target, conflict_type):
             test_db.conn.execute(
@@ -882,10 +929,10 @@ def client_with_proposals():
             )
             return test_db.conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
 
-        non_conflict_id  = _ins('["flickrtag"]',        "flickr", "photos", "non_conflict")
-        divergence_id    = _ins('["flickrtag","extra"]', "flickr", "photos", "divergence")
-        collision_f2p_id = _ins('["flickrcol"]',         "flickr", "photos", "collision")
-        collision_p2f_id = _ins('["photoscol"]',         "photos", "flickr", "collision")
+        non_conflict_id = _ins('["flickrtag"]', "flickr", "photos", "non_conflict")
+        divergence_id = _ins('["flickrtag","extra"]', "flickr", "photos", "divergence")
+        collision_f2p_id = _ins('["flickrcol"]', "flickr", "photos", "collision")
+        collision_p2f_id = _ins('["photoscol"]', "photos", "flickr", "collision")
         test_db.conn.commit()
 
         mock_flickr = MagicMock()
@@ -895,7 +942,15 @@ def client_with_proposals():
         app_module.app.config["SECRET_KEY"] = "test-secret"
 
         with app_module.app.test_client() as c:
-            yield c, test_db, non_conflict_id, divergence_id, collision_f2p_id, collision_p2f_id, mock_flickr
+            yield (
+                c,
+                test_db,
+                non_conflict_id,
+                divergence_id,
+                collision_f2p_id,
+                collision_p2f_id,
+                mock_flickr,
+            )
 
         app_module._db = None
         app_module._client = None
@@ -906,16 +961,22 @@ class TestProposalRoutes:
 
     def test_approve_non_conflict_returns_ok(self, client_with_proposals):
         from unittest.mock import patch
+
         c, db, nc_id, div_id, col_f2p, col_p2f, _ = client_with_proposals
-        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
-             patch("flickr.proposal_applier._run_with_timeout",
-                   return_value={"ok": True, "written": ["flickrtag"]}):
+        with (
+            patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
+            patch(
+                "flickr.proposal_applier._run_with_timeout",
+                return_value={"ok": True, "written": ["flickrtag"]},
+            ),
+        ):
             resp = c.post(f"/api/proposals/{nc_id}/approve")
         assert resp.status_code == 200
         assert resp.get_json()["ok"] is True
 
     def test_approve_returns_not_ok_when_photos_not_responding(self, client_with_proposals):
         from unittest.mock import patch
+
         c, db, nc_id, div_id, col_f2p, col_p2f, _ = client_with_proposals
         with patch("flickr.proposal_applier._photos_is_responsive", return_value=False):
             resp = c.post(f"/api/proposals/{nc_id}/approve")
@@ -926,10 +987,15 @@ class TestProposalRoutes:
 
     def test_approve_resolves_collision_sibling(self, client_with_proposals):
         from unittest.mock import patch
+
         c, db, nc_id, div_id, col_f2p, col_p2f, _ = client_with_proposals
-        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
-             patch("flickr.proposal_applier._run_with_timeout",
-                   return_value={"ok": True, "written": ["flickrcol"]}):
+        with (
+            patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
+            patch(
+                "flickr.proposal_applier._run_with_timeout",
+                return_value={"ok": True, "written": ["flickrcol"]},
+            ),
+        ):
             resp = c.post(f"/api/proposals/{col_f2p}/approve")
         assert resp.get_json()["ok"] is True
         row = db.conn.execute(
@@ -946,10 +1012,15 @@ class TestProposalRoutes:
 
     def test_bulk_approve_non_conflict(self, client_with_proposals):
         from unittest.mock import patch
+
         c, db, nc_id, div_id, col_f2p, col_p2f, _ = client_with_proposals
-        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
-             patch("flickr.proposal_applier._run_with_timeout",
-                   return_value={"ok": True, "written": ["flickrtag"]}):
+        with (
+            patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
+            patch(
+                "flickr.proposal_applier._run_with_timeout",
+                return_value={"ok": True, "written": ["flickrtag"]},
+            ),
+        ):
             resp = c.post("/api/proposals/bulk-approve", json={"conflict_type": "non_conflict"})
         assert resp.status_code == 200
         data = resp.get_json()
@@ -958,10 +1029,15 @@ class TestProposalRoutes:
 
     def test_bulk_approve_divergence(self, client_with_proposals):
         from unittest.mock import patch
+
         c, db, nc_id, div_id, col_f2p, col_p2f, _ = client_with_proposals
-        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
-             patch("flickr.proposal_applier._run_with_timeout",
-                   return_value={"ok": True, "written": ["flickrtag", "extra"]}):
+        with (
+            patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
+            patch(
+                "flickr.proposal_applier._run_with_timeout",
+                return_value={"ok": True, "written": ["flickrtag", "extra"]},
+            ),
+        ):
             resp = c.post("/api/proposals/bulk-approve", json={"conflict_type": "divergence"})
         assert resp.status_code == 200
         data = resp.get_json()
@@ -973,11 +1049,13 @@ class TestProposalRoutes:
 # GH #3 — mDNS/Bonjour registration
 # ---------------------------------------------------------------------------
 
+
 class TestMDnsRegistration:
     """Tests for _start_mdns: Bonjour _http._tcp registration on LAN startup."""
 
     def _call(self, host, port, lan_ip, *, mock_zc_module=None):
         from unittest.mock import patch
+
         if mock_zc_module is None:
             mock_zc_module = MagicMock()
         with patch.dict("sys.modules", {"zeroconf": mock_zc_module}):
@@ -1027,5 +1105,6 @@ class TestMDnsRegistration:
     def test_survives_import_error(self):
         """Missing zeroconf package is handled without raising."""
         from unittest.mock import patch
+
         with patch.dict("sys.modules", {"zeroconf": None}):
             app_module._start_mdns("0.0.0.0", 5173, "192.168.1.100")

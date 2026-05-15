@@ -36,8 +36,11 @@ def _now_iso() -> str:
 
 def _compute_hash(tags: list[str]) -> str:
     normed = sorted(
-        {"".join(c for c in unicodedata.normalize("NFC", t.strip().casefold()) if c.isalnum())
-         for t in tags if t.strip()}
+        {
+            "".join(c for c in unicodedata.normalize("NFC", t.strip().casefold()) if c.isalnum())
+            for t in tags
+            if t.strip()
+        }
     )
     return hashlib.sha256(" ".join(normed).encode()).hexdigest()
 
@@ -185,7 +188,10 @@ def apply_batch(
                 totals["errors"].append({"proposal_id": r["id"], "reason": reason})
                 log.warning("apply_batch: proposal %s failed: %s", r["id"], reason)
     if stale_count:
-        log.info("apply_batch: %s proposals permanently failed (stale UUID — photo deleted from Photos)", stale_count)
+        log.info(
+            "apply_batch: %s proposals permanently failed (stale UUID — photo deleted from Photos)",
+            stale_count,
+        )
     return totals
 
 
@@ -231,7 +237,7 @@ def apply_collision_reverse(
     if flickr_client is None:
         return {"ok": False, "reason": "no flickr_client provided"}
 
-    field    = row["field"]
+    field = row["field"]
     photo_id = row["photo_id"]
 
     if field == "tags":
@@ -240,14 +246,18 @@ def apply_collision_reverse(
         if not result["ok"]:
             return result
     else:
-        photos_value        = (row[f"photos_{field}"] or "").strip()
+        photos_value = (row[f"photos_{field}"] or "").strip()
         current_flickr_title = row["flickr_title"] or ""
-        current_flickr_desc  = row["flickr_description"] or ""
+        current_flickr_desc = row["flickr_description"] or ""
         try:
             if field == "title":
-                flickr_client.set_meta(flickr_id, title=photos_value, description=current_flickr_desc)
+                flickr_client.set_meta(
+                    flickr_id, title=photos_value, description=current_flickr_desc
+                )
             else:
-                flickr_client.set_meta(flickr_id, title=current_flickr_title, description=photos_value)
+                flickr_client.set_meta(
+                    flickr_id, title=current_flickr_title, description=photos_value
+                )
         except Exception as e:
             return {"ok": False, "reason": f"Flickr API error: {e}"}
         now = _now_iso()
@@ -273,8 +283,12 @@ def apply_collision_reverse(
         _mark_applied(db, sibling["id"])
 
     db.conn.commit()
-    log.info("collision-reverse proposal %s → Flickr  photo_id=%s  field=%s",
-             proposal_id, photo_id, field)
+    log.info(
+        "collision-reverse proposal %s → Flickr  photo_id=%s  field=%s",
+        proposal_id,
+        photo_id,
+        field,
+    )
     return {"ok": True}
 
 
@@ -346,14 +360,19 @@ def apply_manual_merge(
 
     _mark_applied(db, proposal_id)
     db.conn.commit()
-    log.info("manual merge proposal %s → both  photo_id=%s  tags=%d",
-             proposal_id, row["photo_id"], len(custom_tags))
+    log.info(
+        "manual merge proposal %s → both  photo_id=%s  tags=%d",
+        proposal_id,
+        row["photo_id"],
+        len(custom_tags),
+    )
     return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _write_tags_to_photos(
     db: "Database", photo_id: int, uuid: str, new_tags: list[str], library_path: str
@@ -396,7 +415,10 @@ def _write_tags_to_photos(
 
 
 def _write_tags_to_flickr(
-    db: "Database", photo_id: int, flickr_id: str, new_tags: list[str],
+    db: "Database",
+    photo_id: int,
+    flickr_id: str,
+    new_tags: list[str],
     flickr_client: "FlickrClient",
 ) -> dict:
     """Write tags to Flickr and update the DB cache. Does not touch proposal state."""
@@ -412,8 +434,14 @@ def _write_tags_to_flickr(
            SET flickr_tags=?, flickr_tags_hash=?, meta_synced_flickr_at=?,
                tags_truncated_for_flickr=?, updated_at=?
            WHERE id=?""",
-        (json.dumps(tags_to_write), _compute_hash(tags_to_write), now,
-         1 if truncated else 0, now, photo_id),
+        (
+            json.dumps(tags_to_write),
+            _compute_hash(tags_to_write),
+            now,
+            1 if truncated else 0,
+            now,
+            photo_id,
+        ),
     )
     return {"ok": True, "truncated": truncated}
 
@@ -428,8 +456,12 @@ def _apply_to_photos(db: "Database", row, new_tags: list[str], library_path: str
     written = result.get("written", new_tags)
     _mark_applied(db, row["id"])
     db.conn.commit()
-    log.info("applied proposal %s → Photos  photo_id=%s  tags=%d",
-             row["id"], row["photo_id"], len(written))
+    log.info(
+        "applied proposal %s → Photos  photo_id=%s  tags=%d",
+        row["id"],
+        row["photo_id"],
+        len(written),
+    )
     return {"ok": True}
 
 
@@ -444,10 +476,13 @@ def _apply_to_flickr(
         return result
     _mark_applied(db, row["id"])
     db.conn.commit()
-    log.info("applied proposal %s → Flickr  photo_id=%s  tags=%d%s",
-             row["id"], row["photo_id"],
-             min(len(new_tags), MAX_FLICKR_TAGS),
-             " (truncated)" if result.get("truncated") else "")
+    log.info(
+        "applied proposal %s → Flickr  photo_id=%s  tags=%d%s",
+        row["id"],
+        row["photo_id"],
+        min(len(new_tags), MAX_FLICKR_TAGS),
+        " (truncated)" if result.get("truncated") else "",
+    )
     return {"ok": True}
 
 
@@ -501,7 +536,9 @@ def _apply_text_to_photos(db: "Database", row, new_value: str) -> dict:
     db.conn.commit()
     log.info(
         "applied proposal %s → Photos  photo_id=%s  field=%s",
-        row["id"], row["photo_id"], field,
+        row["id"],
+        row["photo_id"],
+        field,
     )
     return {"ok": True}
 
@@ -516,7 +553,7 @@ def _apply_text_to_flickr(
 
     # set_meta requires both title and description; keep the current value for the unchanged field
     current_title = row["flickr_title"] or ""
-    current_desc  = row["flickr_description"] or ""
+    current_desc = row["flickr_description"] or ""
     try:
         if field == "title":
             flickr_client.set_meta(flickr_id, title=new_value, description=current_desc)
@@ -536,7 +573,9 @@ def _apply_text_to_flickr(
     db.conn.commit()
     log.info(
         "applied proposal %s → Flickr  photo_id=%s  field=%s",
-        row["id"], row["photo_id"], field,
+        row["id"],
+        row["photo_id"],
+        field,
     )
     return {"ok": True}
 
@@ -615,7 +654,9 @@ def set_photo_text(
         if flickr_client is None:
             warnings.append("Flickr: no client available")
         else:
-            r = _write_text_to_flickr_both(db, photo_id, flickr_id, title, description, flickr_client)
+            r = _write_text_to_flickr_both(
+                db, photo_id, flickr_id, title, description, flickr_client
+            )
             if not r["ok"]:
                 warnings.append(f"Flickr: {r['reason']}")
 
@@ -628,8 +669,13 @@ def set_photo_text(
     )
     db.conn.commit()
 
-    log.info("set_photo_text photo_id=%s title=%r desc_len=%d warnings=%s",
-             photo_id, title[:40], len(description), warnings)
+    log.info(
+        "set_photo_text photo_id=%s title=%r desc_len=%d warnings=%s",
+        photo_id,
+        title[:40],
+        len(description),
+        warnings,
+    )
     if warnings:
         return {"ok": True, "warnings": warnings}
     return {"ok": True}
@@ -660,10 +706,10 @@ def _write_text_to_photos_both(
             return {"ok": False, "reason": f"write failed: {e}"}
         try:
             written_title = (photo.title or "").strip()
-            written_desc  = (photo.description or "").strip()
+            written_desc = (photo.description or "").strip()
         except Exception:
             written_title = title
-            written_desc  = description
+            written_desc = description
         return {"ok": True, "written_title": written_title, "written_desc": written_desc}
 
     result = _run_with_timeout(_do_write)
@@ -681,7 +727,11 @@ def _write_text_to_photos_both(
 
 
 def _write_text_to_flickr_both(
-    db: "Database", photo_id: int, flickr_id: str, title: str, description: str,
+    db: "Database",
+    photo_id: int,
+    flickr_id: str,
+    title: str,
+    description: str,
     flickr_client: "FlickrClient",
 ) -> dict:
     """Write both title and description to Flickr and update the DB cache."""
@@ -716,7 +766,9 @@ def _photos_is_responsive(timeout: int = 3) -> bool:
         # Now verify it actually responds to AppleScript
         result = subprocess.run(
             ["osascript", "-e", 'tell application "Photos" to name'],
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
         return result.returncode == 0
     except Exception:

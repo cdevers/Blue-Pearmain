@@ -24,7 +24,6 @@ import logging
 import subprocess
 import unicodedata
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -63,15 +62,15 @@ def _classify_text_field(
 
     def make(source, target, proposed_value, conflict_type):
         return {
-            "photo_id":                photo_id,
-            "field":                   field,
-            "proposed_value":          proposed_value,
-            "source":                  source,
-            "target":                  target,
-            "conflict_type":           conflict_type,
+            "photo_id": photo_id,
+            "field": field,
+            "proposed_value": proposed_value,
+            "source": source,
+            "target": target,
+            "conflict_type": conflict_type,
             "source_hash_at_creation": fhash if source == "flickr" else phash,
             "target_hash_at_creation": phash if target == "photos" else fhash,
-            "created_at":              now,
+            "created_at": now,
         }
 
     if not fval:
@@ -89,6 +88,7 @@ def _classify_text_field(
 # ---------------------------------------------------------------------------
 # Phase 4: sync engine (DB cache → proposals, no API calls)
 # ---------------------------------------------------------------------------
+
 
 def run_sync_engine(
     db: "Database",
@@ -156,9 +156,12 @@ def run_sync_engine(
         if verbose or i % 1000 == 0 or i == total:
             log.info(
                 "Progress %d/%d — proposals=%d  hash_matches=%d  skipped=%d  failed=%d",
-                i, total,
-                totals["proposals"], totals["hash_matches"],
-                totals["skipped"], totals["failed"],
+                i,
+                total,
+                totals["proposals"],
+                totals["hash_matches"],
+                totals["skipped"],
+                totals["failed"],
             )
 
     if not dry_run and harmonize_batch:
@@ -190,12 +193,16 @@ def run_sync_engine(
             )
         # Title and description: string-equality check.
         for field, subquery in [
-            ("title",
-             "SELECT id FROM photos WHERE TRIM(COALESCE(flickr_title,''))"
-             " = TRIM(COALESCE(photos_title,''))"),
-            ("description",
-             "SELECT id FROM photos WHERE TRIM(COALESCE(flickr_description,''))"
-             " = TRIM(COALESCE(photos_description,''))"),
+            (
+                "title",
+                "SELECT id FROM photos WHERE TRIM(COALESCE(flickr_title,''))"
+                " = TRIM(COALESCE(photos_title,''))",
+            ),
+            (
+                "description",
+                "SELECT id FROM photos WHERE TRIM(COALESCE(flickr_description,''))"
+                " = TRIM(COALESCE(photos_description,''))",
+            ),
         ]:
             cur = db.conn.execute(
                 f"UPDATE metadata_proposals SET status='superseded', resolved_at=?"
@@ -206,7 +213,8 @@ def run_sync_engine(
             if cur.rowcount:
                 log.info(
                     "sync_engine: superseded %d stale %s proposals (values now match)",
-                    cur.rowcount, field,
+                    cur.rowcount,
+                    field,
                 )
         db.conn.commit()
 
@@ -241,7 +249,12 @@ def _harmonise_one(db: "Database", photo_id: int, now: str):
     if not tags_hash_match:
         proposals.extend(
             _classify_tags(
-                photo_id, row["flickr_tags"], row["photos_tags"], fhash, phash, now,
+                photo_id,
+                row["flickr_tags"],
+                row["photos_tags"],
+                fhash,
+                phash,
+                now,
                 proposed_tags_json=row["proposed_tags"],
             )
         )
@@ -250,8 +263,10 @@ def _harmonise_one(db: "Database", photo_id: int, now: str):
     for field in ("title", "description"):
         proposals.extend(
             _classify_text_field(
-                photo_id, field,
-                row[f"flickr_{field}"], row[f"photos_{field}"],
+                photo_id,
+                field,
+                row[f"flickr_{field}"],
+                row[f"photos_{field}"],
                 now,
             )
         )
@@ -292,8 +307,7 @@ def _classify_tags(
         # hyphens, and other punctuation ("close-up" → "closeup", "new york" →
         # "newyork"). Keep only isalnum() chars so comparisons match Flickr's view.
         return "".join(
-            c for c in unicodedata.normalize("NFC", tag.strip().casefold())
-            if c.isalnum()
+            c for c in unicodedata.normalize("NFC", tag.strip().casefold()) if c.isalnum()
         )
 
     ftags_norm = {norm(t) for t in ftags_raw if t.strip()}
@@ -313,15 +327,15 @@ def _classify_tags(
 
     def make(source, target, proposed_value, conflict_type):
         return {
-            "photo_id":                photo_id,
-            "field":                   "tags",
-            "proposed_value":          proposed_value,
-            "source":                  source,
-            "target":                  target,
-            "conflict_type":           conflict_type,
+            "photo_id": photo_id,
+            "field": "tags",
+            "proposed_value": proposed_value,
+            "source": source,
+            "target": target,
+            "conflict_type": conflict_type,
             "source_hash_at_creation": flickr_hash if source == "flickr" else photos_hash,
             "target_hash_at_creation": photos_hash if target == "photos" else flickr_hash,
-            "created_at":              now,
+            "created_at": now,
         }
 
     if not ftags_effective:
@@ -346,6 +360,7 @@ def _classify_tags(
 # ---------------------------------------------------------------------------
 # Public API (legacy: Phase 2/3 pull-and-write behaviour)
 # ---------------------------------------------------------------------------
+
 
 def pull_photo_metadata(
     db: "Database",
@@ -376,13 +391,13 @@ def pull_photo_metadata(
     ).fetchone()
 
     result: dict = {
-        "photo_id":  photo_id,
+        "photo_id": photo_id,
         "flickr_id": row["flickr_id"] if row else None,
-        "status":    "ok",
-        "written":   [],
+        "status": "ok",
+        "written": [],
         "conflicts": [],
-        "skipped":   [],
-        "errors":    [],
+        "skipped": [],
+        "errors": [],
         "cache_hit": False,
     }
 
@@ -391,7 +406,7 @@ def pull_photo_metadata(
         return result
 
     flickr_id = row["flickr_id"]
-    uuid      = row["uuid"]
+    uuid = row["uuid"]
 
     # 1. Fetch from DB cache; fall back to live Flickr API on cache miss
     flickr_meta = _read_flickr_cache(db, photo_id)
@@ -408,7 +423,8 @@ def pull_photo_metadata(
                     db.mark_flickr_deleted(photo_id)
                 log.info(
                     "flickr_deleted photo_id=%s flickr_id=%s — marked, will skip in future",
-                    photo_id, flickr_id,
+                    photo_id,
+                    flickr_id,
                 )
             else:
                 result["status"] = "flickr_error"
@@ -431,11 +447,11 @@ def pull_photo_metadata(
         pval = (photos_meta.get(field) or "").strip()
 
         if not fval:
-            result["skipped"].append(field)   # nothing on Flickr, keep Photos
+            result["skipped"].append(field)  # nothing on Flickr, keep Photos
         elif fval == pval:
-            result["skipped"].append(field)   # already in sync
+            result["skipped"].append(field)  # already in sync
         elif not pval:
-            fields_to_write[field] = fval     # Flickr has it, Photos doesn't
+            fields_to_write[field] = fval  # Flickr has it, Photos doesn't
         else:
             # Both non-empty and different → conflict
             result["conflicts"].append(field)
@@ -457,7 +473,8 @@ def pull_photo_metadata(
         result["conflicts"].append("tags")
         if not dry_run:
             db.upsert_metadata_conflict(
-                photo_id, "tags",
+                photo_id,
+                "tags",
                 json.dumps(sorted(flickr_meta.get("tags") or [])),
                 json.dumps(sorted(photos_meta.get("tags") or [])),
             )
@@ -469,7 +486,9 @@ def pull_photo_metadata(
             result["written"].extend(fields_to_write.keys())
             log.debug(
                 "wrote %s to Photos photo_id=%s fields=%s",
-                row["original_filename"], photo_id, list(fields_to_write.keys()),
+                row["original_filename"],
+                photo_id,
+                list(fields_to_write.keys()),
             )
         except RuntimeError as e:
             result["status"] = "write_error"
@@ -498,12 +517,19 @@ def pull_batch(
     Run pull_photo_metadata for a list of photo_ids.
     Returns aggregate counts: {"written": N, "conflicts": N, "skipped": N, "failed": N}
     """
-    totals = {"written": 0, "conflicts": 0, "skipped": 0, "failed": 0,
-              "cache_hits": 0, "cache_misses": 0}
+    totals = {
+        "written": 0,
+        "conflicts": 0,
+        "skipped": 0,
+        "failed": 0,
+        "cache_hits": 0,
+        "cache_misses": 0,
+    }
     total = len(photo_ids)
 
     try:
         import osxphotos
+
         photos_db = osxphotos.PhotosDB(dbfile=library_path)
     except ImportError:
         raise RuntimeError("osxphotos is not installed — cannot read Photos metadata")
@@ -516,9 +542,9 @@ def pull_batch(
         result = pull_photo_metadata(
             db, flickr, photo_id, library_path, dry_run=dry_run, photos_db=photos_db
         )
-        totals["written"]   += len(result["written"])
+        totals["written"] += len(result["written"])
         totals["conflicts"] += len(result["conflicts"])
-        totals["skipped"]   += len(result["skipped"])
+        totals["skipped"] += len(result["skipped"])
 
         if result.get("cache_hit"):
             totals["cache_hits"] += 1
@@ -532,22 +558,31 @@ def pull_batch(
             if result["status"] != "no_uuid":
                 log.warning(
                     "pull_batch: photo_id=%s status=%s errors=%s",
-                    photo_id, result["status"], result["errors"],
+                    photo_id,
+                    result["status"],
+                    result["errors"],
                 )
         elif verbose:
             log.debug(
                 "pull_batch: photo_id=%s written=%s conflicts=%s skipped=%s cache_hit=%s",
-                photo_id, result["written"], result["conflicts"], result["skipped"],
+                photo_id,
+                result["written"],
+                result["conflicts"],
+                result["skipped"],
                 result.get("cache_hit"),
             )
 
         if i % 50 == 0 or i == total:
             log.info(
-                "Progress: %d / %d — written=%d  conflicts=%d  skipped=%d  failed=%d  "
-                "cache=%d/%d",
-                i, total,
-                totals["written"], totals["conflicts"], totals["skipped"], totals["failed"],
-                totals["cache_hits"], total,
+                "Progress: %d / %d — written=%d  conflicts=%d  skipped=%d  failed=%d  cache=%d/%d",
+                i,
+                total,
+                totals["written"],
+                totals["conflicts"],
+                totals["skipped"],
+                totals["failed"],
+                totals["cache_hits"],
+                total,
             )
 
     return totals
@@ -556,6 +591,7 @@ def pull_batch(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _read_flickr_cache(db: "Database", photo_id: int) -> dict | None:
     """
@@ -572,18 +608,18 @@ def _read_flickr_cache(db: "Database", photo_id: int) -> dict | None:
         return None
     tags = json.loads(row["flickr_tags"]) if row["flickr_tags"] else []
     return {
-        "title":       row["flickr_title"]       or "",
+        "title": row["flickr_title"] or "",
         "description": row["flickr_description"] or "",
-        "tags":        tags,
+        "tags": tags,
     }
 
 
 def _fetch_flickr_metadata(flickr: "FlickrClient", flickr_id: str) -> dict:
     """Fetch title, description, tags from Flickr. Raises FlickrError on failure."""
-    info   = flickr.get_photo_info(flickr_id)
-    photo  = info.get("photo", {})
-    title  = html.unescape(photo.get("title", {}).get("_content", "") or "")
-    desc   = html.unescape(photo.get("description", {}).get("_content", "") or "")
+    info = flickr.get_photo_info(flickr_id)
+    photo = info.get("photo", {})
+    title = html.unescape(photo.get("title", {}).get("_content", "") or "")
+    desc = html.unescape(photo.get("description", {}).get("_content", "") or "")
     tags_raw = photo.get("tags", {})
     if isinstance(tags_raw, dict):
         tags = [t.get("raw", "") for t in tags_raw.get("tag", []) if t.get("raw")]
@@ -611,21 +647,21 @@ def _read_photos_metadata(uuid: str, library_path: str, photos_db: object = None
 
     photo = results[0]
     return {
-        "title":       photo.title       or "",
+        "title": photo.title or "",
         "description": photo.description or "",
-        "tags":        list(photo.keywords or []),
+        "tags": list(photo.keywords or []),
     }
 
 
-def _write_photos_metadata(uuid: str, library_path: str, fields: dict, photos_db: object = None) -> None:
+def _write_photos_metadata(
+    uuid: str, library_path: str, fields: dict, photos_db: object = None
+) -> None:
     """
     Write title/description/keywords to Apple Photos via photoscript (AppleScript bridge).
     Raises RuntimeError if Photos.app is not running or photoscript is unavailable.
     """
     if not _photos_is_responsive():
-        raise RuntimeError(
-            "Photos not responding — open Photos.app and re-run sync-metadata"
-        )
+        raise RuntimeError("Photos not responding — open Photos.app and re-run sync-metadata")
 
     try:
         import photoscript
@@ -653,7 +689,9 @@ def _photos_is_responsive(timeout: int = 3) -> bool:
             return False
         result = subprocess.run(
             ["osascript", "-e", 'tell application "Photos" to name'],
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
         return result.returncode == 0
     except Exception:

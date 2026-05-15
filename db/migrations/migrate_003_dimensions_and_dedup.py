@@ -31,13 +31,16 @@ import yaml
 
 NEW_COLUMNS: list[tuple[str, str, str | None]] = [
     # (column_name, column_def, comment)
-    ("width",              "INTEGER",                               "pixel width"),
-    ("height",             "INTEGER",                               "pixel height"),
-    ("duplicate_group_id", "INTEGER",                               "FK to duplicate_groups.id"),
-    ("duplicate_role",     "TEXT CHECK(duplicate_role IN ('keeper','discard','review'))",
-                                                                    "role within duplicate group"),
-    ("flickr_views",       "INTEGER",                               "Flickr view count"),
-    ("flickr_faves",       "INTEGER",                               "Flickr favourite count"),
+    ("width", "INTEGER", "pixel width"),
+    ("height", "INTEGER", "pixel height"),
+    ("duplicate_group_id", "INTEGER", "FK to duplicate_groups.id"),
+    (
+        "duplicate_role",
+        "TEXT CHECK(duplicate_role IN ('keeper','discard','review'))",
+        "role within duplicate group",
+    ),
+    ("flickr_views", "INTEGER", "Flickr view count"),
+    ("flickr_faves", "INTEGER", "Flickr favourite count"),
 ]
 
 NEW_TABLES = """
@@ -86,9 +89,10 @@ def run(db_path: str, dry_run: bool = False) -> None:
         for col, col_def, comment in NEW_COLUMNS:
             status = "already exists" if col in existing else "ADD"
             print(f"  photos.{col:25s} {status}  ({comment})")
-        tables = {r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()}
+        tables = {
+            r[0]
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
         status = "already exists" if "duplicate_groups" in tables else "CREATE"
         print(f"  table duplicate_groups          {status}")
         conn.close()
@@ -117,8 +121,9 @@ def run(db_path: str, dry_run: bool = False) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="config/config.yml")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Show what would change without modifying the DB")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would change without modifying the DB"
+    )
     args = parser.parse_args()
 
     config_path = Path(args.config)

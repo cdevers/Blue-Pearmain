@@ -30,7 +30,6 @@ import html
 import json
 import logging
 import sys
-import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -55,10 +54,7 @@ def _now_iso() -> str:
 def _normalise_tag(tag: str) -> str:
     # Flickr normalizes tags to alphanumeric-only ("close-up" → "closeup",
     # "new york" → "newyork"). Keep only isalnum() chars so hashes align.
-    return "".join(
-        c for c in unicodedata.normalize("NFC", tag.strip().casefold())
-        if c.isalnum()
-    )
+    return "".join(c for c in unicodedata.normalize("NFC", tag.strip().casefold()) if c.isalnum())
 
 
 def _compute_tags_hash(tags: list[str]) -> str:
@@ -70,6 +66,7 @@ def _compute_tags_hash(tags: list[str]) -> str:
 # Config
 # ---------------------------------------------------------------------------
 
+
 def load_config(path: Path) -> dict:
     if not path.exists():
         log.error(f"Config file not found: {path}")
@@ -79,8 +76,10 @@ def load_config(path: Path) -> dict:
 
 
 def setup_logging(config: dict, verbose: bool):
-    level = logging.DEBUG if verbose else getattr(
-        logging, config.get("logging", {}).get("level", "INFO").upper(), logging.INFO
+    level = (
+        logging.DEBUG
+        if verbose
+        else getattr(logging, config.get("logging", {}).get("level", "INFO").upper(), logging.INFO)
     )
     handlers: list[logging.Handler] = [logging.StreamHandler()]
     log_file = config.get("logging", {}).get("file")
@@ -116,10 +115,10 @@ def flickr_photo_to_db(photo: dict, info: dict | None = None) -> dict:
     """
     # Basic identity
     row: dict = {
-        "flickr_id":     photo.get("id"),
+        "flickr_id": photo.get("id"),
         "flickr_secret": photo.get("secret"),
         "flickr_server": photo.get("server"),
-        "flickr_farm":   photo.get("farm"),
+        "flickr_farm": photo.get("farm"),
     }
 
     # Timestamps
@@ -161,7 +160,7 @@ def flickr_photo_to_db(photo: dict, info: dict | None = None) -> dict:
     lon = photo.get("longitude")
     if lat and lon:
         try:
-            row["latitude"]  = float(lat)
+            row["latitude"] = float(lat)
             row["longitude"] = float(lon)
         except (TypeError, ValueError):
             pass
@@ -175,10 +174,10 @@ def flickr_photo_to_db(photo: dict, info: dict | None = None) -> dict:
     # Apple Photos dimensions when the photo is matched.
     try:
         if photo.get("width_o") and photo.get("height_o"):
-            row["width"]  = int(photo["width_o"])
+            row["width"] = int(photo["width_o"])
             row["height"] = int(photo["height_o"])
         elif photo.get("width_l") and photo.get("height_l"):
-            row["width"]  = int(photo["width_l"])
+            row["width"] = int(photo["width_l"])
             row["height"] = int(photo["height_l"])
     except (TypeError, ValueError):
         pass
@@ -213,13 +212,13 @@ def _enrich_from_info(row: dict, info: dict):
     location = photo.get("location", {})
     if location:
         try:
-            row["latitude"]  = float(location.get("latitude",  row.get("latitude",  0)))
+            row["latitude"] = float(location.get("latitude", row.get("latitude", 0)))
             row["longitude"] = float(location.get("longitude", row.get("longitude", 0)))
         except (TypeError, ValueError):
             pass
-        row["place_city"]    = (location.get("locality")   or {}).get("_content", "")
-        row["place_state"]   = (location.get("region")     or {}).get("_content", "")
-        row["place_country"] = (location.get("country")    or {}).get("_content", "")
+        row["place_city"] = (location.get("locality") or {}).get("_content", "")
+        row["place_state"] = (location.get("region") or {}).get("_content", "")
+        row["place_country"] = (location.get("country") or {}).get("_content", "")
 
     # Tags from getInfo are richer (have id, author, raw value)
     tags_container = photo.get("tags", {})
@@ -258,6 +257,7 @@ def _enrich_from_info(row: dict, info: dict):
 # Privacy classification for Flickr-only records
 # ---------------------------------------------------------------------------
 
+
 def classify_flickr_record(row: dict, zones: list[dict]) -> tuple[str, str]:
     """
     Run the privacy classifier on a Flickr-sourced record.
@@ -277,6 +277,7 @@ def classify_flickr_record(row: dict, zones: list[dict]) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 # Thumbnail download (optionally threaded)
 # ---------------------------------------------------------------------------
+
 
 def download_thumb(client: FlickrClient, row: dict, thumb_root: Path) -> str | None:
     """
@@ -306,6 +307,7 @@ def download_thumb(client: FlickrClient, row: dict, thumb_root: Path) -> str | N
 # Auto-push helpers
 # ---------------------------------------------------------------------------
 
+
 def _find_approved_photos_record(db, flickr_row: dict):
     """
     Look for a Photos-only DB record (no flickr_id) with privacy_state
@@ -319,7 +321,9 @@ def _find_approved_photos_record(db, flickr_row: dict):
 
     Returns the DB record dict if found, else None.
     """
-    import sys as _sys, os as _os
+    import sys as _sys
+    import os as _os
+
     _sys.path.insert(0, _os.path.dirname(__file__))
     from scanner import normalise_dt
 
@@ -342,14 +346,17 @@ def _find_approved_photos_record(db, flickr_row: dict):
     ).fetchall()
 
     import json as _json
+
     for row in candidates:
         row_dt = normalise_dt(row["date_taken"])
         if row_dt and row_dt[:19] == flickr_dt_prefix:
             d = dict(row)
             for field in ("apple_labels", "apple_persons", "proposed_tags"):
                 if isinstance(d.get(field), str):
-                    try:    d[field] = _json.loads(d[field])
-                    except (json.JSONDecodeError, TypeError, ValueError): d[field] = []
+                    try:
+                        d[field] = _json.loads(d[field])
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        d[field] = []
             return d
     return None
 
@@ -360,14 +367,13 @@ def _push_to_flickr(client, flickr_id: str, db_record: dict, db, dry_run: bool) 
     Records push state in the DB only for operations that succeed.
     Returns the number of failed operations (0 = all ok).
     """
-    from analyzer.tagger import merge_tags
+
     errors = []
 
     try:
         client.set_permissions(flickr_id, is_public=1)
         db.conn.execute(
-            "UPDATE photos SET perms_pushed_flickr = 1 WHERE flickr_id = ?",
-            (flickr_id,)
+            "UPDATE photos SET perms_pushed_flickr = 1 WHERE flickr_id = ?", (flickr_id,)
         )
         log.info(f"  set_permissions OK for {flickr_id}")
     except FlickrError as e:
@@ -379,12 +385,12 @@ def _push_to_flickr(client, flickr_id: str, db_record: dict, db, dry_run: bool) 
         try:
             client.add_tags(flickr_id, tags)
             db.conn.execute(
-                "UPDATE photos SET tags_pushed_flickr = 1 WHERE flickr_id = ?",
-                (flickr_id,)
+                "UPDATE photos SET tags_pushed_flickr = 1 WHERE flickr_id = ?", (flickr_id,)
             )
             log.info(f"  add_tags OK for {flickr_id} ({len(tags)} tags)")
         except FlickrError as e:
             from flickr.flickr_client import FLICKR_ERR_MAX_TAGS
+
             if e.code == FLICKR_ERR_MAX_TAGS:
                 log.warning(
                     f"  add_tags skipped for {flickr_id}: "
@@ -404,6 +410,7 @@ def _push_to_flickr(client, flickr_id: str, db_record: dict, db, dry_run: bool) 
 # Main poll loop
 # ---------------------------------------------------------------------------
 
+
 def poll(
     client: FlickrClient,
     db: Database,
@@ -422,7 +429,9 @@ def poll(
     page = 1
 
     while True:
-        log.info(f"Fetching page {page} (from {datetime.fromtimestamp(min_ts, tz=timezone.utc).date()})")
+        log.info(
+            f"Fetching page {page} (from {datetime.fromtimestamp(min_ts, tz=timezone.utc).date()})"
+        )
         try:
             resp = client.get_recent_uploads(
                 min_upload_date=min_ts,
@@ -461,14 +470,14 @@ def poll(
                 existing_for_review = db.get_photo_by_flickr_id(flickr_id)
                 if existing_for_review and existing_for_review.get("review_decision"):
                     # Preserve the human decision; only update sync metadata
-                    row["privacy_state"]  = existing_for_review["privacy_state"]
+                    row["privacy_state"] = existing_for_review["privacy_state"]
                     row["privacy_reason"] = existing_for_review["privacy_reason"]
                 elif photo.get("ispublic") == 1 or row.get("flickr_is_public") == 1:
-                    row["privacy_state"]  = "already_public"
+                    row["privacy_state"] = "already_public"
                     row["privacy_reason"] = "public on Flickr"
                 else:
                     state, reason = classify_flickr_record(row, zones)
-                    row["privacy_state"]  = state
+                    row["privacy_state"] = state
                     row["privacy_reason"] = reason
 
                 # Tag proposals
@@ -477,13 +486,18 @@ def poll(
 
                 # Cache Flickr metadata for the sync engine
                 tags = row.get("flickr_tags") or []
-                row["flickr_tags"]           = json.dumps(tags)
-                row["flickr_tags_hash"]      = _compute_tags_hash(tags)
+                row["flickr_tags"] = json.dumps(tags)
+                row["flickr_tags_hash"] = _compute_tags_hash(tags)
                 row["meta_synced_flickr_at"] = _now_iso()
 
                 # Drop transient fields that have no DB column
-                for _key in ("thumbnail_url_l", "thumbnail_url_m",
-                             "flickr_is_public", "flickr_owner_nsid", "original_format"):
+                for _key in (
+                    "thumbnail_url_l",
+                    "thumbnail_url_m",
+                    "flickr_is_public",
+                    "flickr_owner_nsid",
+                    "original_format",
+                ):
                     row.pop(_key, None)
 
                 if dry_run:
@@ -508,11 +522,13 @@ def poll(
                         # Merge Flickr identity into the Photos record.
                         # Pass uuid so upsert_photo finds the existing row via
                         # the uuid unique constraint rather than inserting a new one.
-                        row["privacy_state"]  = "approved_public"
+                        row["privacy_state"] = "approved_public"
                         row["privacy_reason"] = "matched approved Photos record"
-                        row["uuid"]           = matched["uuid"]
+                        row["uuid"] = matched["uuid"]
                         db.upsert_photo(row)
-                        push_errors += _push_to_flickr(client, flickr_id, matched, db, dry_run=False)
+                        push_errors += _push_to_flickr(
+                            client, flickr_id, matched, db, dry_run=False
+                        )
                     else:
                         db.upsert_photo(row)
                     new += 1
@@ -522,10 +538,13 @@ def poll(
                     thumb_url = photo.get("url_m") or photo.get("url_l")
                     if thumb_url:
                         fut = executor.submit(
-                            download_thumb, client,
-                            {"flickr_id": flickr_id,
-                             "thumbnail_url_l": photo.get("url_l", ""),
-                             "thumbnail_url_m": photo.get("url_m", "")},
+                            download_thumb,
+                            client,
+                            {
+                                "flickr_id": flickr_id,
+                                "thumbnail_url_l": photo.get("url_l", ""),
+                                "thumbnail_url_m": photo.get("url_m", ""),
+                            },
                             thumb_root,
                         )
                         thumb_futures.append((flickr_id, fut))
@@ -554,14 +573,15 @@ def poll(
 # Config validation
 # ---------------------------------------------------------------------------
 
+
 def _validate_config(config: dict, config_path: str):
     """Fail fast with a readable message if required keys are missing."""
     required = {
-        "flickr.api_key":            "Flickr API key",
-        "flickr.api_secret":         "Flickr API secret",
-        "flickr.oauth_token":        "Flickr OAuth token (run flickr/flickr_auth.py)",
+        "flickr.api_key": "Flickr API key",
+        "flickr.api_secret": "Flickr API secret",
+        "flickr.oauth_token": "Flickr OAuth token (run flickr/flickr_auth.py)",
         "flickr.oauth_token_secret": "Flickr OAuth token secret (run flickr/flickr_auth.py)",
-        "database.path":             "SQLite database path",
+        "database.path": "SQLite database path",
     }
     errors = []
     for dotted_key, description in required.items():
@@ -586,18 +606,27 @@ def _validate_config(config: dict, config_path: str):
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 def main():
-    parser = argparse.ArgumentParser(
-        description="Blue Pearmain poller — sync Flickr → local DB"
+    parser = argparse.ArgumentParser(description="Blue Pearmain poller — sync Flickr → local DB")
+    parser.add_argument("--config", default="config/config.yml", help="Path to config.yml")
+    parser.add_argument(
+        "--backfill", action="store_true", help="Poll historical photos, not just recent"
     )
-    parser.add_argument("--config",   default="config/config.yml", help="Path to config.yml")
-    parser.add_argument("--backfill", action="store_true",          help="Poll historical photos, not just recent")
-    parser.add_argument("--days",     type=int, default=30,         help="With --backfill: days to look back (default 30)")
-    parser.add_argument("--since",    type=int, default=None,       help="Override: start from this Unix timestamp")
-    parser.add_argument("--no-thumbs",action="store_true",          help="Skip thumbnail downloads")
-    parser.add_argument("--dry-run",  action="store_true",          help="Classify but don't write to DB")
-    parser.add_argument("--verbose",  action="store_true",          help="Debug logging")
-    parser.add_argument("--fetch-info", action="store_true",        help="Fetch full getInfo for each photo (slower, richer)")
+    parser.add_argument(
+        "--days", type=int, default=30, help="With --backfill: days to look back (default 30)"
+    )
+    parser.add_argument(
+        "--since", type=int, default=None, help="Override: start from this Unix timestamp"
+    )
+    parser.add_argument("--no-thumbs", action="store_true", help="Skip thumbnail downloads")
+    parser.add_argument("--dry-run", action="store_true", help="Classify but don't write to DB")
+    parser.add_argument("--verbose", action="store_true", help="Debug logging")
+    parser.add_argument(
+        "--fetch-info",
+        action="store_true",
+        help="Fetch full getInfo for each photo (slower, richer)",
+    )
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -632,7 +661,9 @@ def main():
     # Determine start timestamp
     if args.since:
         min_ts = args.since
-        log.info(f"Polling from specified timestamp: {datetime.fromtimestamp(min_ts, tz=timezone.utc)}")
+        log.info(
+            f"Polling from specified timestamp: {datetime.fromtimestamp(min_ts, tz=timezone.utc)}"
+        )
     elif args.backfill:
         cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
         min_ts = int(cutoff.timestamp())
@@ -651,7 +682,7 @@ def main():
         else:
             cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
             min_ts = int(cutoff.timestamp())
-            log.info(f"No previous sync found — defaulting to last 24 hours")
+            log.info("No previous sync found — defaulting to last 24 hours")
 
     # Run
     run_id = None if args.dry_run else db.start_sync_run("flickr_poll")

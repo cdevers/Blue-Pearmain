@@ -78,9 +78,7 @@ def run(db_path: str, dry_run: bool = False) -> None:
 
     conn.execute("DROP TABLE tag_events_old")
 
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_tag_events_photo ON tag_events(photo_id)"
-    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tag_events_photo ON tag_events(photo_id)")
 
     conn.execute(
         "INSERT OR IGNORE INTO schema_migrations (name, applied_at) VALUES (?, ?)",
@@ -110,4 +108,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

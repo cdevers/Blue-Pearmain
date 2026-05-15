@@ -30,7 +30,8 @@ test:
 
 lint:
 	uv run mypy db/ poller/ flickr/ reviewer/ bp
-	uv run ruff check .
+	uv run --with ruff ruff format --check .
+	uv run --with ruff ruff check .
 
 install-hooks:
 	@for hook in scripts/hooks/*; do \

@@ -24,6 +24,7 @@ from typing import Any
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -55,6 +56,7 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 # ---------------------------------------------------------------------------
 # Main class
 # ---------------------------------------------------------------------------
+
 
 class Database:
     def __init__(self, path: str | Path):
@@ -131,8 +133,8 @@ class Database:
         if not flickr_row or not photos_row:
             return False
 
-        flickr_row  = dict(flickr_row)
-        photos_row  = dict(photos_row)
+        flickr_row = dict(flickr_row)
+        photos_row = dict(photos_row)
 
         # Sanity checks
         if photos_row.get("flickr_id"):
@@ -169,8 +171,15 @@ class Database:
                     """INSERT INTO tag_events
                        (photo_id, event_at, destination, tags_before, tags_after, success, error)
                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (photos_rec_id, t["event_at"], t["destination"],
-                     t["tags_before"], t["tags_after"], t["success"], t["error"]),
+                    (
+                        photos_rec_id,
+                        t["event_at"],
+                        t["destination"],
+                        t["tags_before"],
+                        t["tags_after"],
+                        t["success"],
+                        t["error"],
+                    ),
                 )
 
         # 3. Migrate metadata_conflicts (INSERT OR IGNORE to skip field conflicts
@@ -185,8 +194,16 @@ class Database:
                    (photo_id, field, flickr_value, photos_value,
                     resolved, resolution, resolved_at, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (photos_rec_id, c["field"], c["flickr_value"], c["photos_value"],
-                 c["resolved"], c["resolution"], c["resolved_at"], c["created_at"]),
+                (
+                    photos_rec_id,
+                    c["field"],
+                    c["flickr_value"],
+                    c["photos_value"],
+                    c["resolved"],
+                    c["resolution"],
+                    c["resolved_at"],
+                    c["created_at"],
+                ),
             )
 
         # 4. Build the set of fields to copy into the Photos record
@@ -194,8 +211,13 @@ class Database:
 
         # Flickr identity fields — always copy from the Flickr record
         for field in (
-            "flickr_id", "flickr_secret", "flickr_server", "flickr_farm",
-            "date_uploaded_flickr", "perms_pushed_flickr", "tags_pushed_flickr",
+            "flickr_id",
+            "flickr_secret",
+            "flickr_server",
+            "flickr_farm",
+            "date_uploaded_flickr",
+            "perms_pushed_flickr",
+            "tags_pushed_flickr",
         ):
             if flickr_row.get(field) is not None:
                 update[field] = flickr_row[field]
@@ -216,9 +238,7 @@ class Database:
         #    SQLite enforces UNIQUE per-row immediately, so we must clear the
         #    value on the source record before setting it on the target record.
         if "flickr_id" in update:
-            self.conn.execute(
-                "UPDATE photos SET flickr_id = NULL WHERE id = ?", (flickr_rec_id,)
-            )
+            self.conn.execute("UPDATE photos SET flickr_id = NULL WHERE id = ?", (flickr_rec_id,))
 
         if update:
             placeholders = ", ".join(f"{k} = ?" for k in update)
@@ -233,16 +253,25 @@ class Database:
         return True
 
     _FLICKR_COPY_FIELDS: list[str] = [
-        "flickr_id", "flickr_secret", "flickr_server", "flickr_farm",
-        "date_uploaded_flickr", "tags_pushed_flickr", "perms_pushed_flickr",
-        "flickr_deleted", "flickr_title", "flickr_description", "flickr_tags",
-        "flickr_tags_hash", "flickr_last_updated", "meta_synced_flickr_at",
-        "tags_truncated_for_flickr", "display_rotation",
+        "flickr_id",
+        "flickr_secret",
+        "flickr_server",
+        "flickr_farm",
+        "date_uploaded_flickr",
+        "tags_pushed_flickr",
+        "perms_pushed_flickr",
+        "flickr_deleted",
+        "flickr_title",
+        "flickr_description",
+        "flickr_tags",
+        "flickr_tags_hash",
+        "flickr_last_updated",
+        "meta_synced_flickr_at",
+        "tags_truncated_for_flickr",
+        "display_rotation",
     ]
 
-    def merge_flickr_donor_in_group(
-        self, donor_id: int, target_id: int, group_id: int
-    ) -> None:
+    def merge_flickr_donor_in_group(self, donor_id: int, target_id: int, group_id: int) -> None:
         """
         Soft-merge a Flickr-only donor record into a Photos-linked target record.
 
@@ -253,25 +282,27 @@ class Database:
 
         Raises ValueError if preconditions are not met.
         """
-        donor = self.conn.execute(
-            "SELECT * FROM photos WHERE id = ?", (donor_id,)
-        ).fetchone()
-        target = self.conn.execute(
-            "SELECT * FROM photos WHERE id = ?", (target_id,)
-        ).fetchone()
+        donor = self.conn.execute("SELECT * FROM photos WHERE id = ?", (donor_id,)).fetchone()
+        target = self.conn.execute("SELECT * FROM photos WHERE id = ?", (target_id,)).fetchone()
 
         if not donor:
             raise ValueError(f"donor {donor_id} not found")
         if not donor["flickr_id"]:
             raise ValueError(f"donor {donor_id} has no flickr_id")
         if donor["uuid"] is not None:
-            raise ValueError(f"donor {donor_id} has a uuid — only Flickr-only records can be donors")
+            raise ValueError(
+                f"donor {donor_id} has a uuid — only Flickr-only records can be donors"
+            )
         if not target:
             raise ValueError(f"target {target_id} not found")
         if target["uuid"] is None:
-            raise ValueError(f"target {target_id} has no uuid — only Photos-linked records can be targets")
+            raise ValueError(
+                f"target {target_id} has no uuid — only Photos-linked records can be targets"
+            )
         if target["flickr_id"] is not None:
-            raise ValueError(f"target {target_id} already has flickr_id '{target['flickr_id']}' — merge would overwrite it")
+            raise ValueError(
+                f"target {target_id} already has flickr_id '{target['flickr_id']}' — merge would overwrite it"
+            )
 
         donor = dict(donor)
 
@@ -300,8 +331,15 @@ class Database:
                     """INSERT INTO tag_events
                        (photo_id, event_at, destination, tags_before, tags_after, success, error)
                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (target_id, t["event_at"], t["destination"],
-                     t["tags_before"], t["tags_after"], t["success"], t["error"]),
+                    (
+                        target_id,
+                        t["event_at"],
+                        t["destination"],
+                        t["tags_before"],
+                        t["tags_after"],
+                        t["success"],
+                        t["error"],
+                    ),
                 )
 
         # 3. Migrate metadata_conflicts
@@ -315,8 +353,16 @@ class Database:
                    (photo_id, field, flickr_value, photos_value,
                     resolved, resolution, resolved_at, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (target_id, c["field"], c["flickr_value"], c["photos_value"],
-                 c["resolved"], c["resolution"], c["resolved_at"], c["created_at"]),
+                (
+                    target_id,
+                    c["field"],
+                    c["flickr_value"],
+                    c["photos_value"],
+                    c["resolved"],
+                    c["resolution"],
+                    c["resolved_at"],
+                    c["created_at"],
+                ),
             )
 
         # 4. Build set of Flickr fields to copy to target (skip nulls)
@@ -343,9 +389,7 @@ class Database:
         )
 
         # 8. Promote target role
-        self.conn.execute(
-            "UPDATE photos SET duplicate_role = 'keeper' WHERE id = ?", (target_id,)
-        )
+        self.conn.execute("UPDATE photos SET duplicate_role = 'keeper' WHERE id = ?", (target_id,))
 
         # 9. Resolve the duplicate group
         self.conn.execute(
@@ -385,8 +429,13 @@ class Database:
         should be passed as Python lists; this method serialises them.
         """
         # Serialise list fields
-        for field in ("apple_labels", "apple_persons", "proposed_tags",
-                      "flickr_tags", "photos_tags"):
+        for field in (
+            "apple_labels",
+            "apple_persons",
+            "proposed_tags",
+            "flickr_tags",
+            "photos_tags",
+        ):
             if isinstance(data.get(field), list):
                 data[field] = json.dumps(data[field])
 
@@ -427,15 +476,18 @@ class Database:
 
             update_data = {k: v for k, v in data.items() if k != lookup_field}
             if already_reviewed:
-                for p in ("privacy_state", "privacy_reason",
-                          "review_decision", "reviewed_at", "review_notes"):
+                for p in (
+                    "privacy_state",
+                    "privacy_reason",
+                    "review_decision",
+                    "reviewed_at",
+                    "review_notes",
+                ):
                     update_data.pop(p, None)
 
             placeholders = ", ".join(f"{k} = ?" for k in update_data)
             values = list(update_data.values()) + [row_id]
-            self.conn.execute(
-                f"UPDATE photos SET {placeholders} WHERE id = ?", values
-            )
+            self.conn.execute(f"UPDATE photos SET {placeholders} WHERE id = ?", values)
         else:
             columns = ", ".join(data.keys())
             placeholders = ", ".join("?" * len(data))
@@ -462,10 +514,10 @@ class Database:
     def record_review(self, photo_id: int, decision: str, notes: str = ""):
         """Record a human review decision and update privacy state accordingly."""
         state_map = {
-            "make_public":    "approved_public",
+            "make_public": "approved_public",
             "confirm_public": "already_public",
-            "keep_private":   "keep_private",
-            "skip":           "skipped",
+            "keep_private": "keep_private",
+            "skip": "skipped",
         }
         new_state = state_map.get(decision, "skipped")
         self.conn.execute(
@@ -482,9 +534,7 @@ class Database:
     # -----------------------------------------------------------------------
 
     def active_zones(self) -> list[dict]:
-        rows = self.conn.execute(
-            "SELECT * FROM geofence_zones WHERE active = 1"
-        ).fetchall()
+        rows = self.conn.execute("SELECT * FROM geofence_zones WHERE active = 1").fetchall()
         return [_row_to_dict(r) for r in rows]
 
     def match_geofence(self, lat: float | None, lon: float | None) -> dict | None:
@@ -615,7 +665,9 @@ class Database:
             next_row["id"] if next_row else None,
         )
 
-    def review_queue_count(self, states: list[str] | None = None, exclude_screenshots: bool = False) -> int:
+    def review_queue_count(
+        self, states: list[str] | None = None, exclude_screenshots: bool = False
+    ) -> int:
         if states is None:
             states = ["needs_review", "candidate_public"]
         placeholders = ",".join("?" * len(states))
@@ -627,9 +679,7 @@ class Database:
         return row["n"] if row else 0
 
     def get_photo(self, photo_id: int) -> dict | None:
-        row = self.conn.execute(
-            "SELECT * FROM photos WHERE id = ?", (photo_id,)
-        ).fetchone()
+        row = self.conn.execute("SELECT * FROM photos WHERE id = ?", (photo_id,)).fetchone()
         if not row:
             return None
         d = _row_to_dict(row)
@@ -639,9 +689,7 @@ class Database:
         return d
 
     def get_photo_by_uuid(self, uuid: str) -> dict | None:
-        row = self.conn.execute(
-            "SELECT * FROM photos WHERE uuid = ?", (uuid,)
-        ).fetchone()
+        row = self.conn.execute("SELECT * FROM photos WHERE uuid = ?", (uuid,)).fetchone()
         if not row:
             return None
         d = _row_to_dict(row)
@@ -651,9 +699,7 @@ class Database:
         return d
 
     def get_photo_by_flickr_id(self, flickr_id: str) -> dict | None:
-        row = self.conn.execute(
-            "SELECT * FROM photos WHERE flickr_id = ?", (flickr_id,)
-        ).fetchone()
+        row = self.conn.execute("SELECT * FROM photos WHERE flickr_id = ?", (flickr_id,)).fetchone()
         if not row:
             return None
         d = _row_to_dict(row)
@@ -689,8 +735,7 @@ class Database:
                SET finished_at = ?, status = ?, photos_seen = ?,
                    photos_new = ?, photos_updated = ?, error_message = ?
                WHERE id = ?""",
-            (_now_iso(), status, photos_seen, photos_new, photos_updated,
-             error_message, run_id),
+            (_now_iso(), status, photos_seen, photos_new, photos_updated, error_message, run_id),
         )
         self.conn.commit()
 
@@ -733,11 +778,11 @@ class Database:
         row = self.conn.execute(
             """SELECT privacy_state, apple_persons, apple_unknown_faces, apple_named_faces
                FROM photos WHERE id = ?""",
-            (photo_id,)
+            (photo_id,),
         ).fetchone()
         if not row:
             return False
-        persons   = _json_loads_safe(row["apple_persons"])
+        persons = _json_loads_safe(row["apple_persons"])
         has_faces = bool(persons) or (row["apple_unknown_faces"] or 0) > 0
         new_state = "needs_review" if has_faces else "candidate_public"
         self.conn.execute(
@@ -811,7 +856,9 @@ class Database:
         )
         self.conn.commit()
 
-    def set_album_flickr_set_id(self, album_id: int, flickr_set_id: str, flickr_set_url: str = "") -> None:
+    def set_album_flickr_set_id(
+        self, album_id: int, flickr_set_id: str, flickr_set_url: str = ""
+    ) -> None:
         """Store the Flickr photoset ID after creating a new photoset."""
         self.conn.execute(
             "UPDATE albums SET flickr_set_id = ?, flickr_set_url = ?, updated_at = ? WHERE id = ?",
@@ -988,10 +1035,10 @@ class Database:
         if not row or row["total"] is None:
             return {"total": 0, "title": 0, "description": 0, "tags": 0}
         return {
-            "total":       row["total"]       or 0,
-            "title":       row["title"]       or 0,
+            "total": row["total"] or 0,
+            "title": row["title"] or 0,
             "description": row["description"] or 0,
-            "tags":        row["tags"]        or 0,
+            "tags": row["tags"] or 0,
         }
 
     # -----------------------------------------------------------------------
@@ -1008,11 +1055,11 @@ class Database:
         - otherwise                  → insert new
         Does NOT commit; caller is responsible for committing.
         """
-        photo_id  = proposal["photo_id"]
-        field     = proposal["field"]
-        source    = proposal["source"]
-        target    = proposal["target"]
-        new_hash  = proposal["source_hash_at_creation"]
+        photo_id = proposal["photo_id"]
+        field = proposal["field"]
+        source = proposal["source"]
+        target = proposal["target"]
+        new_hash = proposal["source_hash_at_creation"]
 
         existing = self.conn.execute(
             """SELECT id, status, source_hash_at_creation
@@ -1042,9 +1089,14 @@ class Database:
                 source_hash_at_creation, target_hash_at_creation, status, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
             (
-                photo_id, field, proposal.get("proposed_value"),
-                source, target, proposal["conflict_type"],
-                new_hash, proposal.get("target_hash_at_creation"),
+                photo_id,
+                field,
+                proposal.get("proposed_value"),
+                source,
+                target,
+                proposal["conflict_type"],
+                new_hash,
+                proposal.get("target_hash_at_creation"),
                 proposal["created_at"],
             ),
         )
@@ -1095,8 +1147,8 @@ class Database:
         result = []
         for r in rows:
             d = dict(r)
-            d["flickr_tags"]  = _json_loads_safe(d.get("flickr_tags"))
-            d["photos_tags"]  = _json_loads_safe(d.get("photos_tags"))
+            d["flickr_tags"] = _json_loads_safe(d.get("flickr_tags"))
+            d["photos_tags"] = _json_loads_safe(d.get("photos_tags"))
             # proposed_value is JSON for tags, plain text for title/description
             if d.get("field") == "tags":
                 d["proposed_value"] = _json_loads_safe(d.get("proposed_value"))
@@ -1105,9 +1157,7 @@ class Database:
             result.append(d)
         return result
 
-    def resolve_proposal(
-        self, proposal_id: int, status: str, note: str | None = None
-    ) -> None:
+    def resolve_proposal(self, proposal_id: int, status: str, note: str | None = None) -> None:
         assert status in ("rejected", "applied", "superseded", "failed")
         self.conn.execute(
             """UPDATE metadata_proposals
@@ -1160,8 +1210,7 @@ class Database:
 
         def norm(tag: str) -> str:
             return "".join(
-                c for c in unicodedata.normalize("NFC", tag.strip().casefold())
-                if c.isalnum()
+                c for c in unicodedata.normalize("NFC", tag.strip().casefold()) if c.isalnum()
             )
 
         now = datetime.now(timezone.utc).isoformat()
@@ -1217,10 +1266,10 @@ class Database:
         ).fetchall()
         counts = {r["conflict_type"]: r["n"] for r in rows}
         return {
-            "total":        sum(counts.values()),
+            "total": sum(counts.values()),
             "non_conflict": counts.get("non_conflict", 0),
-            "divergence":   counts.get("divergence",   0),
-            "collision":    counts.get("collision",    0),
+            "divergence": counts.get("divergence", 0),
+            "collision": counts.get("collision", 0),
         }
 
     # -----------------------------------------------------------------------
@@ -1254,8 +1303,8 @@ class Database:
             screenshot_counts: dict[str, int] = {}
             for label, condition in [
                 ("screenshot_unreviewed", "is_screenshot = 1 AND privacy_state = 'auto_private'"),
-                ("screenshot_public",     "is_screenshot = 1 AND privacy_state = 'approved_public'"),
-                ("screenshot_private",    "is_screenshot = 1 AND privacy_state = 'keep_private'"),
+                ("screenshot_public", "is_screenshot = 1 AND privacy_state = 'approved_public'"),
+                ("screenshot_private", "is_screenshot = 1 AND privacy_state = 'keep_private'"),
             ]:
                 row = self.conn.execute(
                     f"SELECT COUNT(*) AS n FROM photos WHERE {condition}"
@@ -1292,6 +1341,7 @@ class Database:
                    FROM photos"""
             ).fetchone()
             now = datetime.now(timezone.utc)
+
             def _age_hours(ts: str | None) -> float | None:
                 if not ts:
                     return None
@@ -1302,8 +1352,9 @@ class Database:
                     return (now - dt).total_seconds() / 3600
                 except Exception:
                     return None
-            result["flickr_cache_age_hours"]  = _age_hours(row["flickr_ts"])  if row else None
-            result["photos_cache_age_hours"]  = _age_hours(row["photos_ts"])  if row else None
+
+            result["flickr_cache_age_hours"] = _age_hours(row["flickr_ts"]) if row else None
+            result["photos_cache_age_hours"] = _age_hours(row["photos_ts"]) if row else None
         except Exception:
             result["flickr_cache_age_hours"] = None
             result["photos_cache_age_hours"] = None

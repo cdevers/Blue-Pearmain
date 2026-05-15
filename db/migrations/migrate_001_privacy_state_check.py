@@ -12,15 +12,19 @@ Usage:
 
 import argparse
 import sqlite3
-import sys
 from pathlib import Path
 
 import yaml
 
 VALID_STATES = {
-    'auto_private', 'needs_review', 'candidate_public',
-    'approved_public', 'keep_private', 'already_public',
-    'skipped', 'duplicate_flickr',
+    "auto_private",
+    "needs_review",
+    "candidate_public",
+    "approved_public",
+    "keep_private",
+    "already_public",
+    "skipped",
+    "duplicate_flickr",
 }
 
 
@@ -32,15 +36,16 @@ def run(db_path: str, dry_run: bool = False):
     schema = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='photos'"
     ).fetchone()
-    if schema and 'CHECK' in (schema['sql'] or ''):
+    if schema and "CHECK" in (schema["sql"] or ""):
         print("CHECK constraint already present — nothing to do.")
         conn.close()
         return
 
     # Audit: find any rows with invalid states first
     rows = conn.execute("SELECT id, privacy_state FROM photos").fetchall()
-    invalid = [(r['id'], r['privacy_state']) for r in rows
-               if r['privacy_state'] not in VALID_STATES]
+    invalid = [
+        (r["id"], r["privacy_state"]) for r in rows if r["privacy_state"] not in VALID_STATES
+    ]
 
     if invalid:
         print(f"WARNING: {len(invalid)} rows have invalid privacy_state values:")
@@ -52,8 +57,7 @@ def run(db_path: str, dry_run: bool = False):
         if not dry_run:
             for row_id, _ in invalid:
                 conn.execute(
-                    "UPDATE photos SET privacy_state = 'needs_review' WHERE id = ?",
-                    (row_id,)
+                    "UPDATE photos SET privacy_state = 'needs_review' WHERE id = ?", (row_id,)
                 )
             conn.commit()
             print(f"Reset {len(invalid)} rows.")
@@ -79,8 +83,9 @@ def run(db_path: str, dry_run: bool = False):
 
         # Execute just the CREATE TABLE photos statement
         import re
+
         match = re.search(
-            r'(CREATE TABLE IF NOT EXISTS photos\s*\(.*?\);)',
+            r"(CREATE TABLE IF NOT EXISTS photos\s*\(.*?\);)",
             new_schema,
             re.DOTALL,
         )
@@ -117,7 +122,7 @@ def run(db_path: str, dry_run: bool = False):
 
 def main():
     parser = argparse.ArgumentParser(description="Blue Pearmain DB migration 001")
-    parser.add_argument("--config",  default="config/config.yml")
+    parser.add_argument("--config", default="config/config.yml")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 

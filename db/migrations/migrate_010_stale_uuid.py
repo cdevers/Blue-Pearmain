@@ -98,9 +98,7 @@ def run(db_path: str, dry_run: bool = False) -> None:
     # ------------------------------------------------------------------
     existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(photos)").fetchall()}
     if "uuid_stale" not in existing_cols:
-        conn.execute(
-            "ALTER TABLE photos ADD COLUMN uuid_stale INTEGER NOT NULL DEFAULT 0"
-        )
+        conn.execute("ALTER TABLE photos ADD COLUMN uuid_stale INTEGER NOT NULL DEFAULT 0")
 
     # ------------------------------------------------------------------
     # 3. Record migration
@@ -116,7 +114,7 @@ def run(db_path: str, dry_run: bool = False) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Blue Pearmain DB migration 010")
-    parser.add_argument("--config",  default="config/config.yml")
+    parser.add_argument("--config", default="config/config.yml")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 

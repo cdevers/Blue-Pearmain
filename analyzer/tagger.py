@@ -20,21 +20,24 @@ from typing import Any
 # Apple labels we don't want to surface as Flickr tags — too generic
 # or privacy-sensitive (people-related ones handled separately)
 LABEL_BLOCKLIST = {
-    "people", "person", "crowd", "audience",
-    "performer",          # too vague
-    "art",                # too vague
-    "document",           # not useful
-    "machine",            # too vague
-    "light",              # too vague
-    "line",               # too vague
-    "frame",              # too vague
-    "path",               # too vague
-    "wall",               # too vague
-    "window",             # too vague
-    "door",               # too vague
-    "clothing",           # too vague — specific items OK
-    "outdoor",            # redundant with other labels
-    "land",               # too vague
+    "people",
+    "person",
+    "crowd",
+    "audience",
+    "performer",  # too vague
+    "art",  # too vague
+    "document",  # not useful
+    "machine",  # too vague
+    "light",  # too vague
+    "line",  # too vague
+    "frame",  # too vague
+    "path",  # too vague
+    "wall",  # too vague
+    "window",  # too vague
+    "door",  # too vague
+    "clothing",  # too vague — specific items OK
+    "outdoor",  # redundant with other labels
+    "land",  # too vague
 }
 
 # Labels to rename for cleaner Flickr tags (apple_label -> flickr_tag)
@@ -101,9 +104,7 @@ def propose_tags(photo: dict[str, Any], include_camera: bool = False) -> list[st
 
     # 5. Camera tag (optional)
     if include_camera:
-        camera = photo.get("camera_model") or (
-            (photo.get("exif_info") or {}).get("camera_model")
-        )
+        camera = photo.get("camera_model") or ((photo.get("exif_info") or {}).get("camera_model"))
         if camera:
             tags.add(camera.lower().replace(" ", "-"))
 
@@ -129,6 +130,7 @@ def merge_tags(existing: list[str], proposed: list[str]) -> list[str]:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_list(photo: dict, field: str) -> list:
     val = photo.get(field) or []
     if isinstance(val, str):
@@ -142,14 +144,11 @@ def _get_list(photo: dict, field: str) -> list:
 def _get_labels(photo: dict) -> list[str]:
     """Get Apple ML labels from either osxphotos or flat db format."""
     labels = (
-        photo.get("labels")
-        or photo.get("labels_normalized")
-        or photo.get("apple_labels")
-        or []
+        photo.get("labels") or photo.get("labels_normalized") or photo.get("apple_labels") or []
     )
     if isinstance(labels, str):
         try:
             labels = json.loads(labels)
         except Exception:
             labels = []
-    return [str(l) for l in labels if l]
+    return [str(lbl) for lbl in labels if lbl]

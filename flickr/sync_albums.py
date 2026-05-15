@@ -26,10 +26,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Sync Apple Photos album membership → Flickr photosets"
     )
-    parser.add_argument("--config",  default="config/config.yml")
-    parser.add_argument("--dry-run", action="store_true", help="Show what would be pushed, don't write")
-    parser.add_argument("--album",   default=None,        help="Sync only this album name")
-    parser.add_argument("--limit",   type=int, default=None)
+    parser.add_argument("--config", default="config/config.yml")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would be pushed, don't write"
+    )
+    parser.add_argument("--album", default=None, help="Sync only this album name")
+    parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -49,6 +51,7 @@ def main() -> int:
 
     try:
         from db.db import Database
+
         db = Database(Path(config["database"]["path"]).expanduser())
     except Exception as e:
         log.error("Cannot open database: %s", e)
@@ -56,6 +59,7 @@ def main() -> int:
 
     try:
         from flickr.flickr_client import FlickrClient
+
         flickr = FlickrClient.from_config(config)
     except Exception as e:
         log.error("Cannot initialise Flickr client: %s", e)
@@ -79,16 +83,18 @@ def main() -> int:
     from flickr.album_pusher import push_photo_to_albums
 
     albums_before = _count_created_sets(db)
-    added   = 0
+    added = 0
     skipped = 0
-    failed  = 0
+    failed = 0
 
     for photo_id in unique_photos:
         if args.dry_run:
             photo = db.get_photo(photo_id)
             flickr_id = photo.get("flickr_id") if photo else None
             if flickr_id:
-                log.info("[dry-run] would push photo_id=%s flickr_id=%s to albums", photo_id, flickr_id)
+                log.info(
+                    "[dry-run] would push photo_id=%s flickr_id=%s to albums", photo_id, flickr_id
+                )
                 skipped += 1
             else:
                 skipped += 1
@@ -105,10 +111,7 @@ def main() -> int:
 
     albums_created = _count_created_sets(db) - albums_before
     print(
-        f"albums created={albums_created}  "
-        f"photos added={added}  "
-        f"skipped={skipped}  "
-        f"failed={failed}"
+        f"albums created={albums_created}  photos added={added}  skipped={skipped}  failed={failed}"
     )
 
     sync_album_titles(db, flickr, dry_run=args.dry_run)
@@ -133,7 +136,9 @@ def sync_album_titles(db, flickr, dry_run: bool = False) -> dict:
     updated = 0
     for row in rows:
         if dry_run:
-            log.info("[dry-run] would update photoset title %r → %r", row["flickr_set_id"], row["name"])
+            log.info(
+                "[dry-run] would update photoset title %r → %r", row["flickr_set_id"], row["name"]
+            )
             updated += 1
             continue
         try:

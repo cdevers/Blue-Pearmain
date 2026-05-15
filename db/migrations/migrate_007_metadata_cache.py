@@ -48,9 +48,10 @@ def run(db_path: str, dry_run: bool = False) -> None:
 
     def already_applied(name: str) -> bool:
         try:
-            return conn.execute(
-                "SELECT id FROM schema_migrations WHERE name = ?", (name,)
-            ).fetchone() is not None
+            return (
+                conn.execute("SELECT id FROM schema_migrations WHERE name = ?", (name,)).fetchone()
+                is not None
+            )
         except Exception:
             return False
 
@@ -61,27 +62,25 @@ def run(db_path: str, dry_run: bool = False) -> None:
         )
         conn.commit()
 
-    existing_cols = {
-        r[1] for r in conn.execute("PRAGMA table_info(photos)").fetchall()
-    }
+    existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(photos)").fetchall()}
 
     # ------------------------------------------------------------------
     # 1. New columns on photos
     # ------------------------------------------------------------------
     new_columns = [
-        ("flickr_title",             "TEXT"),
-        ("flickr_description",       "TEXT"),
-        ("flickr_tags",              "TEXT"),
-        ("flickr_tags_hash",         "TEXT"),
-        ("flickr_last_updated",      "TEXT"),
-        ("photos_title",             "TEXT"),
-        ("photos_description",       "TEXT"),
-        ("photos_tags",              "TEXT"),
-        ("photos_tags_hash",         "TEXT"),
-        ("meta_synced_flickr_at",    "TEXT"),
-        ("meta_synced_photos_at",    "TEXT"),
-        ("meta_last_harmonized_at",  "TEXT"),
-        ("tags_truncated_for_flickr","INTEGER DEFAULT 0"),
+        ("flickr_title", "TEXT"),
+        ("flickr_description", "TEXT"),
+        ("flickr_tags", "TEXT"),
+        ("flickr_tags_hash", "TEXT"),
+        ("flickr_last_updated", "TEXT"),
+        ("photos_title", "TEXT"),
+        ("photos_description", "TEXT"),
+        ("photos_tags", "TEXT"),
+        ("photos_tags_hash", "TEXT"),
+        ("meta_synced_flickr_at", "TEXT"),
+        ("meta_synced_photos_at", "TEXT"),
+        ("meta_last_harmonized_at", "TEXT"),
+        ("tags_truncated_for_flickr", "INTEGER DEFAULT 0"),
     ]
 
     for col, coltype in new_columns:
@@ -97,9 +96,7 @@ def run(db_path: str, dry_run: bool = False) -> None:
     # 2. metadata_proposals table
     # ------------------------------------------------------------------
     existing_tables = {
-        r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
+        r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     }
 
     if "metadata_proposals" not in existing_tables:
@@ -147,15 +144,13 @@ def run(db_path: str, dry_run: bool = False) -> None:
     # 3. Indexes on photos for new columns
     # ------------------------------------------------------------------
     existing_indexes = {
-        r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='index'"
-        ).fetchall()
+        r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
     }
 
     new_indexes = {
-        "idx_photos_flickr_tags_hash":  "CREATE INDEX idx_photos_flickr_tags_hash ON photos(flickr_tags_hash)",
-        "idx_photos_photos_tags_hash":  "CREATE INDEX idx_photos_photos_tags_hash ON photos(photos_tags_hash)",
-        "idx_photos_meta_harmonized":   "CREATE INDEX idx_photos_meta_harmonized  ON photos(meta_last_harmonized_at)",
+        "idx_photos_flickr_tags_hash": "CREATE INDEX idx_photos_flickr_tags_hash ON photos(flickr_tags_hash)",
+        "idx_photos_photos_tags_hash": "CREATE INDEX idx_photos_photos_tags_hash ON photos(photos_tags_hash)",
+        "idx_photos_meta_harmonized": "CREATE INDEX idx_photos_meta_harmonized  ON photos(meta_last_harmonized_at)",
     }
 
     for idx_name, ddl in new_indexes.items():
@@ -213,7 +208,7 @@ def run(db_path: str, dry_run: bool = False) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Blue Pearmain DB migration 007")
-    parser.add_argument("--config",  default="config/config.yml")
+    parser.add_argument("--config", default="config/config.yml")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 

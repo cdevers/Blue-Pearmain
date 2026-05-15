@@ -58,25 +58,27 @@ def check_photo(
         flickr_id, status, details
     where status is one of: ok | perm_mismatch | tag_mismatch | both_mismatch | flickr_error
     """
-    flickr_id      = row["flickr_id"]
-    db_state       = row["privacy_state"]
+    flickr_id = row["flickr_id"]
+    db_state = row["privacy_state"]
     db_perms_pushed = row["perms_pushed_flickr"]
-    db_tags_pushed  = row["tags_pushed_flickr"]
-    db_tags         = row["proposed_tags"] or []
+    db_tags_pushed = row["tags_pushed_flickr"]
+    db_tags = row["proposed_tags"] or []
     if isinstance(db_tags, str):
-        try:    db_tags = json.loads(db_tags)
-        except (json.JSONDecodeError, TypeError, ValueError): db_tags = []
+        try:
+            db_tags = json.loads(db_tags)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            db_tags = []
 
     result = {
-        "flickr_id":    flickr_id,
-        "status":       "ok",
-        "row_id":       row["id"],
+        "flickr_id": flickr_id,
+        "status": "ok",
+        "row_id": row["id"],
         "perm_expected": None,
-        "perm_actual":   None,
+        "perm_actual": None,
         "tags_expected": [],
-        "tags_missing":  [],
-        "fixes":         [],
-        "errors":        [],
+        "tags_missing": [],
+        "fixes": [],
+        "errors": [],
     }
 
     try:
@@ -90,12 +92,12 @@ def check_photo(
 
     # --- Permission check ---
     if db_perms_pushed:
-        visibility   = photo.get("visibility", {})
-        flickr_pub   = int(visibility.get("ispublic", 0))
+        visibility = photo.get("visibility", {})
+        flickr_pub = int(visibility.get("ispublic", 0))
         expected_pub = 1 if db_state in ("approved_public", "already_public") else 0
 
         result["perm_expected"] = "public" if expected_pub else "private"
-        result["perm_actual"]   = "public" if flickr_pub  else "private"
+        result["perm_actual"] = "public" if flickr_pub else "private"
 
         if flickr_pub != expected_pub:
             result["status"] = "perm_mismatch"
@@ -115,10 +117,10 @@ def check_photo(
                 flickr_tags.add(t.get("raw", "").lower().strip())
 
         expected_tags = set(t.lower().strip() for t in db_tags if t.strip())
-        missing       = sorted(expected_tags - flickr_tags)
+        missing = sorted(expected_tags - flickr_tags)
 
         result["tags_expected"] = sorted(expected_tags)
-        result["tags_missing"]  = missing
+        result["tags_missing"] = missing
 
         if missing:
             result["status"] = (
@@ -168,12 +170,15 @@ def format_result_line(result: dict, url: str, ts: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description="Blue Pearmain reconciliation")
-    parser.add_argument("--config",           default="config/config.yml")
-    parser.add_argument("--fix",              action="store_true", help="Re-push mismatches")
-    parser.add_argument("--apply-proposals",  action="store_true",
-                        help="Apply pending non-conflict proposals to Photos/Flickr")
-    parser.add_argument("--limit",            type=int, default=500)
-    parser.add_argument("--verbose",          action="store_true")
+    parser.add_argument("--config", default="config/config.yml")
+    parser.add_argument("--fix", action="store_true", help="Re-push mismatches")
+    parser.add_argument(
+        "--apply-proposals",
+        action="store_true",
+        help="Apply pending non-conflict proposals to Photos/Flickr",
+    )
+    parser.add_argument("--limit", type=int, default=500)
+    parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
     setup_logging(args.verbose)
@@ -187,13 +192,16 @@ def main():
     # --apply-proposals: apply pending non-conflict tag proposals and exit
     if args.apply_proposals:
         from flickr.proposal_applier import apply_batch
+
         library_path = str(Path(config.get("photos_library", {}).get("path", "")).expanduser())
         try:
             client = FlickrClient.from_config(config)
         except Exception:
             client = None
         totals = apply_batch(db, library_path, flickr_client=client, limit=args.limit)
-        print(f"applied={totals['applied']}  superseded={totals['superseded']}  failed={totals['failed']}")
+        print(
+            f"applied={totals['applied']}  superseded={totals['superseded']}  failed={totals['failed']}"
+        )
         db.close()
         return 1 if totals["failed"] else 0
 
@@ -202,7 +210,7 @@ def main():
     try:
         client = FlickrClient.from_config(config)
         client.test_login()
-        log.info(f"Flickr auth OK")
+        log.info("Flickr auth OK")
     except Exception as e:
         log.error(f"Flickr auth failed: {e}")
         sys.exit(1)
@@ -216,25 +224,26 @@ def main():
              AND (perms_pushed_flickr = 1 OR tags_pushed_flickr = 1)
            ORDER BY reviewed_at DESC
            LIMIT ?""",
-        (args.limit,)
+        (args.limit,),
     ).fetchall()
 
-    total      = len(rows)
-    ok_count   = 0
+    total = len(rows)
+    ok_count = 0
     mismatch_count = 0
-    error_count    = 0
-    fix_ok_count   = 0
+    error_count = 0
+    fix_ok_count = 0
     fix_fail_count = 0
 
     log.info(f"Checking {total} photos against Flickr...")
 
-    flickr_username = config.get("flickr", {}).get("username") or \
-                      config.get("flickr", {}).get("user_nsid", "")
+    flickr_username = config.get("flickr", {}).get("username") or config.get("flickr", {}).get(
+        "user_nsid", ""
+    )
 
     try:
         for row in rows:
             result = check_photo(client, dict(row), fix=args.fix, verbose=args.verbose)
-            ts  = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
             fid = result["flickr_id"]
             url = f"https://www.flickr.com/photos/{flickr_username}/{fid}"
 
@@ -251,7 +260,7 @@ def main():
 
             else:
                 mismatch_count += 1
-                fix_ok_count   += len(result["fixes"])
+                fix_ok_count += len(result["fixes"])
                 fix_fail_count += len(result["errors"])
                 print(format_result_line(result, url, ts))
                 for msg in result["errors"]:

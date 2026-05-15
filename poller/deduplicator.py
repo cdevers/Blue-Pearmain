@@ -66,6 +66,7 @@ REUPLOAD_KEEPER_PIXEL_RATIO = 1.5
 # Data structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PhotoRow:
     id: int
@@ -111,8 +112,8 @@ class PhotoRow:
 
 @dataclass
 class DuplicateGroup:
-    match_key: str               # "filename|date_taken"
-    group_type: str              # snapbridge | device_upload | uncertain
+    match_key: str  # "filename|date_taken"
+    group_type: str  # snapbridge | device_upload | uncertain
     photos: list[PhotoRow]
     keeper: PhotoRow | None = None
     discards: list[PhotoRow] = field(default_factory=list)
@@ -123,6 +124,7 @@ class DuplicateGroup:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _parse_dt(s: str) -> datetime | None:
     if not s:
@@ -243,7 +245,7 @@ def _classify_group(photos: list[PhotoRow]) -> DuplicateGroup:
         # Keeper = earliest Flickr upload (it got there first, may have more views eventually)
         ranked = sorted(
             photos,
-            key=lambda p: p.date_uploaded_dt.timestamp() if p.date_uploaded_dt else float("inf")
+            key=lambda p: p.date_uploaded_dt.timestamp() if p.date_uploaded_dt else float("inf"),
         )
         keeper = ranked[0]
         discards = ranked[1:]
@@ -268,7 +270,9 @@ def _classify_group(photos: list[PhotoRow]) -> DuplicateGroup:
     notes = (
         f"Uncertain: {len(photos)} photos, "
         f"fingerprints={'same' if len(fingerprints) == 1 else f'{len(fingerprints)} unique'}, "
-        f"upload gap={gap:.0f}min" if gap else f"upload gap=unknown"
+        f"upload gap={gap:.0f}min"
+        if gap
+        else "upload gap=unknown"
     )
     return DuplicateGroup(match_key, "uncertain", photos, None, [], photos, notes)
 
@@ -338,25 +342,27 @@ def _classify_reupload_pair(
     if linked_dt and orphan_dt:
         timestamp_delta_s = int(abs((linked_dt - orphan_dt).total_seconds()))
 
-    notes = json.dumps({
-        "keeper_flickr_id": keeper.flickr_id,
-        "discard_flickr_id": discard.flickr_id,
-        "filename_match": filename_match,
-        "timestamp_delta_s": timestamp_delta_s,
-        "upload_session_gap": upload_session_gap,
-        "dimension_ratio": dimension_ratio,
-        "linked_match_count": linked_match_count,
-        "orphan_match_count": orphan_match_count,
-        "keeper_assumed": keeper_assumed,
-        "summary": (
-            f"{linked.original_filename or '(no filename)'} | "
-            f"{linked.date_taken} | "
-            f"linked flickr_id={linked.flickr_id} → "
-            f"orphan flickr_id={orphan.flickr_id} | "
-            f"gap={upload_session_gap}"
-            + (f" | ratio={dimension_ratio}×" if dimension_ratio else "")
-        ),
-    })
+    notes = json.dumps(
+        {
+            "keeper_flickr_id": keeper.flickr_id,
+            "discard_flickr_id": discard.flickr_id,
+            "filename_match": filename_match,
+            "timestamp_delta_s": timestamp_delta_s,
+            "upload_session_gap": upload_session_gap,
+            "dimension_ratio": dimension_ratio,
+            "linked_match_count": linked_match_count,
+            "orphan_match_count": orphan_match_count,
+            "keeper_assumed": keeper_assumed,
+            "summary": (
+                f"{linked.original_filename or '(no filename)'} | "
+                f"{linked.date_taken} | "
+                f"linked flickr_id={linked.flickr_id} → "
+                f"orphan flickr_id={orphan.flickr_id} | "
+                f"gap={upload_session_gap}"
+                + (f" | ratio={dimension_ratio}×" if dimension_ratio else "")
+            ),
+        }
+    )
 
     return DuplicateGroup(
         match_key=_reupload_match_key(linked.flickr_id or "", orphan.flickr_id or ""),
@@ -372,6 +378,7 @@ def _classify_reupload_pair(
 # ---------------------------------------------------------------------------
 # DB queries
 # ---------------------------------------------------------------------------
+
 
 def _fetch_duplicate_candidates(conn: sqlite3.Connection) -> list[DuplicateGroup]:
     """Return all groups of photos sharing original_filename + date_taken."""
@@ -446,12 +453,16 @@ def _fetch_reupload_candidates(
 
     orphans = [
         PhotoRow(
-            id=r["id"], flickr_id=r["flickr_id"], uuid=r["uuid"],
-            original_filename=r["original_filename"], date_taken=r["date_taken"],
+            id=r["id"],
+            flickr_id=r["flickr_id"],
+            uuid=r["uuid"],
+            original_filename=r["original_filename"],
+            date_taken=r["date_taken"],
             date_added_photos=r["date_added_photos"],
             date_uploaded_flickr=r["date_uploaded_flickr"],
             fingerprint=r["fingerprint"],
-            width=r["width"], height=r["height"],
+            width=r["width"],
+            height=r["height"],
             privacy_state=r["privacy_state"],
             duplicate_group_id=r["duplicate_group_id"],
         )
@@ -470,12 +481,16 @@ def _fetch_reupload_candidates(
 
     linked_records = [
         PhotoRow(
-            id=r["id"], flickr_id=r["flickr_id"], uuid=r["uuid"],
-            original_filename=r["original_filename"], date_taken=r["date_taken"],
+            id=r["id"],
+            flickr_id=r["flickr_id"],
+            uuid=r["uuid"],
+            original_filename=r["original_filename"],
+            date_taken=r["date_taken"],
             date_added_photos=r["date_added_photos"],
             date_uploaded_flickr=r["date_uploaded_flickr"],
             fingerprint=r["fingerprint"],
-            width=r["width"], height=r["height"],
+            width=r["width"],
+            height=r["height"],
             privacy_state=r["privacy_state"],
             duplicate_group_id=r["duplicate_group_id"],
         )
@@ -538,18 +553,26 @@ def _fetch_reupload_candidates(
 
         # Skip orphans already in a group
         if orphan.duplicate_group_id:
-            conflicts.append({"flickr_id": orphan.flickr_id,
-                               "existing_group_id": orphan.duplicate_group_id,
-                               "side": "orphan"})
+            conflicts.append(
+                {
+                    "flickr_id": orphan.flickr_id,
+                    "existing_group_id": orphan.duplicate_group_id,
+                    "side": "orphan",
+                }
+            )
             continue
 
         # Filter already-grouped linked records; surface them as conflicts
         ungrouped: list[PhotoRow] = []
         for p in candidates:
             if p.duplicate_group_id:
-                conflicts.append({"flickr_id": p.flickr_id,
-                                   "existing_group_id": p.duplicate_group_id,
-                                   "side": "linked"})
+                conflicts.append(
+                    {
+                        "flickr_id": p.flickr_id,
+                        "existing_group_id": p.duplicate_group_id,
+                        "side": "linked",
+                    }
+                )
             else:
                 ungrouped.append(p)
 
@@ -596,13 +619,19 @@ def _fetch_reupload_candidates(
 
 def _write_groups(conn: sqlite3.Connection, groups: list[DuplicateGroup]) -> dict[str, int]:
     """Write duplicate_groups rows and update photos. Returns type counts."""
-    counts: dict[str, int] = {"snapbridge": 0, "device_upload": 0, "uncertain": 0, "not_duplicate": 0}
+    counts: dict[str, int] = {
+        "snapbridge": 0,
+        "device_upload": 0,
+        "uncertain": 0,
+        "not_duplicate": 0,
+    }
 
     for group in groups:
         is_not_duplicate = group.group_type == "not_duplicate"
 
         # Upsert into duplicate_groups; not_duplicate groups are immediately resolved
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO duplicate_groups (match_key, group_type, photo_count, notes, resolved)
             VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(match_key) DO UPDATE SET
@@ -611,8 +640,15 @@ def _write_groups(conn: sqlite3.Connection, groups: list[DuplicateGroup]) -> dic
                 notes       = excluded.notes,
                 resolved    = excluded.resolved,
                 updated_at  = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-        """, (group.match_key, group.group_type, len(group.photos), group.notes,
-              1 if is_not_duplicate else 0))
+        """,
+            (
+                group.match_key,
+                group.group_type,
+                len(group.photos),
+                group.notes,
+                1 if is_not_duplicate else 0,
+            ),
+        )
 
         group_id = conn.execute(
             "SELECT id FROM duplicate_groups WHERE match_key = ?", (group.match_key,)
@@ -622,25 +658,25 @@ def _write_groups(conn: sqlite3.Connection, groups: list[DuplicateGroup]) -> dic
         if group.keeper:
             conn.execute(
                 "UPDATE duplicate_groups SET keeper_id = ? WHERE id = ?",
-                (group.keeper.id, group_id)
+                (group.keeper.id, group_id),
             )
             conn.execute(
                 "UPDATE photos SET duplicate_group_id = ?, duplicate_role = ? WHERE id = ?",
-                (group_id, "keeper", group.keeper.id)
+                (group_id, "keeper", group.keeper.id),
             )
 
         # Set discards
         for p in group.discards:
             conn.execute(
                 "UPDATE photos SET duplicate_group_id = ?, duplicate_role = ? WHERE id = ?",
-                (group_id, "discard", p.id)
+                (group_id, "discard", p.id),
             )
 
         # Set review
         for p in group.review:
             conn.execute(
                 "UPDATE photos SET duplicate_group_id = ?, duplicate_role = ? WHERE id = ?",
-                (group_id, "review", p.id)
+                (group_id, "review", p.id),
             )
 
         counts[group.group_type] = counts.get(group.group_type, 0) + 1
@@ -660,20 +696,19 @@ def _delete_flickr_discards(
                     flickr_client.delete_photo(photo.flickr_id)
                     conn.execute(
                         "UPDATE photos SET privacy_state = 'duplicate_flickr' WHERE id = ?",
-                        (photo.id,)
+                        (photo.id,),
                     )
                     log.info("Deleted Flickr photo %s (%s)", photo.flickr_id, group.match_key)
                     deleted += 1
                 except Exception as exc:
-                    log.error(
-                        "Failed to delete %s: %s", photo.flickr_id, exc
-                    )
+                    log.error("Failed to delete %s: %s", photo.flickr_id, exc)
     return deleted
 
 
 # ---------------------------------------------------------------------------
 # Delete discards
 # ---------------------------------------------------------------------------
+
 
 def _delete_discards(
     conn: sqlite3.Connection,
@@ -712,7 +747,9 @@ def _delete_discards(
             summary = json.loads(r["notes"]).get("summary", "") if r["notes"] else ""
         except (json.JSONDecodeError, TypeError):
             summary = r["notes"] or ""
-        print(f"  flickr_id={r['flickr_id']}  group_type={r['group_type']}  privacy={r['privacy_state']}")
+        print(
+            f"  flickr_id={r['flickr_id']}  group_type={r['group_type']}  privacy={r['privacy_state']}"
+        )
         if summary:
             print(f"    {summary}")
 
@@ -722,9 +759,9 @@ def _delete_discards(
 
     deleted = already_gone = errors = 0
     for r in rows:
-        photo_id  = r["id"]
+        photo_id = r["id"]
         flickr_id = r["flickr_id"]
-        group_id  = r["group_id"]
+        group_id = r["group_id"]
         try:
             client.delete_photo(flickr_id)
             conn.execute(
@@ -760,6 +797,7 @@ def _delete_discards(
 # Report
 # ---------------------------------------------------------------------------
 
+
 def _print_report(groups: list[DuplicateGroup]) -> None:
     by_type: dict[str, list[DuplicateGroup]] = {}
     for g in groups:
@@ -779,7 +817,8 @@ def _print_report(groups: list[DuplicateGroup]) -> None:
         for g in glist[:10]:  # show up to 10 per type
             keeper_label = (
                 f"keeper={g.keeper.uuid or g.keeper.flickr_id or g.keeper.id}"
-                if g.keeper else "no keeper assigned"
+                if g.keeper
+                else "no keeper assigned"
             )
             print(f"  {g.match_key}")
             print(f"    {keeper_label}")
@@ -808,7 +847,8 @@ def _print_reupload_report(
     for gtype, glist in sorted(by_type.items()):
         pct = 100.0 * len(glist) / total if total else 0.0
         label = (
-            "auto-grouped" if gtype == "reupload"
+            "auto-grouped"
+            if gtype == "reupload"
             else "flagged — small gap, timestamp-only, or collision"
         )
         print(f"  {gtype:<22} {len(glist):>5} pairs  {pct:5.1f}%   ({label})")
@@ -825,8 +865,10 @@ def _print_reupload_report(
                     print(f"    keeper:  flickr_id={g.keeper.flickr_id}  uuid={g.keeper.uuid}")
                 if g.discards:
                     gap = data.get("upload_session_gap", "?")
-                    print(f"    discard: flickr_id={g.discards[0].flickr_id}"
-                          f"  upload_session_gap={gap}")
+                    print(
+                        f"    discard: flickr_id={g.discards[0].flickr_id}"
+                        f"  upload_session_gap={gap}"
+                    )
             except (json.JSONDecodeError, KeyError):
                 print(f"  {g.match_key}  (notes unparseable)")
         if not verbose and len(uncertain) > 10:
@@ -835,9 +877,11 @@ def _print_reupload_report(
     if conflicts:
         print(f"\n── CONFLICTS ({len(conflicts)} records already in a group) " + "─" * 30)
         for c in conflicts[:20]:
-            print(f"  flickr_id={c['flickr_id']}"
-                  f"  already in duplicate_group_id={c['existing_group_id']}"
-                  f"  ({c['side']}) — skipped")
+            print(
+                f"  flickr_id={c['flickr_id']}"
+                f"  already in duplicate_group_id={c['existing_group_id']}"
+                f"  ({c['side']}) — skipped"
+            )
         if len(conflicts) > 20:
             print(f"  ... and {len(conflicts) - 20} more")
 
@@ -848,25 +892,48 @@ def _print_reupload_report(
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="config/config.yml")
-    parser.add_argument("--dry-run", action="store_true", default=True,
-                        help="Print findings without writing (default)")
-    parser.add_argument("--write", action="store_true",
-                        help="Write duplicate groups to DB")
-    parser.add_argument("--confirm", action="store_true",
-                        help="Delete discard photos from Flickr (requires --write)")
-    parser.add_argument("--flickr", action="store_true",
-                        help="Detect Flickr re-upload duplicates (orphan paired with linked record)")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="Maximum pairs to write (recommended for first live runs)")
-    parser.add_argument("--include-approved", action="store_true",
-                        help="Include approved_public Flickr-only records in detection (catches orientation duplicates)")
-    parser.add_argument("--delete-discards", action="store_true",
-                        help="Act on already-grouped discards: call flickr.photos.delete on approved_public discards")
-    parser.add_argument("--apply", action="store_true",
-                        help="Execute deletions (default is dry-run). Requires --delete-discards.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=True,
+        help="Print findings without writing (default)",
+    )
+    parser.add_argument("--write", action="store_true", help="Write duplicate groups to DB")
+    parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Delete discard photos from Flickr (requires --write)",
+    )
+    parser.add_argument(
+        "--flickr",
+        action="store_true",
+        help="Detect Flickr re-upload duplicates (orphan paired with linked record)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Maximum pairs to write (recommended for first live runs)",
+    )
+    parser.add_argument(
+        "--include-approved",
+        action="store_true",
+        help="Include approved_public Flickr-only records in detection (catches orientation duplicates)",
+    )
+    parser.add_argument(
+        "--delete-discards",
+        action="store_true",
+        help="Act on already-grouped discards: call flickr.photos.delete on approved_public discards",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Execute deletions (default is dry-run). Requires --delete-discards.",
+    )
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -902,11 +969,14 @@ def main() -> None:
 
     if args.flickr:
         if args.confirm:
-            log.error("--confirm is not supported with --flickr (use --flickr --write to group only)")
+            log.error(
+                "--confirm is not supported with --flickr (use --flickr --write to group only)"
+            )
             sys.exit(1)
         if args.delete_discards:
             log.info("Loading Flickr client for delete-discards …")
             from flickr.flickr_client import FlickrClient
+
             client = FlickrClient.from_config(config)
             dry_run = not args.apply
             _delete_discards(conn, client, dry_run=dry_run)
@@ -967,6 +1037,7 @@ def main() -> None:
         log.info("Loading Flickr client for deletions …")
         sys.path.insert(0, ".")
         from flickr.flickr_client import FlickrClient
+
         flickr_client = FlickrClient.from_config(config)
         conn.execute("BEGIN")
         try:

@@ -55,9 +55,7 @@ def run(db_path: str, dry_run: bool = False) -> None:
     conn.execute("BEGIN")
 
     if "merged_into_id" not in existing_cols:
-        conn.execute(
-            "ALTER TABLE photos ADD COLUMN merged_into_id INTEGER REFERENCES photos(id)"
-        )
+        conn.execute("ALTER TABLE photos ADD COLUMN merged_into_id INTEGER REFERENCES photos(id)")
 
     conn.execute(
         "INSERT OR IGNORE INTO schema_migrations (name, applied_at) VALUES (?, ?)",
@@ -84,4 +82,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

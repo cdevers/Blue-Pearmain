@@ -48,6 +48,7 @@ CREATE INDEX IF NOT EXISTS idx_photo_albums_pending ON photo_albums(flickr_pushe
 
 def run(db_path: Path) -> None:
     from db.db import Database
+
     db = Database(db_path)
 
     already = db.conn.execute(

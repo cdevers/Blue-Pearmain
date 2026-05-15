@@ -47,6 +47,7 @@ CREATE INDEX IF NOT EXISTS idx_metadata_conflicts_unresolved
 
 def run(db_path: Path) -> None:
     from db.db import Database
+
     db = Database(db_path)
 
     already = db.conn.execute(

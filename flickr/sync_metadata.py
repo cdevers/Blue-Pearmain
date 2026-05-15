@@ -35,21 +35,26 @@ log = logging.getLogger("blue-pearmain.sync_metadata")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Diff DB metadata caches and generate proposals"
+    parser = argparse.ArgumentParser(description="Diff DB metadata caches and generate proposals")
+    parser.add_argument("--config", default="config/config.yml")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Classify and log; do not write proposals"
     )
-    parser.add_argument("--config",          default="config/config.yml")
-    parser.add_argument("--dry-run",         action="store_true",
-                        help="Classify and log; do not write proposals")
-    parser.add_argument("--limit",           type=int, default=0,
-                        help="Process at most N photos (0 = all drift-filtered)")
-    parser.add_argument("--photo-id",        type=int, default=None,
-                        help="Process only this DB photo_id")
-    parser.add_argument("--refresh-flickr",  action="store_true",
-                        help="Re-fetch Flickr metadata via API before syncing")
-    parser.add_argument("--force",           action="store_true",
-                        help="Ignore drift filter; process all photos with warm caches")
-    parser.add_argument("--verbose",         action="store_true")
+    parser.add_argument(
+        "--limit", type=int, default=0, help="Process at most N photos (0 = all drift-filtered)"
+    )
+    parser.add_argument("--photo-id", type=int, default=None, help="Process only this DB photo_id")
+    parser.add_argument(
+        "--refresh-flickr",
+        action="store_true",
+        help="Re-fetch Flickr metadata via API before syncing",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Ignore drift filter; process all photos with warm caches",
+    )
+    parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
     level = logging.DEBUG if args.verbose else logging.INFO
@@ -68,6 +73,7 @@ def main() -> int:
 
     try:
         from db.db import Database
+
         db = Database(Path(config["database"]["path"]).expanduser())
     except Exception as e:
         log.error("Cannot open database: %s", e)
@@ -98,6 +104,7 @@ def main() -> int:
     )
 
     from flickr.metadata_puller import run_sync_engine
+
     totals = run_sync_engine(db, photo_ids, dry_run=args.dry_run, verbose=args.verbose)
 
     suffix = "  (dry-run)" if args.dry_run else ""
@@ -120,7 +127,10 @@ def _select_drift_filtered(db, limit: int, force: bool = False) -> list[int]:
     When force=True, skip the harmonized_at staleness check and return all
     photos with warm caches.
     """
-    drift_clause = "" if force else """
+    drift_clause = (
+        ""
+        if force
+        else """
           AND (
             meta_last_harmonized_at IS NULL
             OR meta_last_harmonized_at < MAX(
@@ -128,6 +138,7 @@ def _select_drift_filtered(db, limit: int, force: bool = False) -> list[int]:
                 meta_synced_photos_at
             )
           )"""
+    )
     query = f"""
         SELECT id FROM photos
         WHERE flickr_id IS NOT NULL
@@ -150,21 +161,28 @@ def _refresh_flickr_cache(db, config: dict, args) -> int:
     log.info("--refresh-flickr: fetching live Flickr metadata before sync engine")
     try:
         from flickr.flickr_client import FlickrClient
+
         flickr = FlickrClient.from_config(config)
     except Exception as e:
         log.error("Cannot initialise Flickr client: %s", e)
         return 2
 
-    photo_ids = _select_drift_filtered(db, limit=args.limit, force=args.force) if not args.photo_id else [args.photo_id]
+    photo_ids = (
+        _select_drift_filtered(db, limit=args.limit, force=args.force)
+        if not args.photo_id
+        else [args.photo_id]
+    )
     if not photo_ids:
         return 0
 
     from flickr.metadata_puller import pull_batch
+
     library_path = str(Path(config.get("photos_library", {}).get("path", "")).expanduser())
     totals = pull_batch(db, flickr, photo_ids, library_path=library_path, dry_run=True)
     log.info(
         "--refresh-flickr done: cache_hits=%d/%d",
-        totals.get("cache_hits", 0), len(photo_ids),
+        totals.get("cache_hits", 0),
+        len(photo_ids),
     )
     return 0
 

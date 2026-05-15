@@ -28,8 +28,8 @@ from db.db import Database, haversine_m
 # normalise_dt
 # ---------------------------------------------------------------------------
 
-class TestNormaliseDt(unittest.TestCase):
 
+class TestNormaliseDt(unittest.TestCase):
     def test_iso8601_with_offset(self):
         self.assertEqual(
             normalise_dt("2026-04-08T16:46:20.047000-04:00"),
@@ -114,14 +114,17 @@ class TestNormaliseDtPlus2(unittest.TestCase):
 # normalise_dt_localise
 # ---------------------------------------------------------------------------
 
+
 class TestNormaliseDtLocalise(unittest.TestCase):
     """normalise_dt_localise converts tz-aware strings to a target tz before stripping."""
 
     from datetime import timezone, timedelta
+
     EDT = timezone(timedelta(hours=-4))
 
     def test_naive_flickr_format_unchanged(self):
         from poller.scanner import normalise_dt_localise
+
         self.assertEqual(
             normalise_dt_localise("2020-06-15 18:24:08"),
             "2020-06-15 18:24:08",
@@ -130,6 +133,7 @@ class TestNormaliseDtLocalise(unittest.TestCase):
     def test_utc_offset_converts_to_edt(self):
         # UTC 22:24 == EDT 18:24 (UTC-4); this is the core bug case
         from poller.scanner import normalise_dt_localise
+
         self.assertEqual(
             normalise_dt_localise("2020-06-15T22:24:08.411297+00:00", tz=self.EDT),
             "2020-06-15 18:24:08",
@@ -137,6 +141,7 @@ class TestNormaliseDtLocalise(unittest.TestCase):
 
     def test_edt_offset_keeps_local_hours(self):
         from poller.scanner import normalise_dt_localise
+
         self.assertEqual(
             normalise_dt_localise("2020-06-15T18:24:08.411297-04:00", tz=self.EDT),
             "2020-06-15 18:24:08",
@@ -144,10 +149,12 @@ class TestNormaliseDtLocalise(unittest.TestCase):
 
     def test_none_returns_none(self):
         from poller.scanner import normalise_dt_localise
+
         self.assertIsNone(normalise_dt_localise(None))
 
     def test_subsecond_stripped(self):
         from poller.scanner import normalise_dt_localise
+
         # Sub-second precision is stripped after conversion
         self.assertEqual(
             normalise_dt_localise("2020-06-15T22:24:08.411297+00:00", tz=self.EDT),
@@ -159,8 +166,8 @@ class TestNormaliseDtLocalise(unittest.TestCase):
 # haversine_m
 # ---------------------------------------------------------------------------
 
-class TestHaversine(unittest.TestCase):
 
+class TestHaversine(unittest.TestCase):
     def test_same_point(self):
         self.assertAlmostEqual(haversine_m(42.38, -71.09, 42.38, -71.09), 0.0, places=1)
 
@@ -181,14 +188,17 @@ class TestHaversine(unittest.TestCase):
 # Privacy classifier
 # ---------------------------------------------------------------------------
 
-class TestPrivacyClassify(unittest.TestCase):
 
+class TestPrivacyClassify(unittest.TestCase):
     BASE = {
-        "latitude": None, "longitude": None,
+        "latitude": None,
+        "longitude": None,
         "place_ishome": 0,
-        "persons": [], "apple_persons": [],
+        "persons": [],
+        "apple_persons": [],
         "face_info": [],
-        "labels": [], "apple_labels": [],
+        "labels": [],
+        "apple_labels": [],
         "media_analysis": {},
     }
 
@@ -210,9 +220,7 @@ class TestPrivacyClassify(unittest.TestCase):
         self.assertEqual(state, "auto_private")
 
     def test_unknown_person(self):
-        state, reason = classify(
-            self._photo(persons=["_UNKNOWN_"]), zones=[]
-        )
+        state, reason = classify(self._photo(persons=["_UNKNOWN_"]), zones=[])
         self.assertEqual(state, "needs_review")
         self.assertIn("unidentified", reason)
 
@@ -234,67 +242,72 @@ class TestPrivacyClassify(unittest.TestCase):
         self.assertEqual(state, "candidate_public")
 
     def test_people_label(self):
-        state, reason = classify(
-            self._photo(labels=["People", "Concert"]), zones=[]
-        )
+        state, reason = classify(self._photo(labels=["People", "Concert"]), zones=[])
         self.assertEqual(state, "needs_review")
 
     def test_crowd_label(self):
-        state, reason = classify(
-            self._photo(labels=["Crowd", "Outdoor"]), zones=[]
-        )
+        state, reason = classify(self._photo(labels=["Crowd", "Outdoor"]), zones=[])
         self.assertEqual(state, "needs_review")
 
     def test_geofence_auto_private(self):
-        zones = [{
-            "name": "home", "label": "Home",
-            "latitude": 42.38, "longitude": -71.09,
-            "radius_m": 200, "policy": "auto_private",
-        }]
+        zones = [
+            {
+                "name": "home",
+                "label": "Home",
+                "latitude": 42.38,
+                "longitude": -71.09,
+                "radius_m": 200,
+                "policy": "auto_private",
+            }
+        ]
         # Point inside zone
-        state, reason = classify(
-            self._photo(latitude=42.38, longitude=-71.09), zones=zones
-        )
+        state, reason = classify(self._photo(latitude=42.38, longitude=-71.09), zones=zones)
         self.assertEqual(state, "auto_private")
         self.assertIn("Home", reason)
 
     def test_geofence_flag_review(self):
-        zones = [{
-            "name": "school", "label": "School",
-            "latitude": 42.38, "longitude": -71.09,
-            "radius_m": 200, "policy": "flag_review",
-        }]
-        state, reason = classify(
-            self._photo(latitude=42.38, longitude=-71.09), zones=zones
-        )
+        zones = [
+            {
+                "name": "school",
+                "label": "School",
+                "latitude": 42.38,
+                "longitude": -71.09,
+                "radius_m": 200,
+                "policy": "flag_review",
+            }
+        ]
+        state, reason = classify(self._photo(latitude=42.38, longitude=-71.09), zones=zones)
         self.assertEqual(state, "needs_review")
 
     def test_outside_geofence(self):
-        zones = [{
-            "name": "home", "label": "Home",
-            "latitude": 42.38, "longitude": -71.09,
-            "radius_m": 50, "policy": "auto_private",
-        }]
+        zones = [
+            {
+                "name": "home",
+                "label": "Home",
+                "latitude": 42.38,
+                "longitude": -71.09,
+                "radius_m": 50,
+                "policy": "auto_private",
+            }
+        ]
         # Point 500m away — outside zone
-        state, reason = classify(
-            self._photo(latitude=42.385, longitude=-71.09), zones=zones
-        )
+        state, reason = classify(self._photo(latitude=42.385, longitude=-71.09), zones=zones)
         self.assertEqual(state, "candidate_public")
 
     def test_human_body_detection(self):
-        photo = self._photo(media_analysis={
-            "humans": [
-                {"humanConfidence": 0.8},
-                {"humanConfidence": 0.6},
-            ]
-        })
+        photo = self._photo(
+            media_analysis={
+                "humans": [
+                    {"humanConfidence": 0.8},
+                    {"humanConfidence": 0.6},
+                ]
+            }
+        )
         state, reason = classify(photo, zones=[])
         self.assertEqual(state, "needs_review")
 
     def test_low_confidence_human_ignored(self):
-        photo = self._photo(media_analysis={
-            "humans": [{"humanConfidence": 0.1}]
-        })
+        photo = self._photo(media_analysis={"humans": [{"humanConfidence": 0.1}]})
         state, reason = classify(photo, zones=[])
         self.assertEqual(state, "candidate_public")
 
@@ -303,21 +316,23 @@ class TestPrivacyClassify(unittest.TestCase):
 # Tagger
 # ---------------------------------------------------------------------------
 
-class TestTagger(unittest.TestCase):
 
+class TestTagger(unittest.TestCase):
     def test_location_tags(self):
-        tags = propose_tags({
-            "place_city": "Boston",
-            "place_state": "Massachusetts",
-            "place_country": "United States",
-        })
+        tags = propose_tags(
+            {
+                "place_city": "Boston",
+                "place_state": "Massachusetts",
+                "place_country": "United States",
+            }
+        )
         self.assertIn("boston", tags)
         self.assertIn("massachusetts", tags)
         self.assertIn("united states", tags)
 
     def test_apple_labels_filtered(self):
         tags = propose_tags({"labels": ["People", "Concert", "Stage", "Music"]})
-        self.assertNotIn("people", tags)   # blocklisted
+        self.assertNotIn("people", tags)  # blocklisted
         self.assertIn("concert", tags)
         self.assertIn("stage", tags)
         self.assertIn("music", tags)
@@ -328,10 +343,12 @@ class TestTagger(unittest.TestCase):
         self.assertIn("car", tags)
 
     def test_deduplication(self):
-        tags = propose_tags({
-            "labels": ["Concert", "concert"],  # duplicates
-            "place_city": "Boston",
-        })
+        tags = propose_tags(
+            {
+                "labels": ["Concert", "concert"],  # duplicates
+                "place_city": "Boston",
+            }
+        )
         self.assertEqual(tags.count("concert"), 1)
 
     def test_empty_photo(self):
@@ -348,8 +365,8 @@ class TestTagger(unittest.TestCase):
 # Database
 # ---------------------------------------------------------------------------
 
-class TestDatabase(unittest.TestCase):
 
+class TestDatabase(unittest.TestCase):
     def setUp(self):
         fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
         os.close(fd)
@@ -360,12 +377,14 @@ class TestDatabase(unittest.TestCase):
         os.unlink(self.tmp_path)
 
     def test_upsert_and_retrieve(self):
-        row_id = self.db.upsert_photo({
-            "flickr_id": "12345",
-            "date_taken": "2023-05-06 16:34:28",
-            "privacy_state": "candidate_public",
-            "privacy_reason": "no people detected",
-        })
+        row_id = self.db.upsert_photo(
+            {
+                "flickr_id": "12345",
+                "date_taken": "2023-05-06 16:34:28",
+                "privacy_state": "candidate_public",
+                "privacy_reason": "no people detected",
+            }
+        )
         self.assertGreater(row_id, 0)
         photo = self.db.get_photo_by_flickr_id("12345")
         self.assertIsNotNone(photo)
@@ -380,17 +399,21 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(count, 1)
 
     def test_review_decision_preserved_on_update(self):
-        self.db.upsert_photo({
-            "flickr_id": "77777",
-            "privacy_state": "approved_public",
-            "review_decision": "make_public",
-            "reviewed_at": "2026-01-01T00:00:00",
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "77777",
+                "privacy_state": "approved_public",
+                "review_decision": "make_public",
+                "reviewed_at": "2026-01-01T00:00:00",
+            }
+        )
         # Update without review fields — should not clobber decision
-        self.db.upsert_photo({
-            "flickr_id": "77777",
-            "date_taken": "2024-06-01 12:00:00",
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "77777",
+                "date_taken": "2024-06-01 12:00:00",
+            }
+        )
         photo = self.db.get_photo_by_flickr_id("77777")
         self.assertEqual(photo["review_decision"], "make_public")
 
@@ -404,35 +427,48 @@ class TestDatabase(unittest.TestCase):
 
     def test_stats_pushable_approved(self):
         # approved_public with flickr_id and perms not yet pushed → pushable
-        p1 = self.db.upsert_photo({"flickr_id": "f1", "privacy_state": "approved_public",
-                                    "perms_pushed_flickr": 0})
+        self.db.upsert_photo(
+            {"flickr_id": "f1", "privacy_state": "approved_public", "perms_pushed_flickr": 0}
+        )
         # already pushed → not pushable
-        p2 = self.db.upsert_photo({"flickr_id": "f2", "privacy_state": "approved_public",
-                                    "perms_pushed_flickr": 1})
+        self.db.upsert_photo(
+            {"flickr_id": "f2", "privacy_state": "approved_public", "perms_pushed_flickr": 1}
+        )
         # Photos-only (no flickr_id) → not pushable
-        p3 = self.db.upsert_photo({"uuid": "uuid-nf", "privacy_state": "approved_public"})
+        self.db.upsert_photo({"uuid": "uuid-nf", "privacy_state": "approved_public"})
         # wrong state → not pushable
-        p4 = self.db.upsert_photo({"flickr_id": "f4", "privacy_state": "candidate_public",
-                                    "perms_pushed_flickr": 0})
+        self.db.upsert_photo(
+            {"flickr_id": "f4", "privacy_state": "candidate_public", "perms_pushed_flickr": 0}
+        )
         stats = self.db.stats()
         self.assertEqual(stats["pushable_approved"], 1)
 
     def test_geofence_match(self):
-        self.db.upsert_zone({
-            "name": "home", "label": "Home",
-            "latitude": 42.38, "longitude": -71.09,
-            "radius_m": 200, "policy": "auto_private",
-        })
+        self.db.upsert_zone(
+            {
+                "name": "home",
+                "label": "Home",
+                "latitude": 42.38,
+                "longitude": -71.09,
+                "radius_m": 200,
+                "policy": "auto_private",
+            }
+        )
         zone = self.db.match_geofence(42.38, -71.09)
         self.assertIsNotNone(zone)
         self.assertEqual(zone["name"], "home")
 
     def test_geofence_no_match(self):
-        self.db.upsert_zone({
-            "name": "home", "label": "Home",
-            "latitude": 42.38, "longitude": -71.09,
-            "radius_m": 50, "policy": "auto_private",
-        })
+        self.db.upsert_zone(
+            {
+                "name": "home",
+                "label": "Home",
+                "latitude": 42.38,
+                "longitude": -71.09,
+                "radius_m": 50,
+                "policy": "auto_private",
+            }
+        )
         zone = self.db.match_geofence(42.39, -71.09)  # ~1km away
         self.assertIsNone(zone)
 
@@ -456,14 +492,20 @@ class TestDatabase(unittest.TestCase):
 
     def test_review_queue_newest_first(self):
         """review_queue returns photos newest-first by date_taken."""
-        self.db.upsert_photo({
-            "flickr_id": "OLD", "privacy_state": "candidate_public",
-            "date_taken": "2020-01-01 00:00:00",
-        })
-        self.db.upsert_photo({
-            "flickr_id": "NEW", "privacy_state": "candidate_public",
-            "date_taken": "2024-06-01 00:00:00",
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "OLD",
+                "privacy_state": "candidate_public",
+                "date_taken": "2020-01-01 00:00:00",
+            }
+        )
+        self.db.upsert_photo(
+            {
+                "flickr_id": "NEW",
+                "privacy_state": "candidate_public",
+                "date_taken": "2024-06-01 00:00:00",
+            }
+        )
         queue = self.db.review_queue()
         ids = [p["flickr_id"] for p in queue]
         self.assertEqual(ids[0], "NEW")
@@ -471,14 +513,20 @@ class TestDatabase(unittest.TestCase):
 
     def test_review_queue_null_date_taken_sorts_last(self):
         """review_queue orders by date_taken DESC; NULL date_taken sorts after non-NULL."""
-        self.db.upsert_photo({
-            "flickr_id": "NOTAKEN", "privacy_state": "candidate_public",
-            "date_uploaded_flickr": "2023-03-01 00:00:00",
-        })
-        self.db.upsert_photo({
-            "flickr_id": "WITHTAKEN", "privacy_state": "candidate_public",
-            "date_taken": "2022-01-01 00:00:00",
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "NOTAKEN",
+                "privacy_state": "candidate_public",
+                "date_uploaded_flickr": "2023-03-01 00:00:00",
+            }
+        )
+        self.db.upsert_photo(
+            {
+                "flickr_id": "WITHTAKEN",
+                "privacy_state": "candidate_public",
+                "date_taken": "2022-01-01 00:00:00",
+            }
+        )
         queue = self.db.review_queue()
         ids = [p["flickr_id"] for p in queue]
         # NULL date_taken sorts last (after 2022 WITHTAKEN)
@@ -486,9 +534,15 @@ class TestDatabase(unittest.TestCase):
 
     def test_get_photo_nav(self):
         """get_photo_nav returns correct prev/next IDs using indexed lookups."""
-        self.db.upsert_photo({"flickr_id": "A", "privacy_state": "candidate_public", "date_taken": "2020-01-01"})
-        self.db.upsert_photo({"flickr_id": "B", "privacy_state": "candidate_public", "date_taken": "2021-01-01"})
-        self.db.upsert_photo({"flickr_id": "C", "privacy_state": "candidate_public", "date_taken": "2022-01-01"})
+        self.db.upsert_photo(
+            {"flickr_id": "A", "privacy_state": "candidate_public", "date_taken": "2020-01-01"}
+        )
+        self.db.upsert_photo(
+            {"flickr_id": "B", "privacy_state": "candidate_public", "date_taken": "2021-01-01"}
+        )
+        self.db.upsert_photo(
+            {"flickr_id": "C", "privacy_state": "candidate_public", "date_taken": "2022-01-01"}
+        )
         a = self.db.get_photo_by_flickr_id("A")
         b = self.db.get_photo_by_flickr_id("B")
         c = self.db.get_photo_by_flickr_id("C")
@@ -533,12 +587,14 @@ class TestDatabase(unittest.TestCase):
 # upsert_photo review protection
 # ---------------------------------------------------------------------------
 
+
 class TestUpsertReviewProtection(unittest.TestCase):
     """upsert_photo must never clobber a human review decision."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         from db.db import Database
+
         self.db = Database(Path(self._tmp.name) / "test.db")
 
     def tearDown(self):
@@ -547,8 +603,7 @@ class TestUpsertReviewProtection(unittest.TestCase):
 
     def _insert_reviewed(self, flickr_id, decision):
         """Insert a photo, record a human decision, and return the updated row."""
-        self.db.upsert_photo({"flickr_id": flickr_id,
-                              "privacy_state": "candidate_public"})
+        self.db.upsert_photo({"flickr_id": flickr_id, "privacy_state": "candidate_public"})
         photo = self.db.get_photo_by_flickr_id(flickr_id)
         self.db.record_review(photo["id"], decision)
         return self.db.get_photo_by_flickr_id(flickr_id)
@@ -559,64 +614,81 @@ class TestUpsertReviewProtection(unittest.TestCase):
         self.assertEqual(row["privacy_state"], "keep_private")
 
         # Simulate scanner re-classifying and upserting
-        self.db.upsert_photo({
-            "flickr_id": "P1",
-            "privacy_state": "candidate_public",
-            "privacy_reason": "no people detected",
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "P1",
+                "privacy_state": "candidate_public",
+                "privacy_reason": "no people detected",
+            }
+        )
         result = self.db.get_photo_by_flickr_id("P1")
-        self.assertEqual(result["privacy_state"], "keep_private",
-                         "Scanner upsert must not revert keep_private")
+        self.assertEqual(
+            result["privacy_state"], "keep_private", "Scanner upsert must not revert keep_private"
+        )
 
     def test_approved_public_survives_scanner_upsert(self):
         """An approved_public decision must survive a subsequent upsert_photo call."""
         row = self._insert_reviewed("P2", "make_public")
         self.assertEqual(row["privacy_state"], "approved_public")
 
-        self.db.upsert_photo({
-            "flickr_id": "P2",
-            "privacy_state": "needs_review",
-            "privacy_reason": "people detected",
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "P2",
+                "privacy_state": "needs_review",
+                "privacy_reason": "people detected",
+            }
+        )
         result = self.db.get_photo_by_flickr_id("P2")
-        self.assertEqual(result["privacy_state"], "approved_public",
-                         "Scanner upsert must not revert approved_public")
+        self.assertEqual(
+            result["privacy_state"],
+            "approved_public",
+            "Scanner upsert must not revert approved_public",
+        )
 
     def test_skipped_survives_scanner_upsert(self):
         """A skipped decision must survive a subsequent upsert_photo call."""
         row = self._insert_reviewed("P3", "skip")
         self.assertEqual(row["privacy_state"], "skipped")
 
-        self.db.upsert_photo({
-            "flickr_id": "P3",
-            "privacy_state": "candidate_public",
-            "privacy_reason": "no people detected",
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "P3",
+                "privacy_state": "candidate_public",
+                "privacy_reason": "no people detected",
+            }
+        )
         result = self.db.get_photo_by_flickr_id("P3")
-        self.assertEqual(result["privacy_state"], "skipped",
-                         "Scanner upsert must not revert skipped")
+        self.assertEqual(
+            result["privacy_state"], "skipped", "Scanner upsert must not revert skipped"
+        )
 
     def test_unreviewed_photo_state_is_updated(self):
         """upsert_photo must still update privacy_state for unreviewed photos."""
-        self.db.upsert_photo({"flickr_id": "P4",
-                              "privacy_state": "candidate_public"})
-        self.db.upsert_photo({
-            "flickr_id": "P4",
-            "privacy_state": "needs_review",
-            "privacy_reason": "people detected",
-        })
+        self.db.upsert_photo({"flickr_id": "P4", "privacy_state": "candidate_public"})
+        self.db.upsert_photo(
+            {
+                "flickr_id": "P4",
+                "privacy_state": "needs_review",
+                "privacy_reason": "people detected",
+            }
+        )
         result = self.db.get_photo_by_flickr_id("P4")
-        self.assertEqual(result["privacy_state"], "needs_review",
-                         "Unreviewed photos must still get state updates")
+        self.assertEqual(
+            result["privacy_state"],
+            "needs_review",
+            "Unreviewed photos must still get state updates",
+        )
 
     def test_non_privacy_fields_still_updated_after_review(self):
         """Metadata fields (tags, filename, etc.) must still update even after review."""
         self._insert_reviewed("P5", "keep_private")
-        self.db.upsert_photo({
-            "flickr_id": "P5",
-            "original_filename": "updated_name.jpg",
-            "proposed_tags": ["new", "tag"],
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "P5",
+                "original_filename": "updated_name.jpg",
+                "proposed_tags": ["new", "tag"],
+            }
+        )
         result = self.db.get_photo_by_flickr_id("P5")
         self.assertEqual(result["original_filename"], "updated_name.jpg")
         self.assertEqual(result["privacy_state"], "keep_private")
@@ -624,12 +696,16 @@ class TestUpsertReviewProtection(unittest.TestCase):
     def test_build_enriched_row_preserves_skipped(self):
         """build_enriched_row must not reclassify skipped photos."""
         from poller.scanner import build_enriched_row
+
         existing = {
-            "id": 1, "flickr_id": "12345", "uuid": None,
+            "id": 1,
+            "flickr_id": "12345",
+            "uuid": None,
             "privacy_state": "skipped",
             "privacy_reason": "user deferred",
             "proposed_tags": [],
-            "latitude": None, "longitude": None,
+            "latitude": None,
+            "longitude": None,
             "place_ishome": 0,
         }
         photo_row = {
@@ -646,16 +722,17 @@ class TestUpsertReviewProtection(unittest.TestCase):
             "_is_live": False,
         }
         enriched = build_enriched_row(photo_row, existing, [], "Chris Devers")
-        self.assertEqual(enriched["privacy_state"], "skipped",
-                         "build_enriched_row must preserve skipped state")
+        self.assertEqual(
+            enriched["privacy_state"], "skipped", "build_enriched_row must preserve skipped state"
+        )
 
 
 # ---------------------------------------------------------------------------
 # undo_decision
 # ---------------------------------------------------------------------------
 
-class TestUndoDecision(unittest.TestCase):
 
+class TestUndoDecision(unittest.TestCase):
     def setUp(self):
         fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
         os.close(fd)
@@ -667,15 +744,17 @@ class TestUndoDecision(unittest.TestCase):
 
     def test_undo_returns_to_candidate_public(self):
         """Photo with no people reverts to candidate_public on undo."""
-        self.db.upsert_photo({
-            "flickr_id": "U1",
-            "privacy_state": "approved_public",
-            "review_decision": "make_public",
-            "reviewed_at": "2026-01-01T00:00:00",
-            "apple_persons": "[]",
-            "apple_unknown_faces": 0,
-            "apple_named_faces": 0,
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "U1",
+                "privacy_state": "approved_public",
+                "review_decision": "make_public",
+                "reviewed_at": "2026-01-01T00:00:00",
+                "apple_persons": "[]",
+                "apple_unknown_faces": 0,
+                "apple_named_faces": 0,
+            }
+        )
         photo = self.db.get_photo_by_flickr_id("U1")
         result = self.db.undo_decision(photo["id"])
         self.assertTrue(result)
@@ -687,15 +766,18 @@ class TestUndoDecision(unittest.TestCase):
     def test_undo_returns_to_needs_review_with_persons(self):
         """Photo with named persons reverts to needs_review on undo."""
         import json as _json
-        self.db.upsert_photo({
-            "flickr_id": "U2",
-            "privacy_state": "keep_private",
-            "review_decision": "keep_private",
-            "reviewed_at": "2026-01-01T00:00:00",
-            "apple_persons": _json.dumps(["Alice"]),
-            "apple_named_faces": 1,
-            "apple_unknown_faces": 0,
-        })
+
+        self.db.upsert_photo(
+            {
+                "flickr_id": "U2",
+                "privacy_state": "keep_private",
+                "review_decision": "keep_private",
+                "reviewed_at": "2026-01-01T00:00:00",
+                "apple_persons": _json.dumps(["Alice"]),
+                "apple_named_faces": 1,
+                "apple_unknown_faces": 0,
+            }
+        )
         photo = self.db.get_photo_by_flickr_id("U2")
         result = self.db.undo_decision(photo["id"])
         self.assertTrue(result)
@@ -704,15 +786,17 @@ class TestUndoDecision(unittest.TestCase):
 
     def test_undo_returns_to_needs_review_with_unknown_faces(self):
         """Photo with unknown faces reverts to needs_review on undo."""
-        self.db.upsert_photo({
-            "flickr_id": "U3",
-            "privacy_state": "approved_public",
-            "review_decision": "make_public",
-            "reviewed_at": "2026-01-01T00:00:00",
-            "apple_persons": "[]",
-            "apple_unknown_faces": 2,
-            "apple_named_faces": 0,
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "U3",
+                "privacy_state": "approved_public",
+                "review_decision": "make_public",
+                "reviewed_at": "2026-01-01T00:00:00",
+                "apple_persons": "[]",
+                "apple_unknown_faces": 2,
+                "apple_named_faces": 0,
+            }
+        )
         photo = self.db.get_photo_by_flickr_id("U3")
         self.db.undo_decision(photo["id"])
         updated = self.db.get_photo_by_flickr_id("U3")
@@ -720,16 +804,18 @@ class TestUndoDecision(unittest.TestCase):
 
     def test_undo_resets_perms_pushed(self):
         """undo_decision resets perms_pushed_flickr to 0."""
-        self.db.upsert_photo({
-            "flickr_id": "U4",
-            "privacy_state": "approved_public",
-            "review_decision": "make_public",
-            "reviewed_at": "2026-01-01T00:00:00",
-            "perms_pushed_flickr": 1,
-            "apple_persons": "[]",
-            "apple_unknown_faces": 0,
-            "apple_named_faces": 0,
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "U4",
+                "privacy_state": "approved_public",
+                "review_decision": "make_public",
+                "reviewed_at": "2026-01-01T00:00:00",
+                "perms_pushed_flickr": 1,
+                "apple_persons": "[]",
+                "apple_unknown_faces": 0,
+                "apple_named_faces": 0,
+            }
+        )
         photo = self.db.get_photo_by_flickr_id("U4")
         self.db.undo_decision(photo["id"])
         updated = self.db.get_photo_by_flickr_id("U4")
@@ -745,14 +831,17 @@ class TestUndoDecision(unittest.TestCase):
 # build_enriched_row (scanner)
 # ---------------------------------------------------------------------------
 
-class TestBuildEnrichedRow(unittest.TestCase):
 
+class TestBuildEnrichedRow(unittest.TestCase):
     EXISTING = {
-        "id": 1, "flickr_id": "12345", "uuid": None,
+        "id": 1,
+        "flickr_id": "12345",
+        "uuid": None,
         "privacy_state": "candidate_public",
         "privacy_reason": "no people detected",
         "proposed_tags": [],
-        "latitude": None, "longitude": None,
+        "latitude": None,
+        "longitude": None,
         "place_ishome": 0,
     }
 
@@ -791,15 +880,13 @@ class TestBuildEnrichedRow(unittest.TestCase):
         self.assertEqual(enriched["privacy_state"], "approved_public")
 
     def test_keep_private_preserved(self):
-        existing = dict(self.EXISTING, privacy_state="keep_private",
-                        review_decision="keep_private")
+        existing = dict(self.EXISTING, privacy_state="keep_private", review_decision="keep_private")
         row = self._photo_row(apple_labels=[])  # would normally be candidate_public
         enriched = build_enriched_row(row, existing, [], "Chris Devers")
         self.assertEqual(enriched["privacy_state"], "keep_private")
 
     def test_skipped_preserved(self):
-        existing = dict(self.EXISTING, privacy_state="skipped",
-                        review_decision="skip")
+        existing = dict(self.EXISTING, privacy_state="skipped", review_decision="skip")
         row = self._photo_row(apple_labels=[])
         enriched = build_enriched_row(row, existing, [], "Chris Devers")
         self.assertEqual(enriched["privacy_state"], "skipped")
@@ -823,37 +910,44 @@ class TestBuildEnrichedRow(unittest.TestCase):
 # Thumbnailer
 # ---------------------------------------------------------------------------
 
-class TestThumbnailer(unittest.TestCase):
 
+class TestThumbnailer(unittest.TestCase):
     def test_flickr_url_valid(self):
         from poller.thumbnailer import flickr_url
+
         url = flickr_url("12345", "abc123", "1234")
         self.assertEqual(url, "https://live.staticflickr.com/1234/12345_abc123_b.jpg")
 
     def test_flickr_url_missing_secret(self):
         from poller.thumbnailer import flickr_url
+
         self.assertIsNone(flickr_url("12345", "", "1234"))
 
     def test_flickr_url_missing_id(self):
         from poller.thumbnailer import flickr_url
+
         self.assertIsNone(flickr_url("", "abc123", "1234"))
 
     def test_flickr_url_missing_server(self):
         from poller.thumbnailer import flickr_url
+
         self.assertIsNone(flickr_url("12345", "abc123", ""))
 
     def test_derivative_path_nonexistent_library(self):
         from poller.thumbnailer import derivative_path
+
         result = derivative_path("AAAAAAAA-0000-0000-0000-000000000000", "/nonexistent/library")
         self.assertIsNone(result)
 
     def test_derivative_path_empty_uuid(self):
         from poller.thumbnailer import derivative_path
+
         self.assertIsNone(derivative_path("", "/some/library"))
 
     def test_derivative_path_uses_first_char_shard(self):
         from poller.thumbnailer import derivative_path
         from unittest import mock
+
         with mock.patch("pathlib.Path.exists", return_value=True):
             result = derivative_path("ABCD1234-0000-0000-0000-000000000000", "/library")
             self.assertIsNotNone(result)
@@ -862,7 +956,8 @@ class TestThumbnailer(unittest.TestCase):
 
     def test_run_clears_display_rotation_on_success(self):
         """Successful thumbnail write must reset display_rotation to 0."""
-        import os, tempfile
+        import os
+        import tempfile
         from unittest import mock
         from poller.thumbnailer import run
 
@@ -871,17 +966,21 @@ class TestThumbnailer(unittest.TestCase):
         db = Database(db_path)
 
         # Insert a Photos-only record with display_rotation=90 and no thumbnail
-        photo_id = db.upsert_photo({
-            "uuid": "AAAAAAAA-0000-0000-0000-000000000000",
-            "display_rotation": 90,
-        })
+        photo_id = db.upsert_photo(
+            {
+                "uuid": "AAAAAAAA-0000-0000-0000-000000000000",
+                "display_rotation": 90,
+            }
+        )
 
         # Mock derivative_path so the thumbnailer resolves the local source.
         # Also mock osxphotos so Phase 0 iCloud lookup doesn't hit the real library.
         mock_photosdb = mock.MagicMock()
         mock_photosdb.photos.return_value = []
-        with mock.patch("poller.thumbnailer.derivative_path", return_value="/fake/thumb.jpeg"), \
-             mock.patch("poller.thumbnailer.osxphotos") as mock_osx:
+        with (
+            mock.patch("poller.thumbnailer.derivative_path", return_value="/fake/thumb.jpeg"),
+            mock.patch("poller.thumbnailer.osxphotos") as mock_osx,
+        ):
             mock_osx.PhotosDB.return_value = mock_photosdb
             run(
                 db=db,
@@ -899,8 +998,11 @@ class TestThumbnailer(unittest.TestCase):
         ).fetchone()
 
         self.assertEqual(row["thumbnail_path"], "/fake/thumb.jpeg")
-        self.assertEqual(row["display_rotation"], 0,
-            "display_rotation must be 0 after thumbnailer sets thumbnail_path")
+        self.assertEqual(
+            row["display_rotation"],
+            0,
+            "display_rotation must be 0 after thumbnailer sets thumbnail_path",
+        )
 
         db.close()
         os.unlink(db_path)
@@ -918,38 +1020,49 @@ class TestThumbnailerICloud(unittest.TestCase):
         self._tmp.cleanup()
 
     def _insert_photos_only(self, uuid: str) -> int:
-        return self.db.upsert_photo({
-            "uuid": uuid,
-            "flickr_id": None,
-            "privacy_state": "candidate_public",
-            "proposed_tags": [],
-            "apple_persons": [],
-            "apple_labels": [],
-        })
+        return self.db.upsert_photo(
+            {
+                "uuid": uuid,
+                "flickr_id": None,
+                "privacy_state": "candidate_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
 
     def _insert_linked(self, flickr_id: str, uuid: str) -> int:
-        return self.db.upsert_photo({
-            "uuid": uuid,
-            "flickr_id": flickr_id,
-            "flickr_secret": "sec",
-            "flickr_server": "999",
-            "privacy_state": "approved_public",
-            "proposed_tags": [],
-            "apple_persons": [],
-            "apple_labels": [],
-        })
+        return self.db.upsert_photo(
+            {
+                "uuid": uuid,
+                "flickr_id": flickr_id,
+                "flickr_secret": "sec",
+                "flickr_server": "999",
+                "privacy_state": "approved_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
 
     def test_no_photos_only_records_osxphotos_never_opened(self):
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
         from poller.thumbnailer import run
 
         # Only a Flickr-linked record — no Photos-only records needing thumbnails
         self._insert_linked("55555555", "LINKED-UUID-0001")
 
         with patch("poller.thumbnailer.osxphotos") as mock_osxphotos:
-            run(db=self.db, library_path="/fake/lib", thumb_root=None,
-                flickr_download=False, client=None, limit=None, dry_run=True,
-                icloud=True)
+            run(
+                db=self.db,
+                library_path="/fake/lib",
+                thumb_root=None,
+                flickr_download=False,
+                client=None,
+                limit=None,
+                dry_run=True,
+                icloud=True,
+            )
 
         mock_osxphotos.PhotosDB.assert_not_called()
 
@@ -960,10 +1073,19 @@ class TestThumbnailerICloud(unittest.TestCase):
 
         self._insert_photos_only("ICLOUD-UUID-DEFAULT")
 
-        with patch("poller.thumbnailer.osxphotos") as mock_osxphotos, \
-             patch("poller.thumbnailer.derivative_path", return_value=None):
-            run(db=self.db, library_path="/fake/lib", thumb_root=None,
-                flickr_download=False, client=None, limit=None, dry_run=True)
+        with (
+            patch("poller.thumbnailer.osxphotos") as mock_osxphotos,
+            patch("poller.thumbnailer.derivative_path", return_value=None),
+        ):
+            run(
+                db=self.db,
+                library_path="/fake/lib",
+                thumb_root=None,
+                flickr_download=False,
+                client=None,
+                limit=None,
+                dry_run=True,
+            )
             # icloud kwarg omitted — default is False
 
         mock_osxphotos.PhotosDB.assert_not_called()
@@ -982,12 +1104,21 @@ class TestThumbnailerICloud(unittest.TestCase):
         mock_photosdb = MagicMock()
         mock_photosdb.photos.return_value = [mock_photo]
 
-        with patch("poller.thumbnailer.osxphotos") as mock_osxphotos, \
-             patch("poller.thumbnailer.derivative_path", return_value=None):
+        with (
+            patch("poller.thumbnailer.osxphotos") as mock_osxphotos,
+            patch("poller.thumbnailer.derivative_path", return_value=None),
+        ):
             mock_osxphotos.PhotosDB.return_value = mock_photosdb
-            run(db=self.db, library_path="/fake/lib", thumb_root=None,
-                flickr_download=False, client=None, limit=None, dry_run=True,
-                icloud=True)
+            run(
+                db=self.db,
+                library_path="/fake/lib",
+                thumb_root=None,
+                flickr_download=False,
+                client=None,
+                limit=None,
+                dry_run=True,
+                icloud=True,
+            )
 
         mock_osxphotos.PhotosDB.assert_called_once_with(dbfile="/fake/lib")
         mock_photosdb.photos.assert_called_once()
@@ -1007,14 +1138,28 @@ class TestThumbnailerICloud(unittest.TestCase):
         mock_photosdb.photos.return_value = [mock_photo]
 
         # derivative_path: None first (Phase 1 local check), then path (after export)
-        mock_deriv = MagicMock(side_effect=[None, "/fake/lib/resources/derivatives/masters/i/ICLOUD-UUID-0001_4_5005_c.jpeg"])
+        mock_deriv = MagicMock(
+            side_effect=[
+                None,
+                "/fake/lib/resources/derivatives/masters/i/ICLOUD-UUID-0001_4_5005_c.jpeg",
+            ]
+        )
 
-        with patch("poller.thumbnailer.osxphotos") as mock_osxphotos, \
-             patch("poller.thumbnailer.derivative_path", mock_deriv):
+        with (
+            patch("poller.thumbnailer.osxphotos") as mock_osxphotos,
+            patch("poller.thumbnailer.derivative_path", mock_deriv),
+        ):
             mock_osxphotos.PhotosDB.return_value = mock_photosdb
-            run(db=self.db, library_path="/fake/lib", thumb_root=None,
-                flickr_download=False, client=None, limit=None, dry_run=False,
-                icloud=True)
+            run(
+                db=self.db,
+                library_path="/fake/lib",
+                thumb_root=None,
+                flickr_download=False,
+                client=None,
+                limit=None,
+                dry_run=False,
+                icloud=True,
+            )
 
         mock_photo.export.assert_called_once()
         row = self.db.conn.execute(
@@ -1037,12 +1182,21 @@ class TestThumbnailerICloud(unittest.TestCase):
         mock_photosdb = MagicMock()
         mock_photosdb.photos.return_value = [mock_photo]
 
-        with patch("poller.thumbnailer.osxphotos") as mock_osxphotos, \
-             patch("poller.thumbnailer.derivative_path", return_value=None):
+        with (
+            patch("poller.thumbnailer.osxphotos") as mock_osxphotos,
+            patch("poller.thumbnailer.derivative_path", return_value=None),
+        ):
             mock_osxphotos.PhotosDB.return_value = mock_photosdb
-            run(db=self.db, library_path="/fake/lib", thumb_root=None,
-                flickr_download=False, client=None, limit=None, dry_run=False,
-                icloud=True)
+            run(
+                db=self.db,
+                library_path="/fake/lib",
+                thumb_root=None,
+                flickr_download=False,
+                client=None,
+                limit=None,
+                dry_run=False,
+                icloud=True,
+            )
 
         # No thumbnail written — photo is queued for next run
         row = self.db.conn.execute(
@@ -1066,12 +1220,21 @@ class TestThumbnailerICloud(unittest.TestCase):
         mock_photosdb.photos.return_value = [mock_photo]
 
         # Should complete without raising; photo ends up queued
-        with patch("poller.thumbnailer.osxphotos") as mock_osxphotos, \
-             patch("poller.thumbnailer.derivative_path", return_value=None):
+        with (
+            patch("poller.thumbnailer.osxphotos") as mock_osxphotos,
+            patch("poller.thumbnailer.derivative_path", return_value=None),
+        ):
             mock_osxphotos.PhotosDB.return_value = mock_photosdb
-            run(db=self.db, library_path="/fake/lib", thumb_root=None,
-                flickr_download=False, client=None, limit=None, dry_run=False,
-                icloud=True)
+            run(
+                db=self.db,
+                library_path="/fake/lib",
+                thumb_root=None,
+                flickr_download=False,
+                client=None,
+                limit=None,
+                dry_run=False,
+                icloud=True,
+            )
 
         row = self.db.conn.execute(
             "SELECT thumbnail_path FROM photos WHERE id = ?", (photo_id,)
@@ -1095,12 +1258,21 @@ class TestThumbnailerICloud(unittest.TestCase):
         # derivative_path: None first (local check), then a path (export "completes")
         mock_deriv = MagicMock(side_effect=[None, "/fake/icloud.jpeg"])
 
-        with patch("poller.thumbnailer.osxphotos") as mock_osxphotos, \
-             patch("poller.thumbnailer.derivative_path", mock_deriv):
+        with (
+            patch("poller.thumbnailer.osxphotos") as mock_osxphotos,
+            patch("poller.thumbnailer.derivative_path", mock_deriv),
+        ):
             mock_osxphotos.PhotosDB.return_value = mock_photosdb
-            run(db=self.db, library_path="/fake/lib", thumb_root=None,
-                flickr_download=False, client=None, limit=None, dry_run=True,
-                icloud=True)
+            run(
+                db=self.db,
+                library_path="/fake/lib",
+                thumb_root=None,
+                flickr_download=False,
+                client=None,
+                limit=None,
+                dry_run=True,
+                icloud=True,
+            )
 
         # export WAS called (download triggered even in dry-run)
         mock_photo.export.assert_called_once()
@@ -1129,12 +1301,22 @@ class TestThumbnailerICloud(unittest.TestCase):
         mock_photosdb = MagicMock()
         mock_photosdb.photos.return_value = mock_photos
 
-        with patch("poller.thumbnailer.osxphotos") as mock_osxphotos, \
-             patch("poller.thumbnailer.derivative_path", return_value=None):
+        with (
+            patch("poller.thumbnailer.osxphotos") as mock_osxphotos,
+            patch("poller.thumbnailer.derivative_path", return_value=None),
+        ):
             mock_osxphotos.PhotosDB.return_value = mock_photosdb
-            run(db=self.db, library_path="/fake/lib", thumb_root=None,
-                flickr_download=False, client=None, limit=None, dry_run=True,
-                icloud=True, icloud_limit=2)
+            run(
+                db=self.db,
+                library_path="/fake/lib",
+                thumb_root=None,
+                flickr_download=False,
+                client=None,
+                limit=None,
+                dry_run=True,
+                icloud=True,
+                icloud_limit=2,
+            )
 
         export_calls = sum(p.export.call_count for p in mock_photos)
         self.assertEqual(export_calls, 2)
@@ -1159,15 +1341,26 @@ class TestThumbnailerICloud(unittest.TestCase):
 
         log_output = []
 
-        with patch("poller.thumbnailer.osxphotos") as mock_osxphotos, \
-             patch("poller.thumbnailer.derivative_path", return_value=None), \
-             patch.object(log, "info", side_effect=lambda msg, *a: log_output.append(msg % a if a else msg)):
+        with (
+            patch("poller.thumbnailer.osxphotos") as mock_osxphotos,
+            patch("poller.thumbnailer.derivative_path", return_value=None),
+            patch.object(
+                log, "info", side_effect=lambda msg, *a: log_output.append(msg % a if a else msg)
+            ),
+        ):
             mock_osxphotos.PhotosDB.return_value = mock_photosdb
-            run(db=self.db, library_path="/fake/lib", thumb_root=None,
-                flickr_download=False, client=None, limit=None, dry_run=True,
-                icloud=True)
+            run(
+                db=self.db,
+                library_path="/fake/lib",
+                thumb_root=None,
+                flickr_download=False,
+                client=None,
+                limit=None,
+                dry_run=True,
+                icloud=True,
+            )
 
-        done_line = next((l for l in log_output if l.startswith("Done:")), "")
+        done_line = next((line for line in log_output if line.startswith("Done:")), "")
         # skipped should be 1 (NOT-IN-LIBRARY), not 2
         match = re.search(r"(\d+) skipped", done_line)
         self.assertIsNotNone(match, f"Expected 'N skipped' in: {done_line!r}")
@@ -1178,12 +1371,13 @@ class TestThumbnailerICloud(unittest.TestCase):
 # Poller: download_thumb URL preference
 # ---------------------------------------------------------------------------
 
-class TestDownloadThumb(unittest.TestCase):
 
+class TestDownloadThumb(unittest.TestCase):
     def _run(self, row, files_on_disk=()):
         from poller.poller import download_thumb
         from unittest import mock
-        import tempfile, os
+        import tempfile
+
         with tempfile.TemporaryDirectory() as tmp:
             thumb_root = Path(tmp)
             fid = row.get("flickr_id", "99999")
@@ -1199,20 +1393,24 @@ class TestDownloadThumb(unittest.TestCase):
             return client, result
 
     def test_prefers_url_m_over_url_l(self):
-        client, _ = self._run({
-            "flickr_id": "99999",
-            "thumbnail_url_m": "https://example.com/99999_m.jpg",
-            "thumbnail_url_l": "https://example.com/99999_l.jpg",
-        })
+        client, _ = self._run(
+            {
+                "flickr_id": "99999",
+                "thumbnail_url_m": "https://example.com/99999_m.jpg",
+                "thumbnail_url_l": "https://example.com/99999_l.jpg",
+            }
+        )
         args = client.download_thumbnail.call_args[0]
         self.assertIn("_m.jpg", args[0])
 
     def test_falls_back_to_url_l_when_url_m_missing(self):
-        client, _ = self._run({
-            "flickr_id": "99998",
-            "thumbnail_url_m": "",
-            "thumbnail_url_l": "https://example.com/99998_l.jpg",
-        })
+        client, _ = self._run(
+            {
+                "flickr_id": "99998",
+                "thumbnail_url_m": "",
+                "thumbnail_url_l": "https://example.com/99998_l.jpg",
+            }
+        )
         args = client.download_thumbnail.call_args[0]
         self.assertIn("_l.jpg", args[0])
 
@@ -1221,16 +1419,19 @@ class TestDownloadThumb(unittest.TestCase):
 # Poller: flickr_photo_to_db
 # ---------------------------------------------------------------------------
 
-class TestFlickrPhotoToDb(unittest.TestCase):
 
+class TestFlickrPhotoToDb(unittest.TestCase):
     def _fake(self, **kwargs):
         base = {
-            "id": "54321", "secret": "abc123",
-            "server": "1234", "farm": 1,
+            "id": "54321",
+            "secret": "abc123",
+            "server": "1234",
+            "farm": 1,
             "title": "Test photo",
             "dateupload": "1718500000",
             "datetaken": "2024-06-16 10:00:00",
-            "latitude": "42.3601", "longitude": "-71.0589",
+            "latitude": "42.3601",
+            "longitude": "-71.0589",
             "tags": "concert boston",
             "url_l": "https://live.staticflickr.com/1234/54321_abc123_b.jpg",
             "url_m": "https://live.staticflickr.com/1234/54321_abc123.jpg",
@@ -1241,6 +1442,7 @@ class TestFlickrPhotoToDb(unittest.TestCase):
 
     def test_basic_fields(self):
         from poller.poller import flickr_photo_to_db
+
         row = flickr_photo_to_db(self._fake())
         self.assertEqual(row["flickr_id"], "54321")
         self.assertEqual(row["flickr_secret"], "abc123")
@@ -1249,33 +1451,39 @@ class TestFlickrPhotoToDb(unittest.TestCase):
 
     def test_location_parsed(self):
         from poller.poller import flickr_photo_to_db
+
         row = flickr_photo_to_db(self._fake())
         self.assertAlmostEqual(row["latitude"], 42.3601, places=3)
         self.assertAlmostEqual(row["longitude"], -71.0589, places=3)
 
     def test_tags_split(self):
         from poller.poller import flickr_photo_to_db
+
         row = flickr_photo_to_db(self._fake(tags="concert boston cycling"))
         self.assertEqual(row["flickr_tags"], ["concert", "boston", "cycling"])
 
     def test_empty_tags(self):
         from poller.poller import flickr_photo_to_db
+
         row = flickr_photo_to_db(self._fake(tags=""))
         self.assertEqual(row["flickr_tags"], [])
 
     def test_upload_date_iso(self):
         from poller.poller import flickr_photo_to_db
+
         row = flickr_photo_to_db(self._fake())
         self.assertIn("2024", row["date_uploaded_flickr"])
         self.assertTrue(row["date_uploaded_flickr"].endswith("+00:00"))
 
     def test_description_extracted(self):
         from poller.poller import flickr_photo_to_db
+
         row = flickr_photo_to_db(self._fake(description={"_content": "My caption"}))
         self.assertEqual(row["flickr_description"], "My caption")
 
     def test_thumbnail_urls_stored(self):
         from poller.poller import flickr_photo_to_db
+
         row = flickr_photo_to_db(self._fake())
         self.assertIn("thumbnail_url_l", row)
         self.assertIn("thumbnail_url_m", row)
@@ -1283,6 +1491,7 @@ class TestFlickrPhotoToDb(unittest.TestCase):
 
     def test_no_location(self):
         from poller.poller import flickr_photo_to_db
+
         row = flickr_photo_to_db(self._fake(latitude="", longitude=""))
         self.assertNotIn("latitude", row)
 
@@ -1291,22 +1500,29 @@ class TestFlickrPhotoToDb(unittest.TestCase):
 # find_flickr_match date matching
 # ---------------------------------------------------------------------------
 
-class TestFindFlickrMatch(unittest.TestCase):
 
+class TestFindFlickrMatch(unittest.TestCase):
     def setUp(self):
-        import tempfile, os
+        import tempfile
+        import os
+
         fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
         os.close(fd)
         self.db = Database(self.tmp_path)
-        self.db.upsert_photo({
-            "flickr_id": "AAA",
-            "date_taken": "2024-06-16 10:00:00",
-            "latitude": 42.36, "longitude": -71.06,
-        })
-        self.db.upsert_photo({
-            "flickr_id": "BBB",
-            "date_taken": "2023-05-06 16:34:28",
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "AAA",
+                "date_taken": "2024-06-16 10:00:00",
+                "latitude": 42.36,
+                "longitude": -71.06,
+            }
+        )
+        self.db.upsert_photo(
+            {
+                "flickr_id": "BBB",
+                "date_taken": "2023-05-06 16:34:28",
+            }
+        )
 
     def tearDown(self):
         self.db.close()
@@ -1314,6 +1530,7 @@ class TestFindFlickrMatch(unittest.TestCase):
 
     def test_match_by_exact_date(self):
         from poller.scanner import find_flickr_match
+
         photo_row = {"date_taken": "2024-06-16T10:00:00.000000-04:00"}
         matches = find_flickr_match(photo_row, self.db)
         self.assertEqual(len(matches), 1)
@@ -1321,12 +1538,14 @@ class TestFindFlickrMatch(unittest.TestCase):
 
     def test_no_match(self):
         from poller.scanner import find_flickr_match
+
         photo_row = {"date_taken": "2020-01-01T00:00:00-05:00"}
         matches = find_flickr_match(photo_row, self.db)
         self.assertEqual(matches, [])
 
     def test_match_flickr_space_format(self):
         from poller.scanner import find_flickr_match
+
         photo_row = {"date_taken": "2023-05-06 16:34:28"}
         matches = find_flickr_match(photo_row, self.db)
         self.assertEqual(len(matches), 1)
@@ -1334,6 +1553,7 @@ class TestFindFlickrMatch(unittest.TestCase):
 
     def test_no_date_returns_empty(self):
         from poller.scanner import find_flickr_match
+
         matches = find_flickr_match({}, self.db)
         self.assertEqual(matches, [])
 
@@ -1342,6 +1562,7 @@ class TestFindFlickrMatch(unittest.TestCase):
         # truncates.  A Photos timestamp of :50.941 normalises to :50, but the
         # Flickr record has :51.  The matcher must find the record via +1s fallback.
         from poller.scanner import find_flickr_match
+
         self.db.upsert_photo({"flickr_id": "CCC", "date_taken": "2024-06-16 10:00:01"})
         photo_row = {"date_taken": "2024-06-16T10:00:00.941984-04:00"}
         matches = find_flickr_match(photo_row, self.db)
@@ -1352,6 +1573,7 @@ class TestFindFlickrMatch(unittest.TestCase):
         # Some HEIC uploads exhibit a 2-second offset (observed for photos 58000/154037
         # and 7299/154008). The matcher must find these via the +2s fallback.
         from poller.scanner import find_flickr_match
+
         self.db.upsert_photo({"flickr_id": "DDD", "date_taken": "2022-01-29 19:06:44"})
         photo_row = {"date_taken": "2022-01-29T19:06:42.706693-05:00"}
         matches = find_flickr_match(photo_row, self.db)
@@ -1363,10 +1585,12 @@ class TestFindFlickrMatch(unittest.TestCase):
 # approved_public queue (DB side of push_approved)
 # ---------------------------------------------------------------------------
 
-class TestApprovedQueue(unittest.TestCase):
 
+class TestApprovedQueue(unittest.TestCase):
     def setUp(self):
-        import tempfile, os
+        import tempfile
+        import os
+
         fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
         os.close(fd)
         self.db = Database(self.tmp_path)
@@ -1376,11 +1600,13 @@ class TestApprovedQueue(unittest.TestCase):
         os.unlink(self.tmp_path)
 
     def test_approved_unpushed_appears_in_queue(self):
-        self.db.upsert_photo({
-            "flickr_id": "111",
-            "privacy_state": "approved_public",
-            "perms_pushed_flickr": 0,
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "111",
+                "privacy_state": "approved_public",
+                "perms_pushed_flickr": 0,
+            }
+        )
         rows = self.db.conn.execute(
             "SELECT flickr_id FROM photos "
             "WHERE privacy_state = 'approved_public' "
@@ -1390,11 +1616,13 @@ class TestApprovedQueue(unittest.TestCase):
         self.assertEqual(rows[0]["flickr_id"], "111")
 
     def test_already_pushed_excluded_from_queue(self):
-        self.db.upsert_photo({
-            "flickr_id": "222",
-            "privacy_state": "approved_public",
-            "perms_pushed_flickr": 1,
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "222",
+                "privacy_state": "approved_public",
+                "perms_pushed_flickr": 1,
+            }
+        )
         rows = self.db.conn.execute(
             "SELECT flickr_id FROM photos "
             "WHERE privacy_state = 'approved_public' "
@@ -1403,11 +1631,13 @@ class TestApprovedQueue(unittest.TestCase):
         self.assertEqual(len(rows), 0)
 
     def test_no_flickr_id_excluded_from_queue(self):
-        self.db.upsert_photo({
-            "uuid": "ABC-123",
-            "privacy_state": "approved_public",
-            "perms_pushed_flickr": 0,
-        })
+        self.db.upsert_photo(
+            {
+                "uuid": "ABC-123",
+                "privacy_state": "approved_public",
+                "perms_pushed_flickr": 0,
+            }
+        )
         rows = self.db.conn.execute(
             "SELECT id FROM photos "
             "WHERE privacy_state = 'approved_public' "
@@ -1434,29 +1664,36 @@ class TestApprovedQueue(unittest.TestCase):
 # Faces / batch person (DB side)
 # ---------------------------------------------------------------------------
 
-class TestBatchPerson(unittest.TestCase):
 
+class TestBatchPerson(unittest.TestCase):
     def setUp(self):
         fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
         os.close(fd)
         self.db = Database(self.tmp_path)
         import json
+
         # Three photos: two with Obama, one with family
-        self.db.upsert_photo({
-            "flickr_id": "O1",
-            "apple_persons": json.dumps(["Barack Obama"]),
-            "privacy_state": "needs_review",
-        })
-        self.db.upsert_photo({
-            "flickr_id": "O2",
-            "apple_persons": json.dumps(["Barack Obama", "_UNKNOWN_"]),
-            "privacy_state": "needs_review",
-        })
-        self.db.upsert_photo({
-            "flickr_id": "F1",
-            "apple_persons": json.dumps(["Family Member"]),
-            "privacy_state": "needs_review",
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "O1",
+                "apple_persons": json.dumps(["Barack Obama"]),
+                "privacy_state": "needs_review",
+            }
+        )
+        self.db.upsert_photo(
+            {
+                "flickr_id": "O2",
+                "apple_persons": json.dumps(["Barack Obama", "_UNKNOWN_"]),
+                "privacy_state": "needs_review",
+            }
+        )
+        self.db.upsert_photo(
+            {
+                "flickr_id": "F1",
+                "apple_persons": json.dumps(["Family Member"]),
+                "privacy_state": "needs_review",
+            }
+        )
 
     def tearDown(self):
         self.db.close()
@@ -1470,12 +1707,12 @@ class TestBatchPerson(unittest.TestCase):
                FROM photos, json_each(photos.apple_persons) AS p
                WHERE p.value = ?
                  AND photos.privacy_state NOT IN ('already_public')""",
-            (person,)
+            (person,),
         ).fetchall()
         for row in rows:
             self.db.conn.execute(
                 "UPDATE photos SET privacy_state = ?, privacy_reason = ? WHERE id = ?",
-                (new_state, f"batch: {person}", row["id"])
+                (new_state, f"batch: {person}", row["id"]),
             )
         self.db.conn.commit()
         return len(rows)
@@ -1498,11 +1735,14 @@ class TestBatchPerson(unittest.TestCase):
 
     def test_batch_skips_already_public(self):
         import json
-        self.db.upsert_photo({
-            "flickr_id": "O3",
-            "apple_persons": json.dumps(["Barack Obama"]),
-            "privacy_state": "already_public",
-        })
+
+        self.db.upsert_photo(
+            {
+                "flickr_id": "O3",
+                "apple_persons": json.dumps(["Barack Obama"]),
+                "privacy_state": "already_public",
+            }
+        )
         count = self._batch_set("Barack Obama", "keep_private")
         # O3 should be excluded (already_public)
         o3 = self.db.get_photo_by_flickr_id("O3")
@@ -1525,25 +1765,32 @@ class TestBatchPerson(unittest.TestCase):
     def test_person_scoped_nav_query(self):
         """Verify the query used for person-scoped prev/next navigation."""
         import json
+
         # Add photos at known dates
-        self.db.upsert_photo({
-            "flickr_id": "NAV1",
-            "apple_persons": json.dumps(["Barack Obama"]),
-            "privacy_state": "needs_review",
-            "date_taken": "2017-01-01 00:00:00",
-        })
-        self.db.upsert_photo({
-            "flickr_id": "NAV2",
-            "apple_persons": json.dumps(["Barack Obama"]),
-            "privacy_state": "needs_review",
-            "date_taken": "2017-06-01 00:00:00",
-        })
-        self.db.upsert_photo({
-            "flickr_id": "NAV3",
-            "apple_persons": json.dumps(["Someone Else"]),
-            "privacy_state": "needs_review",
-            "date_taken": "2017-03-01 00:00:00",  # between NAV1 and NAV2
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "NAV1",
+                "apple_persons": json.dumps(["Barack Obama"]),
+                "privacy_state": "needs_review",
+                "date_taken": "2017-01-01 00:00:00",
+            }
+        )
+        self.db.upsert_photo(
+            {
+                "flickr_id": "NAV2",
+                "apple_persons": json.dumps(["Barack Obama"]),
+                "privacy_state": "needs_review",
+                "date_taken": "2017-06-01 00:00:00",
+            }
+        )
+        self.db.upsert_photo(
+            {
+                "flickr_id": "NAV3",
+                "apple_persons": json.dumps(["Someone Else"]),
+                "privacy_state": "needs_review",
+                "date_taken": "2017-03-01 00:00:00",  # between NAV1 and NAV2
+            }
+        )
 
         # Simulate the person-scoped nav query from photo_detail route (newest-first)
         nav = self.db.conn.execute(
@@ -1576,24 +1823,28 @@ class TestBatchPerson(unittest.TestCase):
 # FlickrClient retry / backoff
 # ---------------------------------------------------------------------------
 
-class TestFlickrClientRetry(unittest.TestCase):
 
+class TestFlickrClientRetry(unittest.TestCase):
     def setUp(self):
         # Suppress retry warning logs — they're expected in these tests
         import logging
+
         logging.getLogger("blue-pearmain.flickr").setLevel(logging.CRITICAL)
 
     def tearDown(self):
         import logging
+
         logging.getLogger("blue-pearmain.flickr").setLevel(logging.WARNING)
 
     def _make_client(self):
         from flickr.flickr_client import FlickrClient
+
         c = FlickrClient("key", "secret", "token", "tsecret", rate_limit_delay=0)
         return c
 
     def _mock_response(self, status_code=200, json_data=None, retry_after=None):
         from unittest.mock import MagicMock
+
         resp = MagicMock()
         resp.status_code = status_code
         resp.json.return_value = json_data or {"stat": "ok"}
@@ -1601,64 +1852,70 @@ class TestFlickrClientRetry(unittest.TestCase):
         resp.headers.get.return_value = retry_after  # None by default — no Retry-After header
         if status_code >= 400:
             import requests as req
+
             resp.raise_for_status.side_effect = req.HTTPError(response=resp)
         return resp
 
     def test_success_no_retry(self):
         from unittest.mock import patch
+
         c = self._make_client()
         ok_resp = self._mock_response(200, {"stat": "ok", "user": {"id": "123"}})
-        with patch.object(c._session, 'get', return_value=ok_resp):
+        with patch.object(c._session, "get", return_value=ok_resp):
             result = c._call("flickr.test.login")
         self.assertEqual(result["stat"], "ok")
 
     def test_retries_on_500(self):
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
+
         c = self._make_client()
         err_resp = self._mock_response(500)
-        ok_resp  = self._mock_response(200, {"stat": "ok"})
+        ok_resp = self._mock_response(200, {"stat": "ok"})
         # Fail once then succeed
-        with patch.object(c._session, 'get', side_effect=[err_resp, ok_resp]):
-            with patch('time.sleep'):  # don't actually sleep in tests
+        with patch.object(c._session, "get", side_effect=[err_resp, ok_resp]):
+            with patch("time.sleep"):  # don't actually sleep in tests
                 result = c._call("flickr.test.login")
         self.assertEqual(result["stat"], "ok")
 
     def test_retries_on_timeout(self):
         from unittest.mock import patch
         import requests as req
+
         c = self._make_client()
         ok_resp = self._mock_response(200, {"stat": "ok"})
-        with patch.object(c._session, 'get',
-                          side_effect=[req.Timeout(), ok_resp]):
-            with patch('time.sleep'):
+        with patch.object(c._session, "get", side_effect=[req.Timeout(), ok_resp]):
+            with patch("time.sleep"):
                 result = c._call("flickr.test.login")
         self.assertEqual(result["stat"], "ok")
 
     def test_raises_after_max_retries(self):
         from unittest.mock import patch
         from flickr.flickr_client import FlickrError
+
         c = self._make_client()
         err_resp = self._mock_response(500)
-        with patch.object(c._session, 'get', return_value=err_resp):
-            with patch('time.sleep'):
+        with patch.object(c._session, "get", return_value=err_resp):
+            with patch("time.sleep"):
                 with self.assertRaises(FlickrError):
                     c._call("flickr.test.login", max_retries=2)
 
     def test_non_transient_flickr_error_raises_immediately(self):
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
         from flickr.flickr_client import FlickrError
+
         c = self._make_client()
-        bad_resp = self._mock_response(200, {
-            "stat": "fail", "code": 1, "message": "Method not found"
-        })
+        bad_resp = self._mock_response(
+            200, {"stat": "fail", "code": 1, "message": "Method not found"}
+        )
         call_count = 0
-        original_get = c._session.get
+
         def counting_get(*a, **kw):
             nonlocal call_count
             call_count += 1
             return bad_resp
-        with patch.object(c._session, 'get', side_effect=counting_get):
-            with patch('time.sleep'):
+
+        with patch.object(c._session, "get", side_effect=counting_get):
+            with patch("time.sleep"):
                 with self.assertRaises(FlickrError) as ctx:
                     c._call("flickr.nonexistent")
         self.assertEqual(call_count, 1)  # no retries
@@ -1666,31 +1923,33 @@ class TestFlickrClientRetry(unittest.TestCase):
 
     def test_transient_flickr_error_retries(self):
         from unittest.mock import patch
-        from flickr.flickr_client import FlickrError
+
         c = self._make_client()
-        transient_resp = self._mock_response(200, {
-            "stat": "fail", "code": 0, "message": "something went wrong"
-        })
+        transient_resp = self._mock_response(
+            200, {"stat": "fail", "code": 0, "message": "something went wrong"}
+        )
         ok_resp = self._mock_response(200, {"stat": "ok"})
-        with patch.object(c._session, 'get',
-                          side_effect=[transient_resp, ok_resp]):
-            with patch('time.sleep'):
+        with patch.object(c._session, "get", side_effect=[transient_resp, ok_resp]):
+            with patch("time.sleep"):
                 result = c._call("flickr.test.login")
         self.assertEqual(result["stat"], "ok")
 
     def test_404_raises_immediately_without_retry(self):
         """HTTP 404 is a permanent error — should raise, not retry."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
         import requests as req
+
         c = self._make_client()
         not_found = self._mock_response(404)
         call_count = 0
+
         def counting_get(*a, **kw):
             nonlocal call_count
             call_count += 1
             return not_found
-        with patch.object(c._session, 'get', side_effect=counting_get):
-            with patch('time.sleep'):
+
+        with patch.object(c._session, "get", side_effect=counting_get):
+            with patch("time.sleep"):
                 with self.assertRaises(req.HTTPError):
                     c._call("flickr.photos.getInfo")
         self.assertEqual(call_count, 1)  # no retries
@@ -1699,15 +1958,18 @@ class TestFlickrClientRetry(unittest.TestCase):
         """HTTP 403 is a permanent error — should raise, not retry."""
         from unittest.mock import patch
         import requests as req
+
         c = self._make_client()
         forbidden = self._mock_response(403)
         call_count = 0
+
         def counting_get(*a, **kw):
             nonlocal call_count
             call_count += 1
             return forbidden
-        with patch.object(c._session, 'get', side_effect=counting_get):
-            with patch('time.sleep'):
+
+        with patch.object(c._session, "get", side_effect=counting_get):
+            with patch("time.sleep"):
                 with self.assertRaises(req.HTTPError):
                     c._call("flickr.photos.getInfo")
         self.assertEqual(call_count, 1)
@@ -1715,14 +1977,15 @@ class TestFlickrClientRetry(unittest.TestCase):
     def test_retry_delay_includes_jitter(self):
         """Retry delay should include jitter (2^n + random), not bare 2^n."""
         from unittest.mock import patch
+
         c = self._make_client()
         err_resp = self._mock_response(500)
-        ok_resp  = self._mock_response(200, {"stat": "ok"})
+        ok_resp = self._mock_response(200, {"stat": "ok"})
         sleep_calls = []
         # Mock random.uniform to return a fixed value so test is deterministic
-        with patch.object(c._session, 'get', side_effect=[err_resp, ok_resp]):
-            with patch('time.sleep', side_effect=lambda d: sleep_calls.append(d)):
-                with patch('flickr.flickr_client.random.uniform', return_value=0.3):
+        with patch.object(c._session, "get", side_effect=[err_resp, ok_resp]):
+            with patch("time.sleep", side_effect=lambda d: sleep_calls.append(d)):
+                with patch("flickr.flickr_client.random.uniform", return_value=0.3):
                     c._call("flickr.test.login")
         retry_sleeps = [d for d in sleep_calls if d > 0]
         self.assertTrue(retry_sleeps, "Expected at least one non-zero retry sleep")
@@ -1733,16 +1996,19 @@ class TestFlickrClientRetry(unittest.TestCase):
     def test_429_is_retried_not_treated_as_permanent(self):
         """429 rate limit must be retried, not raised immediately like 4xx."""
         from unittest.mock import patch
+
         c = self._make_client()
         rate_limited = self._mock_response(429)
         ok_resp = self._mock_response(200, {"stat": "ok"})
         call_count = 0
+
         def counting_get(*a, **kw):
             nonlocal call_count
             call_count += 1
             return rate_limited if call_count == 1 else ok_resp
-        with patch.object(c._session, 'get', side_effect=counting_get):
-            with patch('time.sleep'):
+
+        with patch.object(c._session, "get", side_effect=counting_get):
+            with patch("time.sleep"):
                 result = c._call("flickr.test.login")
         self.assertEqual(result["stat"], "ok")
         self.assertEqual(call_count, 2)  # retried once
@@ -1751,6 +2017,7 @@ class TestFlickrClientRetry(unittest.TestCase):
         """HTTP 429 must use 8 retries, not the default 4, to outlast Flickr's rate-limit window."""
         from unittest.mock import patch
         from flickr.flickr_client import FlickrError
+
         c = self._make_client()
         rate_limited = self._mock_response(429)
         call_count = 0
@@ -1760,8 +2027,8 @@ class TestFlickrClientRetry(unittest.TestCase):
             call_count += 1
             return rate_limited
 
-        with patch.object(c._session, 'get', side_effect=counting_get):
-            with patch('time.sleep'):
+        with patch.object(c._session, "get", side_effect=counting_get):
+            with patch("time.sleep"):
                 with self.assertRaises(FlickrError):
                     c._call("flickr.photosets.addPhoto")
         # 1 initial attempt + 8 retries = 9 total calls
@@ -1772,6 +2039,7 @@ class TestFlickrClientRetry(unittest.TestCase):
         from unittest.mock import patch
         import requests as req
         from flickr.flickr_client import FlickrError
+
         c = self._make_client()
         call_count = 0
 
@@ -1780,8 +2048,8 @@ class TestFlickrClientRetry(unittest.TestCase):
             call_count += 1
             raise req.Timeout()
 
-        with patch.object(c._session, 'get', side_effect=counting_get):
-            with patch('time.sleep'):
+        with patch.object(c._session, "get", side_effect=counting_get):
+            with patch("time.sleep"):
                 with self.assertRaises(FlickrError):
                     c._call("flickr.test.login")
         # 1 initial attempt + 4 retries = 5 total calls
@@ -1791,34 +2059,41 @@ class TestFlickrClientRetry(unittest.TestCase):
         """429 retry delays must be capped at 60s — attempt 6+ should not exceed 60s."""
         from unittest.mock import patch
         from flickr.flickr_client import FlickrError
+
         c = self._make_client()
         rate_limited = self._mock_response(429)
         sleep_calls = []
 
-        with patch.object(c._session, 'get', return_value=rate_limited):
-            with patch('time.sleep', side_effect=lambda d: sleep_calls.append(d)):
-                with patch('flickr.flickr_client.random.uniform', return_value=0.0):
+        with patch.object(c._session, "get", return_value=rate_limited):
+            with patch("time.sleep", side_effect=lambda d: sleep_calls.append(d)):
+                with patch("flickr.flickr_client.random.uniform", return_value=0.0):
                     with self.assertRaises(FlickrError):
                         c._call("flickr.photosets.addPhoto")
 
         # rate_limit_delay=0 in tests, so all non-zero sleeps are retry backoffs
         retry_sleeps = [d for d in sleep_calls if d > 0]
-        self.assertTrue(all(d <= 60.5 for d in retry_sleeps),
-                        f"All retry delays must be <= 60.5s, got: {retry_sleeps}")
+        self.assertTrue(
+            all(d <= 60.5 for d in retry_sleeps),
+            f"All retry delays must be <= 60.5s, got: {retry_sleeps}",
+        )
         # Attempts 6 and 7 (2^6=64, 2^7=128) must be capped at exactly 60s (jitter=0)
-        self.assertEqual(retry_sleeps.count(60.0), 2,
-                         f"Expected two 60s delays (attempts 6 and 7), got: {retry_sleeps}")
+        self.assertEqual(
+            retry_sleeps.count(60.0),
+            2,
+            f"Expected two 60s delays (attempts 6 and 7), got: {retry_sleeps}",
+        )
 
     def test_retry_after_header_honored(self):
         """When Flickr sends Retry-After, sleep that duration (then exponential backoff still runs)."""
         from unittest.mock import patch
+
         c = self._make_client()
         rate_limited = self._mock_response(429, retry_after="30")
         ok_resp = self._mock_response(200, {"stat": "ok"})
         sleep_calls = []
 
-        with patch.object(c._session, 'get', side_effect=[rate_limited, ok_resp]):
-            with patch('time.sleep', side_effect=lambda d: sleep_calls.append(d)):
+        with patch.object(c._session, "get", side_effect=[rate_limited, ok_resp]):
+            with patch("time.sleep", side_effect=lambda d: sleep_calls.append(d)):
                 result = c._call("flickr.test.login")
 
         self.assertEqual(result["stat"], "ok")
@@ -1827,15 +2102,16 @@ class TestFlickrClientRetry(unittest.TestCase):
     def test_retry_after_validation(self):
         """Retry-After header: non-numeric ignored; negative clamped to 0; >120 capped at 120."""
         from unittest.mock import patch
+
         c = self._make_client()
 
         # Non-numeric: should fall through to normal backoff (no sleep of "bad-value")
         bad_header = self._mock_response(429, retry_after="bad-value")
         ok_resp = self._mock_response(200, {"stat": "ok"})
         sleep_calls = []
-        with patch.object(c._session, 'get', side_effect=[bad_header, ok_resp]):
-            with patch('time.sleep', side_effect=lambda d: sleep_calls.append(d)):
-                with patch('flickr.flickr_client.random.uniform', return_value=0.0):
+        with patch.object(c._session, "get", side_effect=[bad_header, ok_resp]):
+            with patch("time.sleep", side_effect=lambda d: sleep_calls.append(d)):
+                with patch("flickr.flickr_client.random.uniform", return_value=0.0):
                     c._call("flickr.test.login")
         # Should have slept 1.0s (2^0 + 0.0 jitter) from exponential backoff, not from the header
         self.assertIn(1.0, sleep_calls)
@@ -1844,8 +2120,8 @@ class TestFlickrClientRetry(unittest.TestCase):
         huge_header = self._mock_response(429, retry_after="86400")
         ok_resp2 = self._mock_response(200, {"stat": "ok"})
         sleep_calls2 = []
-        with patch.object(c._session, 'get', side_effect=[huge_header, ok_resp2]):
-            with patch('time.sleep', side_effect=lambda d: sleep_calls2.append(d)):
+        with patch.object(c._session, "get", side_effect=[huge_header, ok_resp2]):
+            with patch("time.sleep", side_effect=lambda d: sleep_calls2.append(d)):
                 c._call("flickr.test.login")
         self.assertIn(120.0, sleep_calls2, "Retry-After of 86400 must be capped at 120")
         self.assertNotIn(86400.0, sleep_calls2)
@@ -1854,8 +2130,8 @@ class TestFlickrClientRetry(unittest.TestCase):
         neg_header = self._mock_response(429, retry_after="-5")
         ok_resp3 = self._mock_response(200, {"stat": "ok"})
         sleep_calls3 = []
-        with patch.object(c._session, 'get', side_effect=[neg_header, ok_resp3]):
-            with patch('time.sleep', side_effect=lambda d: sleep_calls3.append(d)):
+        with patch.object(c._session, "get", side_effect=[neg_header, ok_resp3]):
+            with patch("time.sleep", side_effect=lambda d: sleep_calls3.append(d)):
                 c._call("flickr.test.login")
         self.assertIn(0.0, sleep_calls3, "Negative Retry-After must be clamped to 0")
         self.assertNotIn(-5.0, sleep_calls3)
@@ -1865,11 +2141,13 @@ class TestFlickrClientRetry(unittest.TestCase):
 # Flickr client: Collections API methods
 # ---------------------------------------------------------------------------
 
+
 class TestFlickrCollectionsClient(unittest.TestCase):
     """FlickrClient Collections API methods call the correct Flickr endpoints."""
 
     def _make_client(self):
         from flickr.flickr_client import FlickrClient
+
         c = FlickrClient.__new__(FlickrClient)
         c._rate_delay = 0
         c.user_nsid = "me"
@@ -1877,8 +2155,11 @@ class TestFlickrCollectionsClient(unittest.TestCase):
 
     def test_create_collection_calls_correct_method(self):
         from unittest.mock import patch
+
         client = self._make_client()
-        with patch.object(client, "_call", return_value={"collection": {"id": "col-999"}}) as mock_call:
+        with patch.object(
+            client, "_call", return_value={"collection": {"id": "col-999"}}
+        ) as mock_call:
             result = client.create_collection("My Folder")
         mock_call.assert_called_once_with(
             "flickr.collections.create",
@@ -1889,21 +2170,25 @@ class TestFlickrCollectionsClient(unittest.TestCase):
 
     def test_create_collection_passes_description(self):
         from unittest.mock import patch
+
         client = self._make_client()
-        with patch.object(client, "_call", return_value={"collection": {"id": "col-42"}}) as mock_call:
+        with patch.object(
+            client, "_call", return_value={"collection": {"id": "col-42"}}
+        ) as mock_call:
             client.create_collection("Folder", description="desc")
         self.assertEqual(mock_call.call_args[0][1]["description"], "desc")
 
     def test_edit_collection_sets_calls_correct_method(self):
         from unittest.mock import patch
+
         client = self._make_client()
         with patch.object(client, "_call", return_value={}) as mock_call:
             client.edit_collection_sets("col-1", ["ps-1", "ps-2"], ["col-2"])
         mock_call.assert_called_once_with(
             "flickr.collections.editSets",
             {
-                "collection_id":  "col-1",
-                "photoset_ids":   "ps-1 ps-2",
+                "collection_id": "col-1",
+                "photoset_ids": "ps-1 ps-2",
                 "collection_ids": "col-2",
             },
             http_method="POST",
@@ -1911,6 +2196,7 @@ class TestFlickrCollectionsClient(unittest.TestCase):
 
     def test_edit_collection_sets_empty_lists(self):
         from unittest.mock import patch
+
         client = self._make_client()
         with patch.object(client, "_call", return_value={}) as mock_call:
             client.edit_collection_sets("col-1", [], [])
@@ -1920,6 +2206,7 @@ class TestFlickrCollectionsClient(unittest.TestCase):
 
     def test_delete_collection_calls_correct_method(self):
         from unittest.mock import patch
+
         client = self._make_client()
         with patch.object(client, "_call", return_value={}) as mock_call:
             client.delete_collection("col-99")
@@ -1929,9 +2216,9 @@ class TestFlickrCollectionsClient(unittest.TestCase):
             http_method="POST",
         )
 
-
     def test_edit_photoset_meta_calls_correct_method(self):
         from unittest.mock import patch
+
         client = self._make_client()
         with patch.object(client, "_call", return_value={}) as mock_call:
             client.edit_photoset_meta("ps-123", "New Title")
@@ -1943,6 +2230,7 @@ class TestFlickrCollectionsClient(unittest.TestCase):
 
     def test_edit_collection_meta_calls_correct_method(self):
         from unittest.mock import patch
+
         client = self._make_client()
         with patch.object(client, "_call", return_value={}) as mock_call:
             client.edit_collection_meta("col-456", "Updated Folder")
@@ -1954,6 +2242,7 @@ class TestFlickrCollectionsClient(unittest.TestCase):
 
     def test_get_photosets_titled_returns_id_title_dict(self):
         from unittest.mock import patch
+
         client = self._make_client()
         api_response = {
             "stat": "ok",
@@ -1970,6 +2259,7 @@ class TestFlickrCollectionsClient(unittest.TestCase):
 
     def test_get_collections_flat_returns_id_title_dict(self):
         from unittest.mock import patch
+
         client = self._make_client()
         api_response = {
             "stat": "ok",
@@ -1992,6 +2282,7 @@ class TestFlickrCollectionsClient(unittest.TestCase):
 
     def test_delete_photo_calls_api(self):
         from unittest.mock import patch
+
         client = self._make_client()
         with patch.object(client, "_call", return_value={}) as mock_call:
             client.delete_photo("12345678")
@@ -2001,12 +2292,13 @@ class TestFlickrCollectionsClient(unittest.TestCase):
             http_method="POST",
         )
 
+
 # ---------------------------------------------------------------------------
 # Poller auto-push: approved Photos record matched to new Flickr upload
 # ---------------------------------------------------------------------------
 
-class TestFindApprovedPhotosRecord(unittest.TestCase):
 
+class TestFindApprovedPhotosRecord(unittest.TestCase):
     def setUp(self):
         fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
         os.close(fd)
@@ -2018,12 +2310,15 @@ class TestFindApprovedPhotosRecord(unittest.TestCase):
 
     def test_finds_approved_match_by_date(self):
         from poller.poller import _find_approved_photos_record
+
         # Insert a Photos-only approved record
-        self.db.upsert_photo({
-            "uuid": "ABC-123",
-            "date_taken": "2024-06-16 10:00:00",
-            "privacy_state": "approved_public",
-        })
+        self.db.upsert_photo(
+            {
+                "uuid": "ABC-123",
+                "date_taken": "2024-06-16 10:00:00",
+                "privacy_state": "approved_public",
+            }
+        )
         # Simulate incoming Flickr row with same date
         flickr_row = {"date_taken": "2024-06-16 10:00:00", "flickr_id": "99999"}
         match = _find_approved_photos_record(self.db, flickr_row)
@@ -2032,62 +2327,77 @@ class TestFindApprovedPhotosRecord(unittest.TestCase):
 
     def test_no_match_for_different_date(self):
         from poller.poller import _find_approved_photos_record
-        self.db.upsert_photo({
-            "uuid": "ABC-456",
-            "date_taken": "2024-06-16 10:00:00",
-            "privacy_state": "approved_public",
-        })
+
+        self.db.upsert_photo(
+            {
+                "uuid": "ABC-456",
+                "date_taken": "2024-06-16 10:00:00",
+                "privacy_state": "approved_public",
+            }
+        )
         flickr_row = {"date_taken": "2024-06-17 10:00:00", "flickr_id": "88888"}
         match = _find_approved_photos_record(self.db, flickr_row)
         self.assertIsNone(match)
 
     def test_no_match_when_not_approved(self):
         from poller.poller import _find_approved_photos_record
-        self.db.upsert_photo({
-            "uuid": "ABC-789",
-            "date_taken": "2024-06-16 10:00:00",
-            "privacy_state": "needs_review",
-        })
+
+        self.db.upsert_photo(
+            {
+                "uuid": "ABC-789",
+                "date_taken": "2024-06-16 10:00:00",
+                "privacy_state": "needs_review",
+            }
+        )
         flickr_row = {"date_taken": "2024-06-16 10:00:00", "flickr_id": "77777"}
         match = _find_approved_photos_record(self.db, flickr_row)
         self.assertIsNone(match)
 
     def test_no_match_when_already_has_flickr_id(self):
         from poller.poller import _find_approved_photos_record
+
         # Record already linked to Flickr should not be re-matched
-        self.db.upsert_photo({
-            "flickr_id": "EXISTING",
-            "date_taken": "2024-06-16 10:00:00",
-            "privacy_state": "approved_public",
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "EXISTING",
+                "date_taken": "2024-06-16 10:00:00",
+                "privacy_state": "approved_public",
+            }
+        )
         flickr_row = {"date_taken": "2024-06-16 10:00:00", "flickr_id": "NEW"}
         match = _find_approved_photos_record(self.db, flickr_row)
         self.assertIsNone(match)
 
     def test_iso8601_date_matches_space_format(self):
         from poller.poller import _find_approved_photos_record
+
         # Apple Photos stores: 2024-06-16T14:00:00.000000+00:00 (UTC)
         # Flickr returns:       2024-06-16 14:00:00 (UTC, space format)
-        self.db.upsert_photo({
-            "uuid": "DEF-123",
-            "date_taken": "2024-06-16T14:00:00.000000+00:00",
-            "privacy_state": "approved_public",
-        })
+        self.db.upsert_photo(
+            {
+                "uuid": "DEF-123",
+                "date_taken": "2024-06-16T14:00:00.000000+00:00",
+                "privacy_state": "approved_public",
+            }
+        )
         flickr_row = {"date_taken": "2024-06-16 14:00:00", "flickr_id": "66666"}
         match = _find_approved_photos_record(self.db, flickr_row)
         self.assertIsNotNone(match)
 
     def test_same_local_time_different_format_matches(self):
         from poller.poller import _find_approved_photos_record
+
         # Both sides record the same local capture time, just formatted differently.
         # normalise_dt strips timezone offset and milliseconds, keeping local time.
         # Apple Photos: 2024-06-16T10:00:00.583000-04:00 -> "2024-06-16 10:00:00"
         # Flickr:       2024-06-16T10:00:00               -> "2024-06-16 10:00:00"
-        self.db.upsert_photo({
-            "uuid": "GHI-123",
-            "date_taken": "2024-06-16T10:00:00.583000-04:00",
-            "privacy_state": "approved_public",
-        })
+        self.db.upsert_photo(
+            {
+                "uuid": "GHI-123",
+                "date_taken": "2024-06-16T10:00:00.583000-04:00",
+                "privacy_state": "approved_public",
+            }
+        )
         flickr_row = {"date_taken": "2024-06-16T10:00:00", "flickr_id": "55555"}
         match = _find_approved_photos_record(self.db, flickr_row)
         self.assertIsNotNone(match)
@@ -2097,14 +2407,16 @@ class TestFindApprovedPhotosRecord(unittest.TestCase):
 # bp CLI entry point
 # ---------------------------------------------------------------------------
 
-class TestBpCli(unittest.TestCase):
 
+class TestBpCli(unittest.TestCase):
     def _run_bp(self, *args):
         """Run bp with given args, return (stdout, stderr, exit_code)."""
         import subprocess
+
         result = subprocess.run(
             [sys.executable, "bp"] + list(args),
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
             cwd=str(Path(__file__).parent.parent),
         )
         return result.stdout, result.stderr, result.returncode
@@ -2145,21 +2457,21 @@ class TestBpCli(unittest.TestCase):
         stdout, _, code = self._run_bp("sync-albums", "--help")
         self.assertEqual(code, 0)
         self.assertIn("--dry-run", stdout)
-        self.assertIn("--album",   stdout)
+        self.assertIn("--album", stdout)
         self.assertIn("--verbose", stdout)
 
     def test_sync_albums_verbose_flag_accepted(self):
         """bp sync-albums --verbose must not be rejected as an unrecognised argument."""
         # --config is a global flag so it comes before the subcommand.
         # --verbose on the subparser must be accepted without argparse complaining.
-        _, stderr, _ = self._run_bp("--config", "/nonexistent.yml",
-                                    "sync-albums", "--verbose")
+        _, stderr, _ = self._run_bp("--config", "/nonexistent.yml", "sync-albums", "--verbose")
         self.assertNotIn("unrecognized", stderr.lower())
 
     def test_sync_album_collections_help(self):
         result = subprocess.run(
             [sys.executable, "bp", "sync-album-collections", "--help"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
             cwd=str(Path(__file__).parent.parent),
         )
         self.assertEqual(result.returncode, 0)
@@ -2168,7 +2480,8 @@ class TestBpCli(unittest.TestCase):
     def test_sync_album_collections_in_all_help(self):
         result = subprocess.run(
             [sys.executable, "bp", "all", "--help"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
             cwd=str(Path(__file__).parent.parent),
         )
         self.assertEqual(result.returncode, 0)
@@ -2181,8 +2494,7 @@ class TestBpCli(unittest.TestCase):
 
     def test_ui_host_flag_accepted(self):
         """bp ui --host 0.0.0.0 must not fail with 'unrecognized argument'."""
-        _, stderr, _ = self._run_bp("--config", "/nonexistent.yml",
-                                    "ui", "--host", "0.0.0.0")
+        _, stderr, _ = self._run_bp("--config", "/nonexistent.yml", "ui", "--host", "0.0.0.0")
         self.assertNotIn("unrecognized", stderr.lower())
 
 
@@ -2190,8 +2502,8 @@ class TestBpCli(unittest.TestCase):
 # updated_at stamping
 # ---------------------------------------------------------------------------
 
-class TestUpdatedAt(unittest.TestCase):
 
+class TestUpdatedAt(unittest.TestCase):
     def setUp(self):
         fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
         os.close(fd)
@@ -2208,6 +2520,7 @@ class TestUpdatedAt(unittest.TestCase):
 
     def test_updated_at_changes_on_update(self):
         import time
+
         self.db.upsert_photo({"flickr_id": "U2", "privacy_state": "needs_review"})
         first = self.db.get_photo_by_flickr_id("U2")["updated_at"]
         time.sleep(0.01)
@@ -2220,8 +2533,8 @@ class TestUpdatedAt(unittest.TestCase):
 # schema_migrations table
 # ---------------------------------------------------------------------------
 
-class TestSchemaMigrations(unittest.TestCase):
 
+class TestSchemaMigrations(unittest.TestCase):
     def setUp(self):
         fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
         os.close(fd)
@@ -2232,23 +2545,41 @@ class TestSchemaMigrations(unittest.TestCase):
         os.unlink(self.tmp_path)
 
     def test_migration_008_adds_metadata_cache_columns(self):
-        import sys as _sys, io, contextlib
+        import sys as _sys
+        import io
+        import contextlib
+
         _sys.path.insert(0, str(Path(__file__).parent.parent / "db" / "migrations"))
         from migrate_007_metadata_cache import run
+
         with contextlib.redirect_stdout(io.StringIO()):
             run(self.tmp_path, dry_run=False)
         cols = {r[1] for r in self.db.conn.execute("PRAGMA table_info(photos)").fetchall()}
-        for col in ("flickr_title", "flickr_description", "flickr_tags", "flickr_tags_hash",
-                    "flickr_last_updated", "photos_title", "photos_description",
-                    "photos_tags", "photos_tags_hash", "meta_synced_flickr_at",
-                    "meta_synced_photos_at", "meta_last_harmonized_at",
-                    "tags_truncated_for_flickr"):
+        for col in (
+            "flickr_title",
+            "flickr_description",
+            "flickr_tags",
+            "flickr_tags_hash",
+            "flickr_last_updated",
+            "photos_title",
+            "photos_description",
+            "photos_tags",
+            "photos_tags_hash",
+            "meta_synced_flickr_at",
+            "meta_synced_photos_at",
+            "meta_last_harmonized_at",
+            "tags_truncated_for_flickr",
+        ):
             self.assertIn(col, cols, f"Missing column: {col}")
 
     def test_migration_008_creates_proposals_table(self):
-        import sys as _sys, io, contextlib
+        import sys as _sys
+        import io
+        import contextlib
+
         _sys.path.insert(0, str(Path(__file__).parent.parent / "db" / "migrations"))
         from migrate_007_metadata_cache import run
+
         with contextlib.redirect_stdout(io.StringIO()):
             run(self.tmp_path, dry_run=False)
         row = self.db.conn.execute(
@@ -2257,43 +2588,66 @@ class TestSchemaMigrations(unittest.TestCase):
         self.assertIsNotNone(row)
 
     def test_migration_008_sets_baseline_harmonized_at(self):
-        import sys as _sys, io, contextlib
+        import sys as _sys
+        import io
+        import contextlib
+
         _sys.path.insert(0, str(Path(__file__).parent.parent / "db" / "migrations"))
         from migrate_007_metadata_cache import run
+
         # Seed a photo first, then run migration
-        self.db.upsert_photo({
-            "uuid": "uuid-baseline-test", "original_filename": "test.jpg",
-            "privacy_state": "needs_review", "proposed_tags": [],
-            "apple_persons": [], "apple_labels": [],
-        })
+        self.db.upsert_photo(
+            {
+                "uuid": "uuid-baseline-test",
+                "original_filename": "test.jpg",
+                "privacy_state": "needs_review",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
         with contextlib.redirect_stdout(io.StringIO()):
             run(self.tmp_path, dry_run=False)
         row = self.db.conn.execute(
             "SELECT meta_last_harmonized_at FROM photos WHERE uuid = 'uuid-baseline-test'"
         ).fetchone()
-        self.assertIsNotNone(row["meta_last_harmonized_at"],
-                             "Existing rows should have meta_last_harmonized_at set")
+        self.assertIsNotNone(
+            row["meta_last_harmonized_at"], "Existing rows should have meta_last_harmonized_at set"
+        )
 
     def test_migration_008_idempotent(self):
-        import sys as _sys, io, contextlib
+        import sys as _sys
+        import io
+        import contextlib
+
         _sys.path.insert(0, str(Path(__file__).parent.parent / "db" / "migrations"))
         from migrate_007_metadata_cache import run
+
         with contextlib.redirect_stdout(io.StringIO()):
             run(self.tmp_path, dry_run=False)
             run(self.tmp_path, dry_run=False)  # should not raise
 
     def test_migration_008_proposals_identity_constraint(self):
         """The unique index on metadata_proposals prevents duplicate pending proposals."""
-        import sys as _sys, io, contextlib
+        import sys as _sys
+        import io
+        import contextlib
+
         _sys.path.insert(0, str(Path(__file__).parent.parent / "db" / "migrations"))
         from migrate_007_metadata_cache import run
+
         with contextlib.redirect_stdout(io.StringIO()):
             run(self.tmp_path, dry_run=False)
-        photo_id = self.db.upsert_photo({
-            "uuid": "uuid-proposal-test", "original_filename": "test.jpg",
-            "privacy_state": "needs_review", "proposed_tags": [],
-            "apple_persons": [], "apple_labels": [],
-        })
+        photo_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-proposal-test",
+                "original_filename": "test.jpg",
+                "privacy_state": "needs_review",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
         now = "2026-01-01T00:00:00+00:00"
         self.db.conn.execute(
             """INSERT INTO metadata_proposals
@@ -2317,13 +2671,15 @@ class TestSchemaMigrations(unittest.TestCase):
 # bp exit codes
 # ---------------------------------------------------------------------------
 
-class TestBpExitCodes(unittest.TestCase):
 
+class TestBpExitCodes(unittest.TestCase):
     def _run_bp(self, *args):
         import subprocess
+
         result = subprocess.run(
             [sys.executable, "bp"] + list(args),
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
             cwd=str(Path(__file__).parent.parent),
         )
         return result.stdout, result.stderr, result.returncode
@@ -2340,6 +2696,7 @@ class TestBpExitCodes(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Reconcile exit code behavior
 # ---------------------------------------------------------------------------
+
 
 class TestReconcileExitCodes(unittest.TestCase):
     """
@@ -2389,8 +2746,8 @@ class TestReconcileExitCodes(unittest.TestCase):
 # Poller push_errors propagation
 # ---------------------------------------------------------------------------
 
-class TestPollerPushErrors(unittest.TestCase):
 
+class TestPollerPushErrors(unittest.TestCase):
     def setUp(self):
         fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
         os.close(fd)
@@ -2401,15 +2758,17 @@ class TestPollerPushErrors(unittest.TestCase):
         os.unlink(self.tmp_path)
 
     def test_push_to_flickr_returns_zero_on_success(self):
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import MagicMock
         from poller.poller import _push_to_flickr
         import json
 
-        self.db.upsert_photo({
-            "flickr_id": "TEST1",
-            "privacy_state": "approved_public",
-            "proposed_tags": json.dumps(["tag1", "tag2"]),
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "TEST1",
+                "privacy_state": "approved_public",
+                "proposed_tags": json.dumps(["tag1", "tag2"]),
+            }
+        )
         record = self.db.get_photo_by_flickr_id("TEST1")
 
         mock_client = MagicMock()
@@ -2422,11 +2781,13 @@ class TestPollerPushErrors(unittest.TestCase):
         from poller.poller import _push_to_flickr
         import json
 
-        self.db.upsert_photo({
-            "flickr_id": "TEST2",
-            "privacy_state": "approved_public",
-            "proposed_tags": json.dumps(["tag1"]),
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "TEST2",
+                "privacy_state": "approved_public",
+                "proposed_tags": json.dumps(["tag1"]),
+            }
+        )
         record = self.db.get_photo_by_flickr_id("TEST2")
 
         mock_client = MagicMock()
@@ -2442,16 +2803,20 @@ class TestPollerPushErrors(unittest.TestCase):
         from poller.poller import _push_to_flickr
         import json
 
-        self.db.upsert_photo({
-            "flickr_id": "MAXTAGS",
-            "privacy_state": "approved_public",
-            "proposed_tags": json.dumps(["tag1"]),
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "MAXTAGS",
+                "privacy_state": "approved_public",
+                "proposed_tags": json.dumps(["tag1"]),
+            }
+        )
         record = self.db.get_photo_by_flickr_id("MAXTAGS")
 
         mock_client = MagicMock()
         mock_client.set_permissions.return_value = {"stat": "ok"}
-        mock_client.add_tags.side_effect = FlickrError(FLICKR_ERR_MAX_TAGS, "Maximum number of tags reached")
+        mock_client.add_tags.side_effect = FlickrError(
+            FLICKR_ERR_MAX_TAGS, "Maximum number of tags reached"
+        )
 
         errors = _push_to_flickr(mock_client, "MAXTAGS", record, self.db, dry_run=False)
         # Max tags is not an error — perms still pushed successfully
@@ -2463,11 +2828,13 @@ class TestPollerPushErrors(unittest.TestCase):
         from poller.poller import _push_to_flickr
         import json
 
-        self.db.upsert_photo({
-            "flickr_id": "TEST3",
-            "privacy_state": "approved_public",
-            "proposed_tags": json.dumps(["tag1"]),
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "TEST3",
+                "privacy_state": "approved_public",
+                "proposed_tags": json.dumps(["tag1"]),
+            }
+        )
         record = self.db.get_photo_by_flickr_id("TEST3")
 
         mock_client = MagicMock()
@@ -2482,19 +2849,23 @@ class TestPollerPushErrors(unittest.TestCase):
 # sync_photo_albums — scanner helper
 # ---------------------------------------------------------------------------
 
+
 class TestSyncPhotoAlbums(unittest.TestCase):
     """sync_photo_albums must use photo.album_info (AlbumInfo objects), not photo.albums (strings)."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         from db.db import Database
+
         self.db = Database(Path(self._tmp.name) / "test.db")
         # Insert a photo to attach albums to
-        self.photo_id = self.db.upsert_photo({
-            "uuid": "test-uuid-001",
-            "original_filename": "IMG_001.jpg",
-            "privacy_state": "candidate_public",
-        })
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "test-uuid-001",
+                "original_filename": "IMG_001.jpg",
+                "privacy_state": "candidate_public",
+            }
+        )
 
     def tearDown(self):
         self.db.close()
@@ -2503,6 +2874,7 @@ class TestSyncPhotoAlbums(unittest.TestCase):
     def _make_album_info(self, title, uuid, album_type=None, parent=None):
         """Return a simple namespace mimicking an osxphotos AlbumInfo object."""
         from types import SimpleNamespace
+
         obj = SimpleNamespace(title=title, uuid=uuid, parent=parent)
         if album_type is not None:
             obj.album_type = album_type
@@ -2511,6 +2883,7 @@ class TestSyncPhotoAlbums(unittest.TestCase):
     def _make_folder_info(self, title, uuid, parent=None):
         """Return a simple namespace mimicking an osxphotos FolderInfo object."""
         from types import SimpleNamespace
+
         return SimpleNamespace(title=title, uuid=uuid, parent=parent)
 
     def test_uses_album_info_not_albums(self):
@@ -2521,8 +2894,8 @@ class TestSyncPhotoAlbums(unittest.TestCase):
         album = self._make_album_info("Vacation 2024", "album-uuid-1")
         # photo.albums is a plain list of strings — must be ignored
         photo = SimpleNamespace(
-            albums=["Vacation 2024"],          # strings — wrong attribute
-            album_info=[album],                # AlbumInfo objects — correct
+            albums=["Vacation 2024"],  # strings — wrong attribute
+            album_info=[album],  # AlbumInfo objects — correct
         )
         sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)
 
@@ -2536,7 +2909,7 @@ class TestSyncPhotoAlbums(unittest.TestCase):
         from poller.scanner import sync_photo_albums
         from types import SimpleNamespace
 
-        user_album  = self._make_album_info("My Trip", "uuid-user",  album_type="Album")
+        user_album = self._make_album_info("My Trip", "uuid-user", album_type="Album")
         smart_album = self._make_album_info("Favourites", "uuid-smart", album_type="SmartAlbum")
         photo = SimpleNamespace(album_info=[user_album, smart_album])
 
@@ -2597,16 +2970,20 @@ class TestSyncPhotoAlbums(unittest.TestCase):
         from types import SimpleNamespace
 
         folder = self._make_folder_info("Travel", "folder-uuid-1")
-        album  = self._make_album_info("Paris Trip", "album-uuid-1", parent=folder)
-        photo  = SimpleNamespace(album_info=[album])
+        album = self._make_album_info("Paris Trip", "album-uuid-1", parent=folder)
+        photo = SimpleNamespace(album_info=[album])
 
         sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)
 
-        folder_row = self.db.conn.execute("SELECT * FROM folders WHERE apple_uuid='folder-uuid-1'").fetchone()
+        folder_row = self.db.conn.execute(
+            "SELECT * FROM folders WHERE apple_uuid='folder-uuid-1'"
+        ).fetchone()
         self.assertIsNotNone(folder_row)
         self.assertEqual(folder_row["name"], "Travel")
 
-        album_row = self.db.conn.execute("SELECT folder_id FROM albums WHERE apple_uuid='album-uuid-1'").fetchone()
+        album_row = self.db.conn.execute(
+            "SELECT folder_id FROM albums WHERE apple_uuid='album-uuid-1'"
+        ).fetchone()
         self.assertEqual(album_row["folder_id"], folder_row["id"])
 
     def test_album_with_nested_folders_creates_all_rows(self):
@@ -2614,14 +2991,18 @@ class TestSyncPhotoAlbums(unittest.TestCase):
         from types import SimpleNamespace
 
         grandparent = self._make_folder_info("Europe", "uuid-gp")
-        parent      = self._make_folder_info("France", "uuid-p", parent=grandparent)
-        album       = self._make_album_info("Paris", "uuid-album", parent=parent)
-        photo       = SimpleNamespace(album_info=[album])
+        parent = self._make_folder_info("France", "uuid-p", parent=grandparent)
+        album = self._make_album_info("Paris", "uuid-album", parent=parent)
+        photo = SimpleNamespace(album_info=[album])
 
         sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)
 
-        gp_row = self.db.conn.execute("SELECT id, parent_id FROM folders WHERE apple_uuid='uuid-gp'").fetchone()
-        p_row  = self.db.conn.execute("SELECT id, parent_id FROM folders WHERE apple_uuid='uuid-p'").fetchone()
+        gp_row = self.db.conn.execute(
+            "SELECT id, parent_id FROM folders WHERE apple_uuid='uuid-gp'"
+        ).fetchone()
+        p_row = self.db.conn.execute(
+            "SELECT id, parent_id FROM folders WHERE apple_uuid='uuid-p'"
+        ).fetchone()
         self.assertIsNone(gp_row["parent_id"])
         self.assertEqual(p_row["parent_id"], gp_row["id"])
 
@@ -2634,7 +3015,9 @@ class TestSyncPhotoAlbums(unittest.TestCase):
 
         sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)
 
-        row = self.db.conn.execute("SELECT folder_id FROM albums WHERE apple_uuid='uuid-nf'").fetchone()
+        row = self.db.conn.execute(
+            "SELECT folder_id FROM albums WHERE apple_uuid='uuid-nf'"
+        ).fetchone()
         self.assertIsNone(row["folder_id"])
 
     def test_shared_folder_deduplicated_across_albums(self):
@@ -2643,8 +3026,8 @@ class TestSyncPhotoAlbums(unittest.TestCase):
 
         folder = self._make_folder_info("Travel", "folder-uuid-shared")
         album1 = self._make_album_info("Paris", "uuid-album-1", parent=folder)
-        album2 = self._make_album_info("Rome",  "uuid-album-2", parent=folder)
-        photo  = SimpleNamespace(album_info=[album1, album2])
+        album2 = self._make_album_info("Rome", "uuid-album-2", parent=folder)
+        photo = SimpleNamespace(album_info=[album1, album2])
 
         sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)
 
@@ -2656,8 +3039,8 @@ class TestSyncPhotoAlbums(unittest.TestCase):
         from types import SimpleNamespace
 
         folder = self._make_folder_info("Travel", "folder-uuid-dry")
-        album  = self._make_album_info("Paris", "uuid-album-dry", parent=folder)
-        photo  = SimpleNamespace(album_info=[album])
+        album = self._make_album_info("Paris", "uuid-album-dry", parent=folder)
+        photo = SimpleNamespace(album_info=[album])
 
         sync_photo_albums(photo, self.photo_id, self.db, dry_run=True)
 
@@ -2669,27 +3052,31 @@ class TestSyncPhotoAlbums(unittest.TestCase):
 # Album DB methods
 # ---------------------------------------------------------------------------
 
+
 def _make_db(tmp_dir: str):
     from db.db import Database
+
     return Database(Path(tmp_dir) / "test.db")
 
 
 def _seed_photo(db, flickr_id=None, perms_pushed=0) -> int:
     import uuid as _uuid
-    return db.upsert_photo({
-        "uuid": str(_uuid.uuid4()),
-        "original_filename": "IMG_0001.JPG",
-        "privacy_state": "approved_public" if flickr_id else "candidate_public",
-        "flickr_id": flickr_id,
-        "perms_pushed_flickr": perms_pushed,
-        "proposed_tags": [],
-        "apple_persons": [],
-        "apple_labels": [],
-    })
+
+    return db.upsert_photo(
+        {
+            "uuid": str(_uuid.uuid4()),
+            "original_filename": "IMG_0001.JPG",
+            "privacy_state": "approved_public" if flickr_id else "candidate_public",
+            "flickr_id": flickr_id,
+            "perms_pushed_flickr": perms_pushed,
+            "proposed_tags": [],
+            "apple_persons": [],
+            "apple_labels": [],
+        }
+    )
 
 
 class TestAlbumDB(unittest.TestCase):
-
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.db = _make_db(self._tmp.name)
@@ -2774,7 +3161,9 @@ class TestAlbumDB(unittest.TestCase):
 
     def test_set_album_flickr_set_id(self):
         album_id = self.db.upsert_album("uuid-a", "Album A")
-        self.db.set_album_flickr_set_id(album_id, "72157720000001", "https://www.flickr.com/photos/me/sets/72157720000001/")
+        self.db.set_album_flickr_set_id(
+            album_id, "72157720000001", "https://www.flickr.com/photos/me/sets/72157720000001/"
+        )
         row = self.db.conn.execute(
             "SELECT flickr_set_id, flickr_set_url FROM albums WHERE id = ?", (album_id,)
         ).fetchone()
@@ -2793,17 +3182,20 @@ class TestAlbumDB(unittest.TestCase):
     def test_get_pending_includes_keep_private_photos(self):
         """keep_private photos with flickr_id but perms_pushed=0 should be included."""
         import uuid as _uuid
-        photo_id = self.db.upsert_photo({
-            "uuid": str(_uuid.uuid4()),
-            "original_filename": "private.jpg",
-            "privacy_state": "keep_private",
-            "review_decision": "keep_private",
-            "flickr_id": "f999",
-            "perms_pushed_flickr": 0,
-            "proposed_tags": [],
-            "apple_persons": [],
-            "apple_labels": [],
-        })
+
+        photo_id = self.db.upsert_photo(
+            {
+                "uuid": str(_uuid.uuid4()),
+                "original_filename": "private.jpg",
+                "privacy_state": "keep_private",
+                "review_decision": "keep_private",
+                "flickr_id": "f999",
+                "perms_pushed_flickr": 0,
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
         album_id = self.db.upsert_album("uuid-prv", "Private Album")
         self.db.upsert_photo_album(photo_id, album_id)
 
@@ -2858,8 +3250,8 @@ class TestAlbumDB(unittest.TestCase):
 # Folder DB
 # ---------------------------------------------------------------------------
 
-class TestFolderDB(unittest.TestCase):
 
+class TestFolderDB(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.db = _make_db(self._tmp.name)
@@ -2886,8 +3278,10 @@ class TestFolderDB(unittest.TestCase):
 
     def test_upsert_folder_with_parent(self):
         parent_id = self.db.upsert_folder("uuid-parent", "Europe")
-        child_id  = self.db.upsert_folder("uuid-child", "France", parent_id=parent_id)
-        row = self.db.conn.execute("SELECT parent_id FROM folders WHERE id=?", (child_id,)).fetchone()
+        child_id = self.db.upsert_folder("uuid-child", "France", parent_id=parent_id)
+        row = self.db.conn.execute(
+            "SELECT parent_id FROM folders WHERE id=?", (child_id,)
+        ).fetchone()
         self.assertEqual(row["parent_id"], parent_id)
 
     def test_upsert_album_accepts_folder_id(self):
@@ -2934,8 +3328,8 @@ class TestFolderDB(unittest.TestCase):
 # Album pusher
 # ---------------------------------------------------------------------------
 
-class TestAlbumPusher(unittest.TestCase):
 
+class TestAlbumPusher(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.db = _make_db(self._tmp.name)
@@ -2949,6 +3343,7 @@ class TestAlbumPusher(unittest.TestCase):
 
     def _mock_flickr(self, new_set_id="SET001"):
         from unittest.mock import MagicMock
+
         m = MagicMock()
         m.create_photoset.return_value = new_set_id
         m.add_photo_to_photoset.return_value = None
@@ -2956,6 +3351,7 @@ class TestAlbumPusher(unittest.TestCase):
 
     def test_skips_photo_with_no_flickr_id(self):
         from flickr.album_pusher import push_photo_to_albums
+
         photo_id = _seed_photo(self.db, flickr_id=None)
         album_id = self.db.upsert_album("uuid-nf", "No Flickr Album")
         self.db.upsert_photo_album(photo_id, album_id)
@@ -2966,12 +3362,14 @@ class TestAlbumPusher(unittest.TestCase):
 
     def test_creates_photoset_when_none_exists(self):
         from flickr.album_pusher import push_photo_to_albums
+
         flickr = self._mock_flickr(new_set_id="NEW_SET")
         push_photo_to_albums(self.db, flickr, self.photo_id)
         flickr.create_photoset.assert_called_once_with("Trip Photos", "flickr001")
 
     def test_adds_to_existing_photoset(self):
         from flickr.album_pusher import push_photo_to_albums
+
         self.db.set_album_flickr_set_id(self.album_id, "EXISTING_SET")
         flickr = self._mock_flickr()
         push_photo_to_albums(self.db, flickr, self.photo_id)
@@ -2980,6 +3378,7 @@ class TestAlbumPusher(unittest.TestCase):
 
     def test_marks_pushed_on_success(self):
         from flickr.album_pusher import push_photo_to_albums
+
         flickr = self._mock_flickr(new_set_id="SET001")
         push_photo_to_albums(self.db, flickr, self.photo_id)
         row = self.db.conn.execute(
@@ -2990,6 +3389,7 @@ class TestAlbumPusher(unittest.TestCase):
 
     def test_stores_flickr_set_id_after_create(self):
         from flickr.album_pusher import push_photo_to_albums
+
         flickr = self._mock_flickr(new_set_id="CREATED_SET")
         push_photo_to_albums(self.db, flickr, self.photo_id)
         row = self.db.conn.execute(
@@ -2999,6 +3399,7 @@ class TestAlbumPusher(unittest.TestCase):
 
     def test_returns_count_of_successes(self):
         from flickr.album_pusher import push_photo_to_albums
+
         # Add a second album
         album_id2 = self.db.upsert_album("uuid-b", "Another Album")
         self.db.upsert_photo_album(self.photo_id, album_id2)
@@ -3063,6 +3464,7 @@ class TestAlbumPusher(unittest.TestCase):
 
     def test_returns_zero_when_no_pending(self):
         from flickr.album_pusher import push_photo_to_albums
+
         flickr = self._mock_flickr()
         # Push once to mark done
         push_photo_to_albums(self.db, flickr, self.photo_id)
@@ -3075,12 +3477,13 @@ class TestAlbumPusher(unittest.TestCase):
 # sync-albums CLI
 # ---------------------------------------------------------------------------
 
-class TestSyncAlbumsCLI(unittest.TestCase):
 
+class TestSyncAlbumsCLI(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self._db_path = Path(self._tmp.name) / "test.db"
         from db.db import Database
+
         self.db = Database(self._db_path)
 
         # Write a minimal config file
@@ -3101,10 +3504,12 @@ class TestSyncAlbumsCLI(unittest.TestCase):
 
     def _run_cli(self, extra_argv=None):
         import subprocess
+
         cmd = [
             sys.executable,
             str(Path(__file__).parent.parent / "flickr" / "sync_albums.py"),
-            "--config", str(self._config_path),
+            "--config",
+            str(self._config_path),
         ] + (extra_argv or [])
         result = subprocess.run(cmd, capture_output=True, text=True)
         return result
@@ -3144,20 +3549,22 @@ class TestSyncAlbumsCLI(unittest.TestCase):
 # Metadata conflicts — DB layer
 # ---------------------------------------------------------------------------
 
-class TestMetadataConflictDB(unittest.TestCase):
 
+class TestMetadataConflictDB(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.db = Database(Path(self._tmp.name) / "test.db")
-        self.photo_id = self.db.upsert_photo({
-            "uuid": "uuid-mc-001",
-            "original_filename": "IMG_mc.JPG",
-            "privacy_state": "approved_public",
-            "flickr_id": "flickr-mc-001",
-            "proposed_tags": [],
-            "apple_persons": [],
-            "apple_labels": [],
-        })
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-mc-001",
+                "original_filename": "IMG_mc.JPG",
+                "privacy_state": "approved_public",
+                "flickr_id": "flickr-mc-001",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
 
     def tearDown(self):
         self.db.close()
@@ -3198,11 +3605,17 @@ class TestMetadataConflictDB(unittest.TestCase):
         self.assertEqual(rows[0]["field"], "description")
 
     def test_get_unresolved_filtered_by_photo_id(self):
-        other_id = self.db.upsert_photo({
-            "uuid": "uuid-mc-002", "original_filename": "IMG2.JPG",
-            "privacy_state": "approved_public", "flickr_id": "flickr-mc-002",
-            "proposed_tags": [], "apple_persons": [], "apple_labels": [],
-        })
+        other_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-mc-002",
+                "original_filename": "IMG2.JPG",
+                "privacy_state": "approved_public",
+                "flickr_id": "flickr-mc-002",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
         self.db.upsert_metadata_conflict(self.photo_id, "title", "F", "P")
         self.db.upsert_metadata_conflict(other_id, "title", "F2", "P2")
         rows = self.db.get_unresolved_conflicts(photo_id=self.photo_id)
@@ -3240,11 +3653,13 @@ class TestMetadataConflictDB(unittest.TestCase):
 # Metadata puller — core comparison logic
 # ---------------------------------------------------------------------------
 
+
 class TestNormaliseTags(unittest.TestCase):
     """_normalise_tags matches Flickr's alphanumeric-only normalisation."""
 
     def _norm(self, tags):
         from flickr.metadata_puller import _normalise_tags
+
         return _normalise_tags(tags)
 
     def test_strips_spaces_within_tag(self):
@@ -3269,20 +3684,22 @@ class TestNormaliseTags(unittest.TestCase):
 
 
 class TestMetadataPuller(unittest.TestCase):
-
     def setUp(self):
         from unittest.mock import MagicMock
+
         self._tmp = tempfile.TemporaryDirectory()
         self.db = Database(Path(self._tmp.name) / "test.db")
-        self.photo_id = self.db.upsert_photo({
-            "uuid": "uuid-mp-001",
-            "original_filename": "IMG_mp.JPG",
-            "privacy_state": "approved_public",
-            "flickr_id": "flickr-mp-001",
-            "proposed_tags": [],
-            "apple_persons": [],
-            "apple_labels": [],
-        })
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-mp-001",
+                "original_filename": "IMG_mp.JPG",
+                "privacy_state": "approved_public",
+                "flickr_id": "flickr-mp-001",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
         self.mock_flickr = MagicMock()
         self.library = "/fake/Photos.photoslibrary"
 
@@ -3293,15 +3710,16 @@ class TestMetadataPuller(unittest.TestCase):
     def _set_flickr_meta(self, title="", description="", tags=None):
         self.mock_flickr.get_photo_info.return_value = {
             "photo": {
-                "title":       {"_content": title},
+                "title": {"_content": title},
                 "description": {"_content": description},
-                "tags":        {"tag": [{"raw": t} for t in (tags or [])]},
+                "tags": {"tag": [{"raw": t} for t in (tags or [])]},
             }
         }
 
     def _patch_photos(self, title="", description="", tags=None, has_update=True):
         """Return a context manager patching _read_photos_metadata and _write_photos_metadata."""
         from unittest.mock import patch
+
         read_return = {"title": title, "description": description, "tags": tags or []}
         patches = [
             patch("flickr.metadata_puller._read_photos_metadata", return_value=read_return),
@@ -3309,24 +3727,36 @@ class TestMetadataPuller(unittest.TestCase):
         if has_update:
             patches.append(patch("flickr.metadata_puller._write_photos_metadata"))
         else:
-            patches.append(patch(
-                "flickr.metadata_puller._write_photos_metadata",
-                side_effect=RuntimeError("Photos.app is not running"),
-            ))
+            patches.append(
+                patch(
+                    "flickr.metadata_puller._write_photos_metadata",
+                    side_effect=RuntimeError("Photos.app is not running"),
+                )
+            )
         return patches
 
     def _pull(self, dry_run=False):
         from flickr.metadata_puller import pull_photo_metadata
+
         return pull_photo_metadata(
-            self.db, self.mock_flickr, self.photo_id,
-            library_path=self.library, dry_run=dry_run,
+            self.db,
+            self.mock_flickr,
+            self.photo_id,
+            library_path=self.library,
+            dry_run=dry_run,
         )
 
     def test_flickr_wins_when_photos_empty(self):
         from unittest.mock import patch
+
         self._set_flickr_meta(title="A Great Shot")
-        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "", "tags": []}), \
-             patch("flickr.metadata_puller._write_photos_metadata") as mock_write:
+        with (
+            patch(
+                "flickr.metadata_puller._read_photos_metadata",
+                return_value={"title": "", "description": "", "tags": []},
+            ),
+            patch("flickr.metadata_puller._write_photos_metadata") as mock_write,
+        ):
             result = self._pull()
         self.assertIn("title", result["written"])
         self.assertEqual(result["conflicts"], [])
@@ -3334,9 +3764,15 @@ class TestMetadataPuller(unittest.TestCase):
 
     def test_no_op_when_values_equal(self):
         from unittest.mock import patch
+
         self._set_flickr_meta(title="Same Title")
-        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "Same Title", "description": "", "tags": []}), \
-             patch("flickr.metadata_puller._write_photos_metadata") as mock_write:
+        with (
+            patch(
+                "flickr.metadata_puller._read_photos_metadata",
+                return_value={"title": "Same Title", "description": "", "tags": []},
+            ),
+            patch("flickr.metadata_puller._write_photos_metadata") as mock_write,
+        ):
             result = self._pull()
         self.assertIn("title", result["skipped"])
         self.assertEqual(result["written"], [])
@@ -3344,9 +3780,15 @@ class TestMetadataPuller(unittest.TestCase):
 
     def test_conflict_recorded_when_both_non_empty_different(self):
         from unittest.mock import patch
+
         self._set_flickr_meta(description="Flickr caption")
-        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "Photos caption", "tags": []}), \
-             patch("flickr.metadata_puller._write_photos_metadata") as mock_write:
+        with (
+            patch(
+                "flickr.metadata_puller._read_photos_metadata",
+                return_value={"title": "", "description": "Photos caption", "tags": []},
+            ),
+            patch("flickr.metadata_puller._write_photos_metadata") as mock_write,
+        ):
             result = self._pull()
         self.assertIn("description", result["conflicts"])
         self.assertEqual(result["written"], [])
@@ -3357,18 +3799,30 @@ class TestMetadataPuller(unittest.TestCase):
 
     def test_photos_only_value_preserved(self):
         from unittest.mock import patch
+
         self._set_flickr_meta(description="")
-        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "Local note", "tags": []}), \
-             patch("flickr.metadata_puller._write_photos_metadata") as mock_write:
+        with (
+            patch(
+                "flickr.metadata_puller._read_photos_metadata",
+                return_value={"title": "", "description": "Local note", "tags": []},
+            ),
+            patch("flickr.metadata_puller._write_photos_metadata") as mock_write,
+        ):
             result = self._pull()
         self.assertIn("description", result["skipped"])
         mock_write.assert_not_called()
 
     def test_tags_comparison_case_insensitive(self):
         from unittest.mock import patch
+
         self._set_flickr_meta(tags=["Nature", "Landscape"])
-        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "", "tags": ["nature", "landscape"]}), \
-             patch("flickr.metadata_puller._write_photos_metadata") as mock_write:
+        with (
+            patch(
+                "flickr.metadata_puller._read_photos_metadata",
+                return_value={"title": "", "description": "", "tags": ["nature", "landscape"]},
+            ),
+            patch("flickr.metadata_puller._write_photos_metadata") as mock_write,
+        ):
             result = self._pull()
         self.assertIn("tags", result["skipped"])
         self.assertEqual(result["conflicts"], [])
@@ -3377,10 +3831,15 @@ class TestMetadataPuller(unittest.TestCase):
     def test_tags_no_conflict_when_differ_only_by_spaces(self):
         # Flickr strips spaces from tags, so "New York" == "newyork"
         from unittest.mock import patch
+
         self._set_flickr_meta(tags=["newyork", "landscape"])
-        with patch("flickr.metadata_puller._read_photos_metadata",
-                   return_value={"title": "", "description": "", "tags": ["New York", "landscape"]}), \
-             patch("flickr.metadata_puller._write_photos_metadata") as mock_write:
+        with (
+            patch(
+                "flickr.metadata_puller._read_photos_metadata",
+                return_value={"title": "", "description": "", "tags": ["New York", "landscape"]},
+            ),
+            patch("flickr.metadata_puller._write_photos_metadata") as mock_write,
+        ):
             result = self._pull()
         self.assertIn("tags", result["skipped"])
         self.assertEqual(result["conflicts"], [])
@@ -3388,9 +3847,15 @@ class TestMetadataPuller(unittest.TestCase):
 
     def test_tags_conflict_when_different(self):
         from unittest.mock import patch
+
         self._set_flickr_meta(tags=["nature"])
-        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "", "tags": ["landscape"]}), \
-             patch("flickr.metadata_puller._write_photos_metadata"):
+        with (
+            patch(
+                "flickr.metadata_puller._read_photos_metadata",
+                return_value={"title": "", "description": "", "tags": ["landscape"]},
+            ),
+            patch("flickr.metadata_puller._write_photos_metadata"),
+        ):
             result = self._pull()
         self.assertIn("tags", result["conflicts"])
         rows = self.db.get_unresolved_conflicts(photo_id=self.photo_id)
@@ -3399,32 +3864,47 @@ class TestMetadataPuller(unittest.TestCase):
 
     def test_dry_run_skips_all_writes_and_db_updates(self):
         from unittest.mock import patch
+
         self._set_flickr_meta(title="Flickr Title", description="Flickr Desc")
-        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "Photos Desc", "tags": []}), \
-             patch("flickr.metadata_puller._write_photos_metadata") as mock_write:
+        with (
+            patch(
+                "flickr.metadata_puller._read_photos_metadata",
+                return_value={"title": "", "description": "Photos Desc", "tags": []},
+            ),
+            patch("flickr.metadata_puller._write_photos_metadata") as mock_write,
+        ):
             result = self._pull(dry_run=True)
         mock_write.assert_not_called()
         rows = self.db.get_unresolved_conflicts(photo_id=self.photo_id)
-        self.assertEqual(len(rows), 0)   # no DB writes in dry_run
+        self.assertEqual(len(rows), 0)  # no DB writes in dry_run
         self.assertIn("title", result["written"])  # counted as would-write
 
     def test_no_uuid_returns_no_uuid_status(self):
-        from unittest.mock import patch
+
         # Seed a photo without a uuid
-        no_uuid_id = self.db.upsert_photo({
-            "uuid": None, "original_filename": "no_uuid.JPG",
-            "privacy_state": "approved_public", "flickr_id": "flickr-nouuid",
-            "proposed_tags": [], "apple_persons": [], "apple_labels": [],
-        })
+        no_uuid_id = self.db.upsert_photo(
+            {
+                "uuid": None,
+                "original_filename": "no_uuid.JPG",
+                "privacy_state": "approved_public",
+                "flickr_id": "flickr-nouuid",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
         from flickr.metadata_puller import pull_photo_metadata
+
         result = pull_photo_metadata(self.db, self.mock_flickr, no_uuid_id, self.library)
         self.assertEqual(result["status"], "no_uuid")
         self.mock_flickr.get_photo_info.assert_not_called()
 
     def test_flickr_error_propagates(self):
         from flickr.flickr_client import FlickrError
+
         self.mock_flickr.get_photo_info.side_effect = FlickrError(500, "Server Error")
         from flickr.metadata_puller import pull_photo_metadata
+
         result = pull_photo_metadata(self.db, self.mock_flickr, self.photo_id, self.library)
         self.assertEqual(result["status"], "flickr_error")
         self.assertTrue(len(result["errors"]) > 0)
@@ -3432,8 +3912,10 @@ class TestMetadataPuller(unittest.TestCase):
     def test_flickr_not_found_returns_flickr_deleted_status(self):
         """Flickr error 1 (photo not found) sets flickr_deleted in DB and returns flickr_deleted status."""
         from flickr.flickr_client import FlickrError
-        self.mock_flickr.get_photo_info.side_effect = FlickrError(1, 'Photo not found')
+
+        self.mock_flickr.get_photo_info.side_effect = FlickrError(1, "Photo not found")
         from flickr.metadata_puller import pull_photo_metadata
+
         result = pull_photo_metadata(self.db, self.mock_flickr, self.photo_id, self.library)
         self.assertEqual(result["status"], "flickr_deleted")
         # DB flag should be set
@@ -3445,8 +3927,10 @@ class TestMetadataPuller(unittest.TestCase):
     def test_flickr_not_found_dry_run_does_not_write_db(self):
         """In dry-run mode, flickr_deleted status is returned but the DB flag is NOT set."""
         from flickr.flickr_client import FlickrError
-        self.mock_flickr.get_photo_info.side_effect = FlickrError(1, 'Photo not found')
+
+        self.mock_flickr.get_photo_info.side_effect = FlickrError(1, "Photo not found")
         from flickr.metadata_puller import pull_photo_metadata
+
         result = pull_photo_metadata(
             self.db, self.mock_flickr, self.photo_id, self.library, dry_run=True
         )
@@ -3458,9 +3942,18 @@ class TestMetadataPuller(unittest.TestCase):
 
     def test_write_error_counted_as_write_error_status(self):
         from unittest.mock import patch
+
         self._set_flickr_meta(title="Flickr Title")
-        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "", "tags": []}), \
-             patch("flickr.metadata_puller._write_photos_metadata", side_effect=RuntimeError("Photos not running")):
+        with (
+            patch(
+                "flickr.metadata_puller._read_photos_metadata",
+                return_value={"title": "", "description": "", "tags": []},
+            ),
+            patch(
+                "flickr.metadata_puller._write_photos_metadata",
+                side_effect=RuntimeError("Photos not running"),
+            ),
+        ):
             result = self._pull()
         self.assertEqual(result["status"], "write_error")
         self.assertTrue(len(result["errors"]) > 0)
@@ -3471,13 +3964,24 @@ class TestMetadataPuller(unittest.TestCase):
     def test_photoscript_invalid_uuid_does_not_crash_batch(self):
         """photoscript.Photo() raising a non-RuntimeError must not escape as an unhandled exception."""
         from unittest.mock import patch, MagicMock
+
         self._set_flickr_meta(title="Flickr Title")
         # Simulate photoscript raising ValueError("Invalid photo id: <uuid>")
-        with patch("flickr.metadata_puller._read_photos_metadata", return_value={"title": "", "description": "", "tags": []}), \
-             patch("flickr.metadata_puller._photos_is_responsive", return_value=True), \
-             patch.dict(__import__("sys").modules, {"photoscript": MagicMock(
-                 Photo=MagicMock(side_effect=ValueError("Invalid photo id: uuid-mp-001"))
-             )}):
+        with (
+            patch(
+                "flickr.metadata_puller._read_photos_metadata",
+                return_value={"title": "", "description": "", "tags": []},
+            ),
+            patch("flickr.metadata_puller._photos_is_responsive", return_value=True),
+            patch.dict(
+                __import__("sys").modules,
+                {
+                    "photoscript": MagicMock(
+                        Photo=MagicMock(side_effect=ValueError("Invalid photo id: uuid-mp-001"))
+                    )
+                },
+            ),
+        ):
             result = self._pull()
         self.assertEqual(result["status"], "write_error")
         self.assertTrue(any("Invalid photo id" in e for e in result["errors"]))
@@ -3487,32 +3991,45 @@ class TestMetadataPuller(unittest.TestCase):
 # pull_batch — PhotosDB caching and progress logging
 # ---------------------------------------------------------------------------
 
-class TestPullBatch(unittest.TestCase):
 
+class TestPullBatch(unittest.TestCase):
     def setUp(self):
         from unittest.mock import MagicMock
+
         self._tmp = tempfile.TemporaryDirectory()
         self.db = Database(Path(self._tmp.name) / "test.db")
         self.library = str(Path(self._tmp.name) / "Photos.photoslibrary")
         self.mock_flickr = MagicMock()
 
         # Seed two photos with flickr_id and uuid
-        self.id1 = self.db.upsert_photo({
-            "uuid": "uuid-batch-1", "original_filename": "IMG_001.JPG",
-            "privacy_state": "approved_public", "flickr_id": "flickr-001",
-            "proposed_tags": [], "apple_persons": [], "apple_labels": [],
-        })
-        self.id2 = self.db.upsert_photo({
-            "uuid": "uuid-batch-2", "original_filename": "IMG_002.JPG",
-            "privacy_state": "approved_public", "flickr_id": "flickr-002",
-            "proposed_tags": [], "apple_persons": [], "apple_labels": [],
-        })
+        self.id1 = self.db.upsert_photo(
+            {
+                "uuid": "uuid-batch-1",
+                "original_filename": "IMG_001.JPG",
+                "privacy_state": "approved_public",
+                "flickr_id": "flickr-001",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+        self.id2 = self.db.upsert_photo(
+            {
+                "uuid": "uuid-batch-2",
+                "original_filename": "IMG_002.JPG",
+                "privacy_state": "approved_public",
+                "flickr_id": "flickr-002",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
 
         self.mock_flickr.get_photo_info.return_value = {
             "photo": {
-                "title":       {"_content": "Flickr Title"},
+                "title": {"_content": "Flickr Title"},
                 "description": {"_content": ""},
-                "tags":        {"tag": []},
+                "tags": {"tag": []},
             }
         }
 
@@ -3523,30 +4040,48 @@ class TestPullBatch(unittest.TestCase):
     def _mock_osxphotos(self):
         """Return (mock_module, mock_db_instance) with sys.modules patching."""
         from unittest.mock import MagicMock, patch
+
         mock_db_instance = MagicMock()
         mock_db_instance.photos.return_value = []
         mock_module = MagicMock()
         mock_module.PhotosDB.return_value = mock_db_instance
-        return mock_module, mock_db_instance, patch.dict(__import__("sys").modules, {"osxphotos": mock_module})
+        return (
+            mock_module,
+            mock_db_instance,
+            patch.dict(__import__("sys").modules, {"osxphotos": mock_module}),
+        )
 
     def test_photosdb_opened_once_not_per_photo(self):
         """PhotosDB should be opened once for the whole batch, not once per photo."""
         mock_module, mock_db_instance, patcher = self._mock_osxphotos()
         with patcher:
             from flickr.metadata_puller import pull_batch
-            pull_batch(self.db, self.mock_flickr, [self.id1, self.id2],
-                       library_path=self.library, dry_run=True)
+
+            pull_batch(
+                self.db,
+                self.mock_flickr,
+                [self.id1, self.id2],
+                library_path=self.library,
+                dry_run=True,
+            )
         mock_module.PhotosDB.assert_called_once_with(dbfile=self.library)
 
     def test_progress_logged_at_intervals(self):
         """pull_batch should emit at least one INFO progress line."""
         import logging as _logging
+
         mock_module, mock_db_instance, patcher = self._mock_osxphotos()
         with patcher, self.assertLogs("blue-pearmain.metadata_puller", level=_logging.INFO) as cm:
             from flickr.metadata_puller import pull_batch
-            pull_batch(self.db, self.mock_flickr, [self.id1, self.id2],
-                       library_path=self.library, dry_run=True)
-        progress_lines = [l for l in cm.output if "Progress:" in l or "Processing" in l]
+
+            pull_batch(
+                self.db,
+                self.mock_flickr,
+                [self.id1, self.id2],
+                library_path=self.library,
+                dry_run=True,
+            )
+        progress_lines = [line for line in cm.output if "Progress:" in line or "Processing" in line]
         self.assertTrue(len(progress_lines) >= 1, "Expected at least one progress log line")
 
     def test_batch_totals_aggregated(self):
@@ -3554,8 +4089,14 @@ class TestPullBatch(unittest.TestCase):
         mock_module, mock_db_instance, patcher = self._mock_osxphotos()
         with patcher:
             from flickr.metadata_puller import pull_batch
-            totals = pull_batch(self.db, self.mock_flickr, [self.id1, self.id2],
-                                library_path=self.library, dry_run=True)
+
+            totals = pull_batch(
+                self.db,
+                self.mock_flickr,
+                [self.id1, self.id2],
+                library_path=self.library,
+                dry_run=True,
+            )
         self.assertIn("written", totals)
         self.assertIn("conflicts", totals)
         self.assertIn("skipped", totals)
@@ -3565,12 +4106,19 @@ class TestPullBatch(unittest.TestCase):
     def test_flickr_deleted_counted_as_skipped_not_failed(self):
         """A photo deleted from Flickr (error 1) should count as skipped, not failed."""
         from flickr.flickr_client import FlickrError
+
         self.mock_flickr.get_photo_info.side_effect = FlickrError(1, "Photo not found")
         mock_module, mock_db_instance, patcher = self._mock_osxphotos()
         with patcher:
             from flickr.metadata_puller import pull_batch
-            totals = pull_batch(self.db, self.mock_flickr, [self.id1, self.id2],
-                                library_path=self.library, dry_run=False)
+
+            totals = pull_batch(
+                self.db,
+                self.mock_flickr,
+                [self.id1, self.id2],
+                library_path=self.library,
+                dry_run=False,
+            )
         self.assertEqual(totals["failed"], 0)
         self.assertGreater(totals["skipped"], 0)
 
@@ -3579,37 +4127,40 @@ class TestPullBatch(unittest.TestCase):
 # Phase 4: scanner writes Photos metadata cache to DB
 # ---------------------------------------------------------------------------
 
+
 class TestPhotosRecordToDbMetadata(unittest.TestCase):
     """photos_record_to_db should capture Photos metadata cache columns."""
 
     def _make_mock_photo(self, title="", description="", keywords=None):
         from unittest.mock import MagicMock
+
         p = MagicMock()
-        p.uuid             = "uuid-meta-001"
+        p.uuid = "uuid-meta-001"
         p.original_filename = "IMG_meta.JPG"
-        p.date             = None
-        p.date_added       = None
-        p.exif_info        = None
-        p.latitude         = None
-        p.place            = None
-        p.media_analysis   = {}
-        p.score            = None
-        p.labels           = []
-        p.persons          = []
-        p.fingerprint      = ""
-        p.width            = None
-        p.height           = None
-        p.screenshot       = False
-        p.selfie           = False
-        p.live_photo       = False
-        p.album_info       = []
-        p.title            = title
-        p.description      = description
-        p.keywords         = keywords or []
+        p.date = None
+        p.date_added = None
+        p.exif_info = None
+        p.latitude = None
+        p.place = None
+        p.media_analysis = {}
+        p.score = None
+        p.labels = []
+        p.persons = []
+        p.fingerprint = ""
+        p.width = None
+        p.height = None
+        p.screenshot = False
+        p.selfie = False
+        p.live_photo = False
+        p.album_info = []
+        p.title = title
+        p.description = description
+        p.keywords = keywords or []
         return p
 
     def _convert(self, **kwargs):
         from poller.scanner import photos_record_to_db
+
         return photos_record_to_db(self._make_mock_photo(**kwargs))
 
     def test_photos_title_captured(self):
@@ -3632,6 +4183,7 @@ class TestPhotosRecordToDbMetadata(unittest.TestCase):
 
     def test_photos_tags_hash_case_insensitive(self):
         from poller.scanner import _compute_tags_hash
+
         h1 = _compute_tags_hash(["Alpha"])
         h2 = _compute_tags_hash(["alpha"])
         self.assertEqual(h1, h2)
@@ -3653,11 +4205,14 @@ class TestBuildEnrichedRowPhase4(unittest.TestCase):
     """build_enriched_row should propagate Photos metadata cache fields."""
 
     EXISTING = {
-        "id": 1, "flickr_id": "12345", "uuid": None,
+        "id": 1,
+        "flickr_id": "12345",
+        "uuid": None,
         "privacy_state": "candidate_public",
         "privacy_reason": "no people detected",
         "proposed_tags": [],
-        "latitude": None, "longitude": None,
+        "latitude": None,
+        "longitude": None,
         "place_ishome": 0,
     }
 
@@ -3666,9 +4221,14 @@ class TestBuildEnrichedRowPhase4(unittest.TestCase):
             "uuid": "ABC-123",
             "original_filename": "IMG_0001.HEIC",
             "date_taken": "2026-04-08T16:46:20-04:00",
-            "apple_labels": [], "apple_persons": [],
-            "apple_named_faces": 0, "apple_unknown_faces": 0, "apple_human_count": 0,
-            "_is_screenshot": False, "_is_selfie": False, "_is_live": False,
+            "apple_labels": [],
+            "apple_persons": [],
+            "apple_named_faces": 0,
+            "apple_unknown_faces": 0,
+            "apple_human_count": 0,
+            "_is_screenshot": False,
+            "_is_selfie": False,
+            "_is_live": False,
             "photos_title": "Test Title",
             "photos_description": "Test Desc",
             "photos_tags": ["holiday"],
@@ -3701,60 +4261,65 @@ class TestScannerSkipConditionPhase4(unittest.TestCase):
     """
 
     def setUp(self):
-        from unittest.mock import MagicMock, patch
+
         self._tmp = tempfile.TemporaryDirectory()
-        self.db   = Database(Path(self._tmp.name) / "test.db")
+        self.db = Database(Path(self._tmp.name) / "test.db")
         from datetime import datetime, timezone
+
         ts = datetime.now(timezone.utc).isoformat()
-        self.photo_id = self.db.upsert_photo({
-            "uuid":                  "uuid-skip-001",
-            "flickr_id":             "flickr-skip-001",
-            "original_filename":     "IMG_skip.JPG",
-            "privacy_state":         "approved_public",
-            "proposed_tags":         [],
-            "apple_persons":         [],
-            "apple_labels":          [],
-            "date_analyzed":         "2026-01-01T00:00:00",
-            "photos_title":          "Old Title",
-            "photos_tags_hash":      "oldhash",
-            "meta_synced_photos_at": ts,
-        })
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-skip-001",
+                "flickr_id": "flickr-skip-001",
+                "original_filename": "IMG_skip.JPG",
+                "privacy_state": "approved_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+                "date_analyzed": "2026-01-01T00:00:00",
+                "photos_title": "Old Title",
+                "photos_tags_hash": "oldhash",
+                "meta_synced_photos_at": ts,
+            }
+        )
 
     def tearDown(self):
         self.db.close()
         self._tmp.cleanup()
 
-    def _make_mock_photo(self, title="Old Title", keywords=None,
-                         date_analyzed="2026-01-01T00:00:00"):
+    def _make_mock_photo(
+        self, title="Old Title", keywords=None, date_analyzed="2026-01-01T00:00:00"
+    ):
         from unittest.mock import MagicMock
-        from poller.scanner import _compute_tags_hash
+
         p = MagicMock()
-        p.uuid             = "uuid-skip-001"
+        p.uuid = "uuid-skip-001"
         p.original_filename = "IMG_skip.JPG"
-        p.date             = None
-        p.date_added       = None
-        p.exif_info        = None
-        p.latitude         = None
-        p.place            = None
-        p.media_analysis   = {"date_analyzed": date_analyzed}
-        p.score            = None
-        p.labels           = []
-        p.persons          = []
-        p.fingerprint      = ""
-        p.width            = None
-        p.height           = None
-        p.screenshot       = False
-        p.selfie           = False
-        p.live_photo       = False
-        p.album_info       = []
-        p.title            = title
-        p.description      = ""
-        p.keywords         = keywords or []
+        p.date = None
+        p.date_added = None
+        p.exif_info = None
+        p.latitude = None
+        p.place = None
+        p.media_analysis = {"date_analyzed": date_analyzed}
+        p.score = None
+        p.labels = []
+        p.persons = []
+        p.fingerprint = ""
+        p.width = None
+        p.height = None
+        p.screenshot = False
+        p.selfie = False
+        p.live_photo = False
+        p.album_info = []
+        p.title = title
+        p.description = ""
+        p.keywords = keywords or []
         return p
 
     def _run_scan_one(self, mock_photo):
         from unittest.mock import MagicMock, patch
         from poller.scanner import scan
+
         mock_db_instance = MagicMock()
         mock_db_instance.photos.return_value = [mock_photo]
         mock_module = MagicMock()
@@ -3775,10 +4340,11 @@ class TestScannerSkipConditionPhase4(unittest.TestCase):
         ).fetchone()["updated_at"]
 
         # photo with same date_analyzed AND same photos_tags_hash/title
-        from poller.scanner import _compute_tags_hash
+
         p = self._make_mock_photo(title="Old Title", keywords=[])
         # Force the hash to match the stored "oldhash" by patching _compute_tags_hash
         from unittest.mock import patch
+
         with patch("poller.scanner._compute_tags_hash", return_value="oldhash"):
             self._run_scan_one(p)
 
@@ -3799,9 +4365,8 @@ class TestScannerSkipConditionPhase4(unittest.TestCase):
     def test_re_enriches_when_analysis_changes(self):
         """When date_analyzed changes, the row must be re-enriched."""
         from unittest.mock import patch
-        p = self._make_mock_photo(
-            title="Old Title", date_analyzed="2026-06-01T00:00:00"
-        )
+
+        p = self._make_mock_photo(title="Old Title", date_analyzed="2026-06-01T00:00:00")
         with patch("poller.scanner._compute_tags_hash", return_value="oldhash"):
             self._run_scan_one(p)
         row = self.db.conn.execute(
@@ -3814,18 +4379,23 @@ class TestScannerSkipConditionPhase4(unittest.TestCase):
 # Phase 3: sync-metadata reads from DB cache instead of per-photo Flickr API
 # ---------------------------------------------------------------------------
 
+
 class TestFlickrCacheRead(unittest.TestCase):
     """Unit tests for _read_flickr_cache."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.db   = Database(Path(self._tmp.name) / "test.db")
-        self.photo_id = self.db.upsert_photo({
-            "flickr_id":  "flickr-cache-001",
-            "uuid":       "uuid-cache-001",
-            "privacy_state": "approved_public",
-            "proposed_tags": [], "apple_persons": [], "apple_labels": [],
-        })
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        self.photo_id = self.db.upsert_photo(
+            {
+                "flickr_id": "flickr-cache-001",
+                "uuid": "uuid-cache-001",
+                "privacy_state": "approved_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
 
     def tearDown(self):
         self.db.close()
@@ -3833,6 +4403,7 @@ class TestFlickrCacheRead(unittest.TestCase):
 
     def _read_cache(self):
         from flickr.metadata_puller import _read_flickr_cache
+
         return _read_flickr_cache(self.db, self.photo_id)
 
     def test_returns_none_when_not_synced(self):
@@ -3841,6 +4412,7 @@ class TestFlickrCacheRead(unittest.TestCase):
 
     def test_returns_dict_when_synced(self):
         from datetime import datetime, timezone
+
         ts = datetime.now(timezone.utc).isoformat()
         self.db.conn.execute(
             """UPDATE photos
@@ -3858,6 +4430,7 @@ class TestFlickrCacheRead(unittest.TestCase):
 
     def test_returns_empty_strings_for_null_fields(self):
         from datetime import datetime, timezone
+
         ts = datetime.now(timezone.utc).isoformat()
         self.db.conn.execute(
             "UPDATE photos SET meta_synced_flickr_at=? WHERE id=?",
@@ -3871,6 +4444,7 @@ class TestFlickrCacheRead(unittest.TestCase):
 
     def test_tags_parsed_from_json(self):
         from datetime import datetime, timezone
+
         ts = datetime.now(timezone.utc).isoformat()
         self.db.conn.execute(
             """UPDATE photos SET flickr_tags='["foo","bar"]', meta_synced_flickr_at=?
@@ -3890,16 +4464,21 @@ class TestPullPhotoMetadataPhase3(unittest.TestCase):
 
     def setUp(self):
         from unittest.mock import MagicMock
+
         self._tmp = tempfile.TemporaryDirectory()
-        self.db   = Database(Path(self._tmp.name) / "test.db")
-        self.photo_id = self.db.upsert_photo({
-            "flickr_id":  "flickr-p3-001",
-            "uuid":       "uuid-p3-001",
-            "privacy_state": "approved_public",
-            "proposed_tags": [], "apple_persons": [], "apple_labels": [],
-        })
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        self.photo_id = self.db.upsert_photo(
+            {
+                "flickr_id": "flickr-p3-001",
+                "uuid": "uuid-p3-001",
+                "privacy_state": "approved_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
         self.mock_flickr = MagicMock()
-        self.library     = "/fake/Photos.photoslibrary"
+        self.library = "/fake/Photos.photoslibrary"
 
     def tearDown(self):
         self.db.close()
@@ -3907,6 +4486,7 @@ class TestPullPhotoMetadataPhase3(unittest.TestCase):
 
     def _seed_cache(self, title="Cached Title", description="", tags=None):
         from datetime import datetime, timezone
+
         ts = datetime.now(timezone.utc).isoformat()
         self.db.conn.execute(
             """UPDATE photos
@@ -3920,12 +4500,20 @@ class TestPullPhotoMetadataPhase3(unittest.TestCase):
     def _pull(self, dry_run=False):
         from unittest.mock import patch
         from flickr.metadata_puller import pull_photo_metadata
-        with patch("flickr.metadata_puller._read_photos_metadata",
-                   return_value={"title": "", "description": "", "tags": []}), \
-             patch("flickr.metadata_puller._write_photos_metadata"):
+
+        with (
+            patch(
+                "flickr.metadata_puller._read_photos_metadata",
+                return_value={"title": "", "description": "", "tags": []},
+            ),
+            patch("flickr.metadata_puller._write_photos_metadata"),
+        ):
             return pull_photo_metadata(
-                self.db, self.mock_flickr, self.photo_id,
-                library_path=self.library, dry_run=dry_run,
+                self.db,
+                self.mock_flickr,
+                self.photo_id,
+                library_path=self.library,
+                dry_run=dry_run,
             )
 
     def test_cache_hit_skips_flickr_api(self):
@@ -3939,9 +4527,9 @@ class TestPullPhotoMetadataPhase3(unittest.TestCase):
         """When meta_synced_flickr_at is NULL, the live Flickr API is called."""
         self.mock_flickr.get_photo_info.return_value = {
             "photo": {
-                "title":       {"_content": "Live Title"},
+                "title": {"_content": "Live Title"},
                 "description": {"_content": ""},
-                "tags":        {"tag": []},
+                "tags": {"tag": []},
             }
         }
         result = self._pull()
@@ -3960,30 +4548,37 @@ class TestPullPhotoMetadataPhase3(unittest.TestCase):
         self._seed_cache()
         self.mock_flickr.get_photo_info.return_value = {
             "photo": {
-                "title":       {"_content": ""},
+                "title": {"_content": ""},
                 "description": {"_content": ""},
-                "tags":        {"tag": []},
+                "tags": {"tag": []},
             }
         }
         mock_module, mock_db_instance, patcher = self._mock_osxphotos()
         with patcher:
             from flickr.metadata_puller import pull_batch
+
             totals = pull_batch(
-                self.db, self.mock_flickr, [self.photo_id],
-                library_path=self.library, dry_run=True,
+                self.db,
+                self.mock_flickr,
+                [self.photo_id],
+                library_path=self.library,
+                dry_run=True,
             )
-        self.assertIn("cache_hits",   totals)
+        self.assertIn("cache_hits", totals)
         self.assertIn("cache_misses", totals)
         self.assertEqual(totals["cache_hits"] + totals["cache_misses"], 1)
 
     def _mock_osxphotos(self):
         from unittest.mock import MagicMock, patch
+
         mock_db_instance = MagicMock()
         mock_db_instance.photos.return_value = []
         mock_module = MagicMock()
         mock_module.PhotosDB.return_value = mock_db_instance
-        return mock_module, mock_db_instance, patch.dict(
-            __import__("sys").modules, {"osxphotos": mock_module}
+        return (
+            mock_module,
+            mock_db_instance,
+            patch.dict(__import__("sys").modules, {"osxphotos": mock_module}),
         )
 
 
@@ -3991,12 +4586,14 @@ class TestPullPhotoMetadataPhase3(unittest.TestCase):
 # Phase 2: poller Flickr metadata cache helpers and poll-loop behaviour
 # ---------------------------------------------------------------------------
 
+
 class TestPollerHelpers(unittest.TestCase):
     """Unit tests for _normalise_tag and _compute_tags_hash."""
 
     def setUp(self):
         from poller.poller import _normalise_tag, _compute_tags_hash
-        self._normalise_tag    = _normalise_tag
+
+        self._normalise_tag = _normalise_tag
         self._compute_tags_hash = _compute_tags_hash
 
     def test_normalise_tag_strips_whitespace(self):
@@ -4008,6 +4605,7 @@ class TestPollerHelpers(unittest.TestCase):
     def test_normalise_tag_nfc(self):
         # NFC normalization: composed vs decomposed form
         import unicodedata
+
         decomposed = unicodedata.normalize("NFD", "café")
         self.assertEqual(self._normalise_tag(decomposed), "café")
 
@@ -4036,22 +4634,23 @@ class TestPollerHelpers(unittest.TestCase):
         self.assertEqual(len(h), 64)  # SHA-256 hex digest
 
 
-class TestFlickrPhotoToDb(unittest.TestCase):
-    """Tests for flickr_photo_to_db and _enrich_from_info."""
+class TestFlickrPhotoToDbEnrich(unittest.TestCase):
+    """Tests for flickr_photo_to_db title/lastupdate fields and _enrich_from_info."""
 
     def setUp(self):
         from poller.poller import flickr_photo_to_db, _enrich_from_info
+
         self._flickr_photo_to_db = flickr_photo_to_db
-        self._enrich_from_info   = _enrich_from_info
+        self._enrich_from_info = _enrich_from_info
 
     def _make_photo(self, **overrides):
         base = {
-            "id":     "12345",
+            "id": "12345",
             "secret": "abc",
             "server": "srv",
-            "farm":   1,
-            "title":  "My Photo",
-            "tags":   "foo bar",
+            "farm": 1,
+            "title": "My Photo",
+            "tags": "foo bar",
         }
         base.update(overrides)
         return base
@@ -4072,62 +4671,72 @@ class TestFlickrPhotoToDb(unittest.TestCase):
 
     def test_enrich_updates_flickr_title_from_getinfo(self):
         row = self._flickr_photo_to_db(self._make_photo(title="Old Title"))
-        info = {"photo": {
-            "title":       {"_content": "New Title From Info"},
-            "description": {"_content": ""},
-            "tags":        {"tag": []},
-            "dates":       {},
-            "owner":       {},
-        }}
+        info = {
+            "photo": {
+                "title": {"_content": "New Title From Info"},
+                "description": {"_content": ""},
+                "tags": {"tag": []},
+                "dates": {},
+                "owner": {},
+            }
+        }
         self._enrich_from_info(row, info)
         self.assertEqual(row["flickr_title"], "New Title From Info")
 
     def test_enrich_captures_lastupdate_from_dates(self):
         row = self._flickr_photo_to_db(self._make_photo())
-        info = {"photo": {
-            "title":       {"_content": ""},
-            "description": {"_content": ""},
-            "tags":        {"tag": []},
-            "dates":       {"lastupdate": "1700000000"},
-            "owner":       {},
-        }}
+        info = {
+            "photo": {
+                "title": {"_content": ""},
+                "description": {"_content": ""},
+                "tags": {"tag": []},
+                "dates": {"lastupdate": "1700000000"},
+                "owner": {},
+            }
+        }
         self._enrich_from_info(row, info)
         self.assertIn("flickr_last_updated", row)
         self.assertTrue(row["flickr_last_updated"].startswith("2023"))
 
     def test_enrich_does_not_overwrite_title_with_empty(self):
         row = self._flickr_photo_to_db(self._make_photo(title="Keep This"))
-        info = {"photo": {
-            "title":       {"_content": ""},
-            "description": {"_content": ""},
-            "tags":        {"tag": []},
-            "dates":       {},
-            "owner":       {},
-        }}
+        info = {
+            "photo": {
+                "title": {"_content": ""},
+                "description": {"_content": ""},
+                "tags": {"tag": []},
+                "dates": {},
+                "owner": {},
+            }
+        }
         self._enrich_from_info(row, info)
         self.assertEqual(row["flickr_title"], "Keep This")
 
     def test_original_dimensions_stored_from_width_o_height_o(self):
         row = self._flickr_photo_to_db(self._make_photo(width_o="6048", height_o="4024"))
-        self.assertEqual(row["width"],  6048)
+        self.assertEqual(row["width"], 6048)
         self.assertEqual(row["height"], 4024)
 
     def test_large_dimensions_used_as_fallback(self):
         row = self._flickr_photo_to_db(self._make_photo(width_l="2048", height_l="1365"))
-        self.assertEqual(row["width"],  2048)
+        self.assertEqual(row["width"], 2048)
         self.assertEqual(row["height"], 1365)
 
     def test_original_preferred_over_large(self):
-        row = self._flickr_photo_to_db(self._make_photo(
-            width_o="6048", height_o="4024",
-            width_l="2048", height_l="1365",
-        ))
-        self.assertEqual(row["width"],  6048)
+        row = self._flickr_photo_to_db(
+            self._make_photo(
+                width_o="6048",
+                height_o="4024",
+                width_l="2048",
+                height_l="1365",
+            )
+        )
+        self.assertEqual(row["width"], 6048)
         self.assertEqual(row["height"], 4024)
 
     def test_no_dimensions_when_absent(self):
         row = self._flickr_photo_to_db(self._make_photo())
-        self.assertNotIn("width",  row)
+        self.assertNotIn("width", row)
         self.assertNotIn("height", row)
 
 
@@ -4135,27 +4744,30 @@ class TestPollerMetadataCache(unittest.TestCase):
     """Integration tests: poll() writes Flickr metadata cache columns to DB."""
 
     def setUp(self):
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import MagicMock
+
         self._tmp = tempfile.TemporaryDirectory()
-        self.db   = Database(Path(self._tmp.name) / "test.db")
+        self.db = Database(Path(self._tmp.name) / "test.db")
 
         # One minimal photo returned by the mock Flickr client
         self.flickr_id = "poll-meta-001"
         self.mock_client = MagicMock()
         self.mock_client.get_recent_uploads.return_value = {
             "photos": {
-                "photo": [{
-                    "id":          self.flickr_id,
-                    "secret":      "sec",
-                    "server":      "srv",
-                    "farm":        1,
-                    "title":       "Poll Title",
-                    "tags":        "alpha beta",
-                    "description": {"_content": "Poll desc"},
-                    "lastupdate":  "1700000000",
-                }],
+                "photo": [
+                    {
+                        "id": self.flickr_id,
+                        "secret": "sec",
+                        "server": "srv",
+                        "farm": 1,
+                        "title": "Poll Title",
+                        "tags": "alpha beta",
+                        "description": {"_content": "Poll desc"},
+                        "lastupdate": "1700000000",
+                    }
+                ],
                 "pages": 1,
-                "page":  1,
+                "page": 1,
             }
         }
 
@@ -4165,6 +4777,7 @@ class TestPollerMetadataCache(unittest.TestCase):
 
     def _run_poll(self, **kwargs):
         from poller.poller import poll
+
         poll(
             client=self.mock_client,
             db=self.db,
@@ -4217,8 +4830,13 @@ class TestPollerMetadataCache(unittest.TestCase):
         self._run_poll()
         row = self._get_row()
         cols = set(row.keys())
-        for bad in ("thumbnail_url_l", "thumbnail_url_m",
-                    "flickr_is_public", "flickr_owner_nsid", "original_format"):
+        for bad in (
+            "thumbnail_url_l",
+            "thumbnail_url_m",
+            "flickr_is_public",
+            "flickr_owner_nsid",
+            "original_format",
+        ):
             self.assertNotIn(bad, cols, f"{bad!r} should not be a DB column")
 
     def test_flickr_description_written_to_db(self):
@@ -4232,27 +4850,31 @@ class TestUpsertPhotoTagSerialisation(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.db   = Database(Path(self._tmp.name) / "test.db")
+        self.db = Database(Path(self._tmp.name) / "test.db")
 
     def tearDown(self):
         self.db.close()
         self._tmp.cleanup()
 
     def test_flickr_tags_list_serialised_to_json(self):
-        photo_id = self.db.upsert_photo({
-            "flickr_id":   "serial-flickr-001",
-            "flickr_tags": ["alpha", "beta"],
-        })
+        photo_id = self.db.upsert_photo(
+            {
+                "flickr_id": "serial-flickr-001",
+                "flickr_tags": ["alpha", "beta"],
+            }
+        )
         row = self.db.conn.execute(
             "SELECT flickr_tags FROM photos WHERE id = ?", (photo_id,)
         ).fetchone()
         self.assertEqual(json.loads(row["flickr_tags"]), ["alpha", "beta"])
 
     def test_photos_tags_list_serialised_to_json(self):
-        photo_id = self.db.upsert_photo({
-            "flickr_id":   "serial-photos-001",
-            "photos_tags": ["vacation", "summer"],
-        })
+        photo_id = self.db.upsert_photo(
+            {
+                "flickr_id": "serial-photos-001",
+                "photos_tags": ["vacation", "summer"],
+            }
+        )
         row = self.db.conn.execute(
             "SELECT photos_tags FROM photos WHERE id = ?", (photo_id,)
         ).fetchone()
@@ -4260,10 +4882,12 @@ class TestUpsertPhotoTagSerialisation(unittest.TestCase):
 
     def test_flickr_tags_string_passed_through_unchanged(self):
         payload = json.dumps(["gamma"])
-        photo_id = self.db.upsert_photo({
-            "flickr_id":   "serial-str-001",
-            "flickr_tags": payload,
-        })
+        photo_id = self.db.upsert_photo(
+            {
+                "flickr_id": "serial-str-001",
+                "flickr_tags": payload,
+            }
+        )
         row = self.db.conn.execute(
             "SELECT flickr_tags FROM photos WHERE id = ?", (photo_id,)
         ).fetchone()
@@ -4274,8 +4898,8 @@ class TestUpsertPhotoTagSerialisation(unittest.TestCase):
 # sync-metadata CLI
 # ---------------------------------------------------------------------------
 
-class TestSyncMetadataCLI(unittest.TestCase):
 
+class TestSyncMetadataCLI(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self._db_path = Path(self._tmp.name) / "test.db"
@@ -4302,7 +4926,8 @@ class TestSyncMetadataCLI(unittest.TestCase):
         cmd = [
             sys.executable,
             str(Path(__file__).parent.parent / "flickr" / "sync_metadata.py"),
-            "--config", str(self._config_path),
+            "--config",
+            str(self._config_path),
         ] + (extra_argv or [])
         return subprocess.run(cmd, capture_output=True, text=True)
 
@@ -4335,9 +4960,7 @@ class TestSyncMetadataCLI(unittest.TestCase):
                 meta_last_harmonized_at,
                 flickr_tags, photos_tags, flickr_tags_hash, photos_tags_hash)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("111", "AAA-111", now, now, later,
-             '["beach"]', '[]',
-             "hash1", "hash2"),
+            ("111", "AAA-111", now, now, later, '["beach"]', "[]", "hash1", "hash2"),
         )
         self.db.conn.commit()
         # Without --force, drift filter sees 0 (harmonized_at is newer than caches)
@@ -4353,6 +4976,7 @@ class TestSyncMetadataCLI(unittest.TestCase):
 # End-to-end reconcile lifecycle: mismatch → fix → idempotent clean
 # ---------------------------------------------------------------------------
 
+
 class TestReconcileLifecycle(unittest.TestCase):
     """
     Full lifecycle test covering:
@@ -4364,21 +4988,24 @@ class TestReconcileLifecycle(unittest.TestCase):
 
     def setUp(self):
         from unittest.mock import MagicMock
+
         self._tmp = tempfile.mkdtemp()
-        self.db   = Database(Path(self._tmp) / "test.db")
+        self.db = Database(Path(self._tmp) / "test.db")
 
         # Seed: photo approved_public, perms pushed, tags pushed
-        self.photo_id = self.db.upsert_photo({
-            "uuid":               "uuid-e2e-001",
-            "original_filename":  "IMG_e2e.JPG",
-            "privacy_state":      "approved_public",
-            "flickr_id":          "flickr-e2e-001",
-            "perms_pushed_flickr": 1,
-            "tags_pushed_flickr":  1,
-            "proposed_tags":      ["nature", "landscape"],
-            "apple_persons":      [],
-            "apple_labels":       [],
-        })
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-e2e-001",
+                "original_filename": "IMG_e2e.JPG",
+                "privacy_state": "approved_public",
+                "flickr_id": "flickr-e2e-001",
+                "perms_pushed_flickr": 1,
+                "tags_pushed_flickr": 1,
+                "proposed_tags": ["nature", "landscape"],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
 
         # Build a reusable mock FlickrClient
         self.mock_client = MagicMock()
@@ -4386,27 +5013,27 @@ class TestReconcileLifecycle(unittest.TestCase):
     def tearDown(self):
         self.db.close()
         import shutil
+
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _photo_row(self):
-        return dict(self.db.conn.execute(
-            "SELECT * FROM photos WHERE id = ?", (self.photo_id,)
-        ).fetchone())
+        return dict(
+            self.db.conn.execute("SELECT * FROM photos WHERE id = ?", (self.photo_id,)).fetchone()
+        )
 
     def _flickr_info_response(self, is_public: int, tags: list[str]):
         """Build a minimal get_photo_info payload."""
         return {
             "photo": {
                 "visibility": {"ispublic": is_public},
-                "tags": {
-                    "tag": [{"raw": t} for t in tags]
-                },
+                "tags": {"tag": [{"raw": t} for t in tags]},
             }
         }
 
     def test_1_mismatch_detected_when_flickr_is_private(self):
         """DB says public+pushed; Flickr says private → perm_mismatch."""
         from poller.reconcile import check_photo
+
         self.mock_client.get_photo_info.return_value = self._flickr_info_response(
             is_public=0, tags=["nature", "landscape"]
         )
@@ -4415,14 +5042,15 @@ class TestReconcileLifecycle(unittest.TestCase):
 
         self.assertEqual(result["status"], "perm_mismatch")
         self.assertEqual(result["perm_expected"], "public")
-        self.assertEqual(result["perm_actual"],   "private")
-        self.assertEqual(result["fixes"],  [])   # fix=False — no API write
+        self.assertEqual(result["perm_actual"], "private")
+        self.assertEqual(result["fixes"], [])  # fix=False — no API write
         self.assertEqual(result["errors"], [])
         self.mock_client.set_permissions.assert_not_called()
 
     def test_2_fix_corrects_mismatch_and_calls_api(self):
         """fix=True: reconcile calls set_permissions; result carries the fix."""
         from poller.reconcile import check_photo
+
         self.mock_client.get_photo_info.return_value = self._flickr_info_response(
             is_public=0, tags=["nature", "landscape"]
         )
@@ -4432,13 +5060,12 @@ class TestReconcileLifecycle(unittest.TestCase):
         self.assertEqual(result["status"], "perm_mismatch")
         self.assertIn("perm", result["fixes"])
         self.assertEqual(result["errors"], [])
-        self.mock_client.set_permissions.assert_called_once_with(
-            "flickr-e2e-001", is_public=1
-        )
+        self.mock_client.set_permissions.assert_called_once_with("flickr-e2e-001", is_public=1)
 
     def test_3_idempotent_second_run_is_clean(self):
         """After Flickr is consistent, a second reconcile pass returns ok."""
         from poller.reconcile import check_photo
+
         self.mock_client.get_photo_info.return_value = self._flickr_info_response(
             is_public=1, tags=["nature", "landscape"]
         )
@@ -4446,13 +5073,14 @@ class TestReconcileLifecycle(unittest.TestCase):
         result = check_photo(self.mock_client, self._photo_row(), fix=True, verbose=False)
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["fixes"],  [])
+        self.assertEqual(result["fixes"], [])
         self.assertEqual(result["errors"], [])
         self.mock_client.set_permissions.assert_not_called()
 
     def test_4_tag_mismatch_detected_and_fixed(self):
         """Tags on Flickr are missing some expected tags → tag_mismatch, then fixed."""
         from poller.reconcile import check_photo
+
         # Flickr has only "nature"; "landscape" is missing
         self.mock_client.get_photo_info.return_value = self._flickr_info_response(
             is_public=1, tags=["nature"]
@@ -4468,6 +5096,7 @@ class TestReconcileLifecycle(unittest.TestCase):
         """Flickr API failure on get_photo_info → flickr_error status, not a crash."""
         from poller.reconcile import check_photo
         from flickr.flickr_client import FlickrError
+
         self.mock_client.get_photo_info.side_effect = FlickrError(500, "Server Error")
 
         result = check_photo(self.mock_client, self._photo_row(), fix=False, verbose=False)
@@ -4484,62 +5113,78 @@ class TestReconcileLifecycle(unittest.TestCase):
         before = self._photo_row()["updated_at"]
         time.sleep(0.01)
         self.db.set_privacy_state(self.photo_id, "keep_private", "test")
-        self.assertGreater(self._photo_row()["updated_at"], before,
-                           "set_privacy_state must update updated_at")
+        self.assertGreater(
+            self._photo_row()["updated_at"], before, "set_privacy_state must update updated_at"
+        )
 
         # record_review
         before = self._photo_row()["updated_at"]
         time.sleep(0.01)
         self.db.record_review(self.photo_id, "make_public")
-        self.assertGreater(self._photo_row()["updated_at"], before,
-                           "record_review must update updated_at")
+        self.assertGreater(
+            self._photo_row()["updated_at"], before, "record_review must update updated_at"
+        )
 
         # undo_decision
         before = self._photo_row()["updated_at"]
         time.sleep(0.01)
         self.db.undo_decision(self.photo_id)
-        self.assertGreater(self._photo_row()["updated_at"], before,
-                           "undo_decision must update updated_at")
+        self.assertGreater(
+            self._photo_row()["updated_at"], before, "undo_decision must update updated_at"
+        )
 
 
 # ---------------------------------------------------------------------------
 # reconcile output format
 # ---------------------------------------------------------------------------
 
+
 class TestFormatResultLine(unittest.TestCase):
     URL = "https://www.flickr.com/photos/cdevers/12345"
-    TS  = "2026-05-11T12:29:29"
+    TS = "2026-05-11T12:29:29"
 
     def _base(self, **kw):
         base = {
-            "flickr_id": "12345", "status": "ok",
-            "perm_expected": "", "perm_actual": "",
-            "tags_missing": [], "fixes": [], "errors": [],
+            "flickr_id": "12345",
+            "status": "ok",
+            "perm_expected": "",
+            "perm_actual": "",
+            "tags_missing": [],
+            "fixes": [],
+            "errors": [],
         }
         base.update(kw)
         return base
 
     def test_ok_line(self):
         from poller.reconcile import format_result_line
+
         line = format_result_line(self._base(status="ok"), self.URL, self.TS)
         self.assertEqual(line, f"{self.TS} [ok] {self.URL}")
 
     def test_flickr_error_line(self):
         from poller.reconcile import format_result_line
-        line = format_result_line(self._base(status="flickr_error", errors=["oops"]), self.URL, self.TS)
+
+        line = format_result_line(
+            self._base(status="flickr_error", errors=["oops"]), self.URL, self.TS
+        )
         self.assertEqual(line, f"{self.TS} [ERR] {self.URL}")
 
     def test_tag_mismatch_with_fix(self):
         from poller.reconcile import format_result_line
-        result = self._base(status="tag_mismatch", fixes=["tags"],
-                            tags_missing=["unitedstates"])
+
+        result = self._base(status="tag_mismatch", fixes=["tags"], tags_missing=["unitedstates"])
         line = format_result_line(result, self.URL, self.TS)
-        self.assertEqual(line, f"{self.TS} [tag_mismatch] {self.URL} fixed:tags missing:unitedstates")
+        self.assertEqual(
+            line, f"{self.TS} [tag_mismatch] {self.URL} fixed:tags missing:unitedstates"
+        )
 
     def test_fix_comes_before_missing(self):
         from poller.reconcile import format_result_line
-        result = self._base(status="tag_mismatch", fixes=["tags"],
-                            tags_missing=["opticalequipment", "unitedstates"])
+
+        result = self._base(
+            status="tag_mismatch", fixes=["tags"], tags_missing=["opticalequipment", "unitedstates"]
+        )
         line = format_result_line(result, self.URL, self.TS)
         # fixed: must precede missing:
         self.assertLess(line.index("fixed:"), line.index("missing:"))
@@ -4547,8 +5192,8 @@ class TestFormatResultLine(unittest.TestCase):
 
     def test_perm_mismatch_no_fix(self):
         from poller.reconcile import format_result_line
-        result = self._base(status="perm_mismatch",
-                            perm_expected="public", perm_actual="private")
+
+        result = self._base(status="perm_mismatch", perm_expected="public", perm_actual="private")
         line = format_result_line(result, self.URL, self.TS)
         self.assertIn("[perm_mismatch]", line)
         self.assertIn("perm:public→private", line)
@@ -4556,8 +5201,8 @@ class TestFormatResultLine(unittest.TestCase):
 
     def test_flickr_id_not_in_line(self):
         from poller.reconcile import format_result_line
-        result = self._base(status="tag_mismatch", fixes=["tags"],
-                            tags_missing=["nature"])
+
+        result = self._base(status="tag_mismatch", fixes=["tags"], tags_missing=["nature"])
         line = format_result_line(result, self.URL, self.TS)
         # Flickr ID appears only as part of the URL, never standalone
         self.assertNotIn(" 12345 ", line)
@@ -4565,6 +5210,7 @@ class TestFormatResultLine(unittest.TestCase):
 
     def test_missing_tags_truncated_at_8(self):
         from poller.reconcile import format_result_line
+
         tags = [f"tag{i}" for i in range(10)]
         result = self._base(status="tag_mismatch", tags_missing=tags)
         line = format_result_line(result, self.URL, self.TS)
@@ -4575,6 +5221,7 @@ class TestFormatResultLine(unittest.TestCase):
 # merge_flickr_into_photos — late-linking of split records
 # ---------------------------------------------------------------------------
 
+
 class TestMergeFlickrIntoPhotos(unittest.TestCase):
     """db.merge_flickr_into_photos() must correctly merge a Flickr-only record
     into a Photos-only record and clean up the Flickr-only record."""
@@ -4584,35 +5231,40 @@ class TestMergeFlickrIntoPhotos(unittest.TestCase):
         self.db = Database(Path(self._tmp) / "test.db")
 
         # Photos-only record (uuid set, no flickr_id)
-        self.photos_id = self.db.upsert_photo({
-            "uuid":              "uuid-heic-001",
-            "original_filename": "IMG_1234.HEIC",
-            "date_taken":        "2026-04-24T15:30:07.775000-04:00",
-            "privacy_state":     "candidate_public",
-            "apple_labels":      ["Travel", "Beach"],
-            "apple_persons":     [],
-            "proposed_tags":     ["travel", "beach"],
-            "apple_ai_caption":  "A sunny beach scene",
-            "latitude":          25.0,
-            "longitude":         -80.0,
-        })
+        self.photos_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-heic-001",
+                "original_filename": "IMG_1234.HEIC",
+                "date_taken": "2026-04-24T15:30:07.775000-04:00",
+                "privacy_state": "candidate_public",
+                "apple_labels": ["Travel", "Beach"],
+                "apple_persons": [],
+                "proposed_tags": ["travel", "beach"],
+                "apple_ai_caption": "A sunny beach scene",
+                "latitude": 25.0,
+                "longitude": -80.0,
+            }
+        )
 
         # Flickr-only record (flickr_id set, no uuid)
-        self.flickr_id_row = self.db.upsert_photo({
-            "flickr_id":          "55228034962",
-            "flickr_secret":      "abc123",
-            "flickr_server":      "65535",
-            "flickr_farm":        66,
-            "original_filename":  "IMG_1234.JPG",
-            "date_taken":         "2026-04-24 15:30:07",
-            "privacy_state":      "candidate_public",
-            "date_uploaded_flickr": "2026-04-24T20:00:00+00:00",
-            "thumbnail_path":     "https://live.staticflickr.com/65535/55228034962_abc123_b.jpg",
-        })
+        self.flickr_id_row = self.db.upsert_photo(
+            {
+                "flickr_id": "55228034962",
+                "flickr_secret": "abc123",
+                "flickr_server": "65535",
+                "flickr_farm": 66,
+                "original_filename": "IMG_1234.JPG",
+                "date_taken": "2026-04-24 15:30:07",
+                "privacy_state": "candidate_public",
+                "date_uploaded_flickr": "2026-04-24T20:00:00+00:00",
+                "thumbnail_path": "https://live.staticflickr.com/65535/55228034962_abc123_b.jpg",
+            }
+        )
 
     def tearDown(self):
         self.db.close()
         import shutil
+
         shutil.rmtree(self._tmp)
 
     def _row(self, photo_id):
@@ -4665,7 +5317,7 @@ class TestMergeFlickrIntoPhotos(unittest.TestCase):
 
     def test_merge_does_not_overwrite_existing_review_decision(self):
         # Both records have review decisions; Photos record wins
-        self.db.record_review(self.photos_id,    "keep_private")
+        self.db.record_review(self.photos_id, "keep_private")
         self.db.record_review(self.flickr_id_row, "make_public")
         self.db.merge_flickr_into_photos(self.flickr_id_row, self.photos_id)
         row = self._row(self.photos_id)
@@ -4729,6 +5381,7 @@ class TestMergeFlickrIntoPhotos(unittest.TestCase):
 # link_orphans batch tool
 # ---------------------------------------------------------------------------
 
+
 class TestLinkOrphans(unittest.TestCase):
     """poller/link_orphans.py must find and merge split record pairs."""
 
@@ -4739,29 +5392,35 @@ class TestLinkOrphans(unittest.TestCase):
     def tearDown(self):
         self.db.close()
         import shutil
+
         shutil.rmtree(self._tmp)
 
     def _seed_pair(self, tag: str, date: str = "2026-01-15 10:00:00"):
         """Insert a Photos-only and a Flickr-only record with matching timestamp.
         Both use naive local-time strings so the test is timezone-independent."""
-        photos_id = self.db.upsert_photo({
-            "uuid":              f"uuid-{tag}",
-            "original_filename": f"IMG_{tag}.HEIC",
-            "date_taken":        date,
-            "privacy_state":     "candidate_public",
-            "apple_labels":      [],
-            "apple_persons":     [],
-        })
-        flickr_id_row = self.db.upsert_photo({
-            "flickr_id":          f"flickr-{tag}",
-            "original_filename":  f"IMG_{tag}.JPG",
-            "date_taken":         date,
-            "privacy_state":      "candidate_public",
-        })
+        photos_id = self.db.upsert_photo(
+            {
+                "uuid": f"uuid-{tag}",
+                "original_filename": f"IMG_{tag}.HEIC",
+                "date_taken": date,
+                "privacy_state": "candidate_public",
+                "apple_labels": [],
+                "apple_persons": [],
+            }
+        )
+        flickr_id_row = self.db.upsert_photo(
+            {
+                "flickr_id": f"flickr-{tag}",
+                "original_filename": f"IMG_{tag}.JPG",
+                "date_taken": date,
+                "privacy_state": "candidate_public",
+            }
+        )
         return photos_id, flickr_id_row
 
     def test_dry_run_does_not_modify_db(self):
         from poller.link_orphans import link_orphans
+
         photos_id, flickr_row = self._seed_pair("dry")
         linked, failed = link_orphans(self.db, dry_run=True, limit=100)
         self.assertEqual(linked, 1)
@@ -4772,6 +5431,7 @@ class TestLinkOrphans(unittest.TestCase):
 
     def test_links_matching_pair(self):
         from poller.link_orphans import link_orphans
+
         photos_id, flickr_row = self._seed_pair("live")
         linked, failed = link_orphans(self.db, dry_run=False, limit=100)
         self.assertEqual(linked, 1)
@@ -4782,6 +5442,7 @@ class TestLinkOrphans(unittest.TestCase):
 
     def test_links_multiple_pairs(self):
         from poller.link_orphans import link_orphans
+
         self._seed_pair("a", "2026-02-01 09:00:00")
         self._seed_pair("b", "2026-02-02 10:00:00")
         self._seed_pair("c", "2026-02-03 11:00:00")
@@ -4791,6 +5452,7 @@ class TestLinkOrphans(unittest.TestCase):
 
     def test_limit_respected(self):
         from poller.link_orphans import link_orphans
+
         self._seed_pair("x", "2026-03-01 08:00:00")
         self._seed_pair("y", "2026-03-02 09:00:00")
         linked, failed = link_orphans(self.db, dry_run=False, limit=1)
@@ -4798,14 +5460,17 @@ class TestLinkOrphans(unittest.TestCase):
 
     def test_unmatched_photos_only_record_left_alone(self):
         from poller.link_orphans import link_orphans
-        photos_id = self.db.upsert_photo({
-            "uuid":              "uuid-nopair",
-            "original_filename": "IMG_nopair.HEIC",
-            "date_taken":        "2026-06-01 12:00:00",
-            "privacy_state":     "candidate_public",
-            "apple_labels":      [],
-            "apple_persons":     [],
-        })
+
+        photos_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-nopair",
+                "original_filename": "IMG_nopair.HEIC",
+                "date_taken": "2026-06-01 12:00:00",
+                "privacy_state": "candidate_public",
+                "apple_labels": [],
+                "apple_persons": [],
+            }
+        )
         linked, failed = link_orphans(self.db, dry_run=False, limit=100)
         self.assertEqual(linked, 0)
         self.assertIsNotNone(self.db.get_photo(photos_id))
@@ -4816,21 +5481,26 @@ class TestLinkOrphans(unittest.TestCase):
         # dynamically so the test is machine-timezone-independent.
         from poller.link_orphans import link_orphans
         from datetime import datetime, timezone as tz_module
+
         utc_dt = datetime(2020, 6, 15, 22, 24, 8, tzinfo=tz_module.utc)
         local_str = utc_dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
-        photos_id = self.db.upsert_photo({
-            "uuid":              "uuid-utcbug",
-            "original_filename": "IMG_utcbug.HEIC",
-            "date_taken":        utc_dt.isoformat(),
-            "privacy_state":     "candidate_public",
-            "apple_labels":      [],
-            "apple_persons":     [],
-        })
-        flickr_row = self.db.upsert_photo({
-            "flickr_id":  "flickr-utcbug",
-            "date_taken": local_str,
-            "privacy_state": "candidate_public",
-        })
+        photos_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-utcbug",
+                "original_filename": "IMG_utcbug.HEIC",
+                "date_taken": utc_dt.isoformat(),
+                "privacy_state": "candidate_public",
+                "apple_labels": [],
+                "apple_persons": [],
+            }
+        )
+        flickr_row = self.db.upsert_photo(
+            {
+                "flickr_id": "flickr-utcbug",
+                "date_taken": local_str,
+                "privacy_state": "candidate_public",
+            }
+        )
         linked, failed = link_orphans(self.db, dry_run=False, limit=100)
         self.assertEqual(linked, 1)
         self.assertEqual(failed, 0)
@@ -4841,18 +5511,23 @@ class TestLinkOrphans(unittest.TestCase):
         # Reproduces the real-world off-by-one: Photos stores sub-second precision
         # (truncated to :50) while Flickr rounds the same EXIF time to :51.
         from poller.link_orphans import link_orphans
-        photos_id = self.db.upsert_photo({
-            "uuid":              "uuid-round",
-            "original_filename": "IMG_round.HEIC",
-            "date_taken":        "2022-02-14T20:14:50.941984-05:00",
-            "privacy_state":     "candidate_public",
-            "apple_labels":      [],
-            "apple_persons":     [],
-        })
-        flickr_row = self.db.upsert_photo({
-            "flickr_id":  "flickr-round",
-            "date_taken": "2022-02-14 20:14:51",
-        })
+
+        photos_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-round",
+                "original_filename": "IMG_round.HEIC",
+                "date_taken": "2022-02-14T20:14:50.941984-05:00",
+                "privacy_state": "candidate_public",
+                "apple_labels": [],
+                "apple_persons": [],
+            }
+        )
+        flickr_row = self.db.upsert_photo(
+            {
+                "flickr_id": "flickr-round",
+                "date_taken": "2022-02-14 20:14:51",
+            }
+        )
         linked, failed = link_orphans(self.db, dry_run=False, limit=100)
         self.assertEqual(linked, 1)
         self.assertEqual(failed, 0)
@@ -4863,18 +5538,23 @@ class TestLinkOrphans(unittest.TestCase):
         # Reproduces DB pair 5245/146585: Photos sub-second truncates to :33 while
         # Flickr stores :36 — a 3-second gap outside the old ±2 s tolerance.
         from poller.link_orphans import link_orphans
-        photos_id = self.db.upsert_photo({
-            "uuid":              "uuid-3s",
-            "original_filename": "IMG_3s.HEIC",
-            "date_taken":        "2021-11-11T18:03:33.572856-05:00",
-            "privacy_state":     "candidate_public",
-            "apple_labels":      [],
-            "apple_persons":     [],
-        })
-        flickr_row = self.db.upsert_photo({
-            "flickr_id":  "flickr-3s",
-            "date_taken": "2021-11-11 18:03:36",
-        })
+
+        photos_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-3s",
+                "original_filename": "IMG_3s.HEIC",
+                "date_taken": "2021-11-11T18:03:33.572856-05:00",
+                "privacy_state": "candidate_public",
+                "apple_labels": [],
+                "apple_persons": [],
+            }
+        )
+        flickr_row = self.db.upsert_photo(
+            {
+                "flickr_id": "flickr-3s",
+                "date_taken": "2021-11-11 18:03:36",
+            }
+        )
         linked, failed = link_orphans(self.db, dry_run=False, limit=100)
         self.assertEqual(linked, 1)
         self.assertEqual(failed, 0)
@@ -4885,18 +5565,23 @@ class TestLinkOrphans(unittest.TestCase):
         # Reproduces the 2-second offset observed for HEIC photos 58000/154037
         # and 7299/154008 where Flickr's processing produces an extra second of drift.
         from poller.link_orphans import link_orphans
-        photos_id = self.db.upsert_photo({
-            "uuid":              "uuid-2s",
-            "original_filename": "IMG_2s.HEIC",
-            "date_taken":        "2022-01-29T19:06:42.706693-05:00",
-            "privacy_state":     "candidate_public",
-            "apple_labels":      [],
-            "apple_persons":     [],
-        })
-        flickr_row = self.db.upsert_photo({
-            "flickr_id":  "flickr-2s",
-            "date_taken": "2022-01-29 19:06:44",
-        })
+
+        photos_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-2s",
+                "original_filename": "IMG_2s.HEIC",
+                "date_taken": "2022-01-29T19:06:42.706693-05:00",
+                "privacy_state": "candidate_public",
+                "apple_labels": [],
+                "apple_persons": [],
+            }
+        )
+        flickr_row = self.db.upsert_photo(
+            {
+                "flickr_id": "flickr-2s",
+                "date_taken": "2022-01-29 19:06:44",
+            }
+        )
         linked, failed = link_orphans(self.db, dry_run=False, limit=100)
         self.assertEqual(linked, 1)
         self.assertEqual(failed, 0)
@@ -4907,18 +5592,23 @@ class TestLinkOrphans(unittest.TestCase):
         # Photos stores machine-local time (EDT, -04:00); Flickr stores EXIF camera
         # time (PDT, 3 h earlier). The -3 h offset is the most common real-world case.
         from poller.link_orphans import link_orphans
-        photos_id = self.db.upsert_photo({
-            "uuid":              "uuid-pdt",
-            "original_filename": "IMG_pdt.HEIC",
-            "date_taken":        "2022-03-17T19:57:36.719161-04:00",  # EDT machine
-            "privacy_state":     "candidate_public",
-            "apple_labels":      [],
-            "apple_persons":     [],
-        })
-        flickr_row = self.db.upsert_photo({
-            "flickr_id":  "flickr-pdt",
-            "date_taken": "2022-03-17 16:57:36",  # PDT camera EXIF, 3 h earlier
-        })
+
+        photos_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-pdt",
+                "original_filename": "IMG_pdt.HEIC",
+                "date_taken": "2022-03-17T19:57:36.719161-04:00",  # EDT machine
+                "privacy_state": "candidate_public",
+                "apple_labels": [],
+                "apple_persons": [],
+            }
+        )
+        flickr_row = self.db.upsert_photo(
+            {
+                "flickr_id": "flickr-pdt",
+                "date_taken": "2022-03-17 16:57:36",  # PDT camera EXIF, 3 h earlier
+            }
+        )
         linked, failed = link_orphans(self.db, dry_run=False, limit=100)
         self.assertEqual(linked, 1)
         self.assertEqual(failed, 0)
@@ -4928,24 +5618,31 @@ class TestLinkOrphans(unittest.TestCase):
     def test_exact_match_preferred_over_hour_offset_match(self):
         # If both an exact match and a hour-offset match exist, the exact one wins.
         from poller.link_orphans import link_orphans
-        photos_id = self.db.upsert_photo({
-            "uuid":              "uuid-exact",
-            "original_filename": "IMG_exact.HEIC",
-            "date_taken":        "2022-05-10 14:00:00",
-            "privacy_state":     "candidate_public",
-            "apple_labels":      [],
-            "apple_persons":     [],
-        })
+
+        photos_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-exact",
+                "original_filename": "IMG_exact.HEIC",
+                "date_taken": "2022-05-10 14:00:00",
+                "privacy_state": "candidate_public",
+                "apple_labels": [],
+                "apple_persons": [],
+            }
+        )
         # Exact match
-        exact_flickr = self.db.upsert_photo({
-            "flickr_id":  "flickr-exact",
-            "date_taken": "2022-05-10 14:00:00",
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "flickr-exact",
+                "date_taken": "2022-05-10 14:00:00",
+            }
+        )
         # Hour-offset decoy (1 h earlier — would match if exact is missed)
-        decoy_flickr = self.db.upsert_photo({
-            "flickr_id":  "flickr-decoy",
-            "date_taken": "2022-05-10 13:00:00",
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "flickr-decoy",
+                "date_taken": "2022-05-10 13:00:00",
+            }
+        )
         linked, _ = link_orphans(self.db, dry_run=False, limit=100)
         self.assertEqual(linked, 1)
         merged = self.db.get_photo(photos_id)
@@ -4956,12 +5653,14 @@ class TestLinkOrphans(unittest.TestCase):
 # Phase 4 — sync engine: classify + proposals
 # ---------------------------------------------------------------------------
 
+
 class TestClassifyTags(unittest.TestCase):
     """_classify_tags returns correct proposals for each divergence case."""
 
     def _classify(self, ftags, ptags, fhash="fh", phash="ph"):
         import json
         from flickr.metadata_puller import _classify_tags
+
         fj = json.dumps(ftags) if ftags is not None else None
         pj = json.dumps(ptags) if ptags is not None else None
         return _classify_tags(1, fj, pj, fhash, phash, "2026-01-01T00:00:00+00:00")
@@ -5043,11 +5742,13 @@ class TestClassifyTagsProposedExclusion(unittest.TestCase):
     def _classify(self, ftags, ptags, proposed=None, fhash="fh", phash="ph"):
         import json
         from flickr.metadata_puller import _classify_tags
+
         fj = json.dumps(ftags) if ftags is not None else None
         pj = json.dumps(ptags) if ptags is not None else None
         prj = json.dumps(proposed) if proposed is not None else None
-        return _classify_tags(1, fj, pj, fhash, phash, "2026-01-01T00:00:00+00:00",
-                              proposed_tags_json=prj)
+        return _classify_tags(
+            1, fj, pj, fhash, phash, "2026-01-01T00:00:00+00:00", proposed_tags_json=prj
+        )
 
     def test_managed_only_extra_on_flickr_no_proposal(self):
         # Flickr has unitedstates (managed); Photos doesn't → no proposal
@@ -5107,6 +5808,7 @@ class TestClassifyTextField(unittest.TestCase):
 
     def setUp(self):
         from flickr.metadata_puller import _classify_text_field
+
         self._fn = _classify_text_field
         self._now = "2026-01-01T00:00:00+00:00"
 
@@ -5153,39 +5855,49 @@ class TestHtmlEntityNormalization(unittest.TestCase):
 
     def setUp(self):
         from flickr.metadata_puller import _classify_text_field, _field_hash
+
         self._fn = _classify_text_field
         self._hash = _field_hash
         self._now = "2026-01-01T00:00:00+00:00"
 
     def test_amp_entity_equal_to_plain(self):
         """Flickr &amp; should match Photos & — no proposal."""
-        result = self._fn(1, "description",
-                          'Belle &amp; Sebastian at the Orpheum',
-                          'Belle & Sebastian at the Orpheum',
-                          self._now)
+        result = self._fn(
+            1,
+            "description",
+            "Belle &amp; Sebastian at the Orpheum",
+            "Belle & Sebastian at the Orpheum",
+            self._now,
+        )
         self.assertEqual(result, [])
 
     def test_quot_entity_equal_to_plain(self):
         """Flickr &quot; should match Photos " — no proposal."""
-        result = self._fn(1, "description",
-                          '&quot;Piazza, New York Catcher&quot;',
-                          '"Piazza, New York Catcher"',
-                          self._now)
+        result = self._fn(
+            1,
+            "description",
+            "&quot;Piazza, New York Catcher&quot;",
+            '"Piazza, New York Catcher"',
+            self._now,
+        )
         self.assertEqual(result, [])
 
     def test_mixed_entities_equal_to_plain(self):
         """Multiple entities in one string — no proposal."""
-        result = self._fn(1, "description",
-                          'Belle &amp; Sebastian perform &quot;Piazza, New York Catcher&quot;',
-                          'Belle & Sebastian perform "Piazza, New York Catcher"',
-                          self._now)
+        result = self._fn(
+            1,
+            "description",
+            "Belle &amp; Sebastian perform &quot;Piazza, New York Catcher&quot;",
+            'Belle & Sebastian perform "Piazza, New York Catcher"',
+            self._now,
+        )
         self.assertEqual(result, [])
 
     def test_truly_different_still_produces_collision(self):
         """Different after decoding should still produce a collision proposal."""
-        result = self._fn(1, "description",
-                          'Belle &amp; Sebastian', 'Belle and Sebastian',
-                          self._now)
+        result = self._fn(
+            1, "description", "Belle &amp; Sebastian", "Belle and Sebastian", self._now
+        )
         self.assertEqual(len(result), 2)
         self.assertTrue(all(p["conflict_type"] == "collision" for p in result))
 
@@ -5202,8 +5914,10 @@ class TestHtmlEntityNormalization(unittest.TestCase):
     def test_compute_text_hash_normalizes_entities(self):
         """apply-time staleness check produces same hash for encoded and decoded equivalents."""
         from flickr.proposal_applier import _compute_text_hash
-        self.assertEqual(_compute_text_hash("Belle &amp; Sebastian"),
-                         _compute_text_hash("Belle & Sebastian"))
+
+        self.assertEqual(
+            _compute_text_hash("Belle &amp; Sebastian"), _compute_text_hash("Belle & Sebastian")
+        )
 
 
 class TestUpsertProposal(unittest.TestCase):
@@ -5212,10 +5926,17 @@ class TestUpsertProposal(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         from db.db import Database
+
         self.db = Database(Path(self._tmp.name) / "test.db")
-        self.db.upsert_photo({"flickr_id": "X", "uuid": "U1",
-                               "privacy_state": "candidate_public",
-                               "flickr_tags_hash": "FH1", "photos_tags_hash": "PH1"})
+        self.db.upsert_photo(
+            {
+                "flickr_id": "X",
+                "uuid": "U1",
+                "privacy_state": "candidate_public",
+                "flickr_tags_hash": "FH1",
+                "photos_tags_hash": "PH1",
+            }
+        )
         self.photo_id = self.db.get_photo_by_flickr_id("X")["id"]
 
     def tearDown(self):
@@ -5224,9 +5945,11 @@ class TestUpsertProposal(unittest.TestCase):
 
     def _proposal(self, **overrides):
         base = {
-            "photo_id": self.photo_id, "field": "tags",
+            "photo_id": self.photo_id,
+            "field": "tags",
             "proposed_value": '["nature"]',
-            "source": "flickr", "target": "photos",
+            "source": "flickr",
+            "target": "photos",
             "conflict_type": "non_conflict",
             "source_hash_at_creation": "FH1",
             "target_hash_at_creation": "PH1",
@@ -5269,8 +5992,7 @@ class TestUpsertProposal(unittest.TestCase):
         self.db.upsert_proposal(self._proposal())
         self.db.conn.commit()
         self.db.conn.execute(
-            "UPDATE metadata_proposals SET status='rejected' WHERE photo_id=?",
-            (self.photo_id,)
+            "UPDATE metadata_proposals SET status='rejected' WHERE photo_id=?", (self.photo_id,)
         )
         self.db.conn.commit()
         self.db.upsert_proposal(self._proposal())
@@ -5281,8 +6003,7 @@ class TestUpsertProposal(unittest.TestCase):
         self.db.upsert_proposal(self._proposal())
         self.db.conn.commit()
         self.db.conn.execute(
-            "UPDATE metadata_proposals SET status='rejected' WHERE photo_id=?",
-            (self.photo_id,)
+            "UPDATE metadata_proposals SET status='rejected' WHERE photo_id=?", (self.photo_id,)
         )
         self.db.conn.commit()
         self.db.upsert_proposal(self._proposal(source_hash_at_creation="FH2"))
@@ -5296,6 +6017,7 @@ class TestRunSyncEngine(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         from db.db import Database
+
         self.db = Database(Path(self._tmp.name) / "test.db")
 
     def tearDown(self):
@@ -5303,23 +6025,33 @@ class TestRunSyncEngine(unittest.TestCase):
         self._tmp.cleanup()
 
     def _add(self, flickr_id, ftags, ptags, fhash=None, phash=None):
-        import hashlib, json as _json, unicodedata as _ud
+        import hashlib
+        import json as _json
+        import unicodedata as _ud
+
         def _hash(tags):
-            normed = sorted({
-                "".join(c for c in _ud.normalize("NFC", t.strip().casefold()) if c.isalnum())
-                for t in tags if t.strip()
-            })
+            normed = sorted(
+                {
+                    "".join(c for c in _ud.normalize("NFC", t.strip().casefold()) if c.isalnum())
+                    for t in tags
+                    if t.strip()
+                }
+            )
             return hashlib.sha256(" ".join(normed).encode()).hexdigest()
-        self.db.upsert_photo({
-            "flickr_id": flickr_id, "uuid": f"uuid-{flickr_id}",
-            "privacy_state": "candidate_public",
-            "meta_synced_flickr_at": "2026-01-01T00:00:00+00:00",
-            "meta_synced_photos_at": "2026-01-01T00:00:00+00:00",
-            "flickr_tags": _json.dumps(ftags),
-            "photos_tags": _json.dumps(ptags),
-            "flickr_tags_hash": fhash or _hash(ftags),
-            "photos_tags_hash": phash or _hash(ptags),
-        })
+
+        self.db.upsert_photo(
+            {
+                "flickr_id": flickr_id,
+                "uuid": f"uuid-{flickr_id}",
+                "privacy_state": "candidate_public",
+                "meta_synced_flickr_at": "2026-01-01T00:00:00+00:00",
+                "meta_synced_photos_at": "2026-01-01T00:00:00+00:00",
+                "flickr_tags": _json.dumps(ftags),
+                "photos_tags": _json.dumps(ptags),
+                "flickr_tags_hash": fhash or _hash(ftags),
+                "photos_tags_hash": phash or _hash(ptags),
+            }
+        )
         return self.db.get_photo_by_flickr_id(flickr_id)["id"]
 
     def _pending_proposals(self):
@@ -5329,6 +6061,7 @@ class TestRunSyncEngine(unittest.TestCase):
 
     def test_hash_match_generates_no_proposal(self):
         from flickr.metadata_puller import run_sync_engine
+
         pid = self._add("A", ["nature"], ["nature"])
         totals = run_sync_engine(self.db, [pid])
         self.assertEqual(totals["hash_matches"], 1)
@@ -5337,6 +6070,7 @@ class TestRunSyncEngine(unittest.TestCase):
 
     def test_non_conflict_generates_proposal(self):
         from flickr.metadata_puller import run_sync_engine
+
         pid = self._add("B", ["nature", "travel"], [])
         totals = run_sync_engine(self.db, [pid])
         self.assertEqual(totals["proposals"], 1)
@@ -5345,6 +6079,7 @@ class TestRunSyncEngine(unittest.TestCase):
 
     def test_sets_meta_last_harmonized_at(self):
         from flickr.metadata_puller import run_sync_engine
+
         pid = self._add("C", ["nature"], ["nature"])
         run_sync_engine(self.db, [pid])
         row = self.db.conn.execute(
@@ -5354,6 +6089,7 @@ class TestRunSyncEngine(unittest.TestCase):
 
     def test_dry_run_writes_no_proposals(self):
         from flickr.metadata_puller import run_sync_engine
+
         pid = self._add("D", ["nature"], [])
         totals = run_sync_engine(self.db, [pid], dry_run=True)
         self.assertEqual(totals["proposals"], 1)
@@ -5365,6 +6101,7 @@ class TestRunSyncEngine(unittest.TestCase):
 
     def test_collision_generates_two_proposals(self):
         from flickr.metadata_puller import run_sync_engine
+
         pid = self._add("E", ["nature", "landscape"], ["nature", "travel"])
         totals = run_sync_engine(self.db, [pid])
         self.assertEqual(totals["proposals"], 2)
@@ -5375,16 +6112,21 @@ class TestRunSyncEngine(unittest.TestCase):
     def test_punctuation_only_difference_generates_no_proposal(self):
         # Tags differing only in punctuation (spaces, hyphens) are the same on Flickr
         from flickr.metadata_puller import run_sync_engine
-        import hashlib as _hl, unicodedata as _ud
+        import hashlib as _hl
+        import unicodedata as _ud
+
         # Use old-style hashes (no punctuation stripping) to force the slow path
         def old_hash(tags):
             normed = sorted({_ud.normalize("NFC", t.strip().casefold()) for t in tags if t.strip()})
             return _hl.sha256(" ".join(normed).encode()).hexdigest()
-        pid = self._add("PUNCT1",
-                        ["closeup", "harvardsquare"],
-                        ["close-up", "harvard square"],
-                        fhash=old_hash(["closeup", "harvardsquare"]),
-                        phash=old_hash(["close-up", "harvard square"]))
+
+        pid = self._add(
+            "PUNCT1",
+            ["closeup", "harvardsquare"],
+            ["close-up", "harvard square"],
+            fhash=old_hash(["closeup", "harvardsquare"]),
+            phash=old_hash(["close-up", "harvard square"]),
+        )
         totals = run_sync_engine(self.db, [pid])
         self.assertEqual(totals["proposals"], 0)
         self.assertEqual(totals["skipped"], 1)
@@ -5393,21 +6135,31 @@ class TestRunSyncEngine(unittest.TestCase):
     def test_punctuation_mismatch_supersedes_stale_proposals(self):
         # Stale collision proposals from before the punctuation-normalisation fix
         # should be superseded when the sync engine finds no real difference.
-        import json as _json, hashlib as _hl, unicodedata as _ud
+        import json as _json
+        import hashlib as _hl
+        import unicodedata as _ud
         from flickr.metadata_puller import run_sync_engine
+
         def old_hash(tags):
             normed = sorted({_ud.normalize("NFC", t.strip().casefold()) for t in tags if t.strip()})
             return _hl.sha256(" ".join(normed).encode()).hexdigest()
+
         fhash = old_hash(["closeup"])
         phash = old_hash(["close-up"])
         pid = self._add("PUNCT2", ["closeup"], ["close-up"], fhash=fhash, phash=phash)
-        self.db.upsert_proposal({
-            "photo_id": pid, "field": "tags",
-            "proposed_value": _json.dumps(["closeup"]),
-            "source": "flickr", "target": "photos", "conflict_type": "collision",
-            "source_hash_at_creation": fhash, "target_hash_at_creation": phash,
-            "created_at": "2026-01-01T00:00:00+00:00",
-        })
+        self.db.upsert_proposal(
+            {
+                "photo_id": pid,
+                "field": "tags",
+                "proposed_value": _json.dumps(["closeup"]),
+                "source": "flickr",
+                "target": "photos",
+                "conflict_type": "collision",
+                "source_hash_at_creation": fhash,
+                "target_hash_at_creation": phash,
+                "created_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
         self.db.conn.commit()
         self.assertEqual(len(self._pending_proposals()), 1)
         run_sync_engine(self.db, [pid])
@@ -5422,6 +6174,7 @@ class TestRunSyncEngine(unittest.TestCase):
         # pending proposals must still be superseded by the end-of-run bulk cleanup.
         import json as _json
         from flickr.metadata_puller import run_sync_engine
+
         # Both sides have equal hashes → hash_match branch will be taken
         pid = self._add("HASH_MATCH_STALE", ["closeup"], ["close-up"])
         # Both sides normalise to the same hash, so _add computes identical hashes
@@ -5429,13 +6182,19 @@ class TestRunSyncEngine(unittest.TestCase):
         fhash = self.db.conn.execute(
             "SELECT flickr_tags_hash FROM photos WHERE id=?", (pid,)
         ).fetchone()["flickr_tags_hash"]
-        self.db.upsert_proposal({
-            "photo_id": pid, "field": "tags",
-            "proposed_value": _json.dumps(["closeup"]),
-            "source": "flickr", "target": "photos", "conflict_type": "collision",
-            "source_hash_at_creation": fhash, "target_hash_at_creation": fhash,
-            "created_at": "2026-01-01T00:00:00+00:00",
-        })
+        self.db.upsert_proposal(
+            {
+                "photo_id": pid,
+                "field": "tags",
+                "proposed_value": _json.dumps(["closeup"]),
+                "source": "flickr",
+                "target": "photos",
+                "conflict_type": "collision",
+                "source_hash_at_creation": fhash,
+                "target_hash_at_creation": fhash,
+                "created_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
         self.db.conn.commit()
         self.assertEqual(len(self._pending_proposals()), 1)
         totals = run_sync_engine(self.db, [pid])
@@ -5448,13 +6207,14 @@ class TestRunSyncEngine(unittest.TestCase):
 
     def test_title_non_conflict_generates_proposal(self):
         from flickr.metadata_puller import run_sync_engine
+
         pid = self._add("TITLE1", [], [])
         # Manually set flickr_title only
         self.db.conn.execute(
             "UPDATE photos SET flickr_title='Sunset at the Beach' WHERE id=?", (pid,)
         )
         self.db.conn.commit()
-        totals = run_sync_engine(self.db, [pid])
+        run_sync_engine(self.db, [pid])
         props = self._pending_proposals()
         self.assertEqual(len(props), 1)
         self.assertEqual(props[0]["field"], "title")
@@ -5463,12 +6223,13 @@ class TestRunSyncEngine(unittest.TestCase):
 
     def test_title_collision_generates_two_proposals(self):
         from flickr.metadata_puller import run_sync_engine
+
         pid = self._add("TITLE2", [], [])
         self.db.conn.execute(
             "UPDATE photos SET flickr_title='Sunset', photos_title='Golden Hour' WHERE id=?", (pid,)
         )
         self.db.conn.commit()
-        totals = run_sync_engine(self.db, [pid])
+        run_sync_engine(self.db, [pid])
         props = self._pending_proposals()
         self.assertEqual(len(props), 2)
         self.assertTrue(all(p["field"] == "title" for p in props))
@@ -5479,21 +6240,28 @@ class TestRunSyncEngine(unittest.TestCase):
 # Phase 5 — proposal applier and proposals UI
 # ---------------------------------------------------------------------------
 
+
 class TestApplyProposal(unittest.TestCase):
     """apply_proposal staleness checks and rejection logic."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         from db.db import Database
+
         self.db = Database(Path(self._tmp.name) / "test.db")
-        self.db.upsert_photo({
-            "flickr_id": "F1", "uuid": "U1",
-            "privacy_state": "candidate_public",
-            "flickr_tags": '["nature"]', "flickr_tags_hash": "FH1",
-            "photos_tags": '[]',         "photos_tags_hash": "PH_EMPTY",
-            "meta_synced_flickr_at": "2026-01-01T00:00:00+00:00",
-            "meta_synced_photos_at": "2026-01-01T00:00:00+00:00",
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "F1",
+                "uuid": "U1",
+                "privacy_state": "candidate_public",
+                "flickr_tags": '["nature"]',
+                "flickr_tags_hash": "FH1",
+                "photos_tags": "[]",
+                "photos_tags_hash": "PH_EMPTY",
+                "meta_synced_flickr_at": "2026-01-01T00:00:00+00:00",
+                "meta_synced_photos_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
         self.photo_id = self.db.get_photo_by_flickr_id("F1")["id"]
 
     def tearDown(self):
@@ -5501,23 +6269,28 @@ class TestApplyProposal(unittest.TestCase):
         self._tmp.cleanup()
 
     def _insert_proposal(self, source_hash="FH1", target_hash="PH_EMPTY"):
-        self.db.upsert_proposal({
-            "photo_id": self.photo_id, "field": "tags",
-            "proposed_value": '["nature"]',
-            "source": "flickr", "target": "photos",
-            "conflict_type": "non_conflict",
-            "source_hash_at_creation": source_hash,
-            "target_hash_at_creation": target_hash,
-            "created_at": "2026-01-01T00:00:00+00:00",
-        })
+        self.db.upsert_proposal(
+            {
+                "photo_id": self.photo_id,
+                "field": "tags",
+                "proposed_value": '["nature"]',
+                "source": "flickr",
+                "target": "photos",
+                "conflict_type": "non_conflict",
+                "source_hash_at_creation": source_hash,
+                "target_hash_at_creation": target_hash,
+                "created_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
         self.db.conn.commit()
         return self.db.conn.execute(
             "SELECT id FROM metadata_proposals WHERE photo_id=? ORDER BY id DESC LIMIT 1",
-            (self.photo_id,)
+            (self.photo_id,),
         ).fetchone()["id"]
 
     def test_source_changed_supersedes(self):
         from flickr.proposal_applier import apply_proposal
+
         pid = self._insert_proposal(source_hash="STALE_HASH")
         result = apply_proposal(self.db, pid, library_path="")
         self.assertFalse(result["ok"])
@@ -5529,6 +6302,7 @@ class TestApplyProposal(unittest.TestCase):
 
     def test_target_changed_supersedes(self):
         from flickr.proposal_applier import apply_proposal
+
         pid = self._insert_proposal(target_hash="STALE_TARGET")
         result = apply_proposal(self.db, pid, library_path="")
         self.assertFalse(result["ok"])
@@ -5536,6 +6310,7 @@ class TestApplyProposal(unittest.TestCase):
 
     def test_already_applied_returns_error(self):
         from flickr.proposal_applier import apply_proposal
+
         pid = self._insert_proposal()
         self.db.resolve_proposal(pid, "applied")
         result = apply_proposal(self.db, pid, library_path="")
@@ -5545,6 +6320,7 @@ class TestApplyProposal(unittest.TestCase):
     def test_photos_not_responding_returns_error(self):
         from unittest.mock import patch
         from flickr.proposal_applier import apply_proposal
+
         pid = self._insert_proposal()
         with patch("flickr.proposal_applier._photos_is_responsive", return_value=False):
             result = apply_proposal(self.db, pid, library_path="/fake/path")
@@ -5556,33 +6332,46 @@ class TestApplyProposal(unittest.TestCase):
         # target_hash_at_creation=NULL. NULL means "no baseline", not "changed".
         from unittest.mock import patch
         from flickr.proposal_applier import apply_proposal
+
         pid = self._insert_proposal(target_hash=None)
         with patch("flickr.proposal_applier._photos_is_responsive", return_value=True):
             with patch("flickr.proposal_applier._write_tags_to_photos") as mock_write:
                 mock_write.return_value = {"ok": True}
                 result = apply_proposal(self.db, pid, library_path="/fake/path")
-        self.assertNotEqual(result.get("reason"), "target_changed",
-                            "NULL target hash should not trigger staleness check")
+        self.assertNotEqual(
+            result.get("reason"),
+            "target_changed",
+            "NULL target hash should not trigger staleness check",
+        )
 
     def test_null_source_hash_does_not_trigger_source_changed(self):
         from unittest.mock import patch
         from flickr.proposal_applier import apply_proposal
+
         pid = self._insert_proposal(source_hash=None)
         with patch("flickr.proposal_applier._photos_is_responsive", return_value=True):
             with patch("flickr.proposal_applier._write_tags_to_photos") as mock_write:
                 mock_write.return_value = {"ok": True}
                 result = apply_proposal(self.db, pid, library_path="/fake/path")
-        self.assertNotEqual(result.get("reason"), "source_changed",
-                            "NULL source hash should not trigger staleness check")
+        self.assertNotEqual(
+            result.get("reason"),
+            "source_changed",
+            "NULL source hash should not trigger staleness check",
+        )
 
     def test_write_tags_timeout_returns_not_responding(self):
         import sys
         from unittest.mock import patch, MagicMock
         from flickr.proposal_applier import _write_tags_to_photos
-        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
-             patch.dict(sys.modules, {"photoscript": MagicMock()}), \
-             patch("flickr.proposal_applier._run_with_timeout",
-                   return_value={"ok": False, "reason": "Photos not responding"}):
+
+        with (
+            patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
+            patch.dict(sys.modules, {"photoscript": MagicMock()}),
+            patch(
+                "flickr.proposal_applier._run_with_timeout",
+                return_value={"ok": False, "reason": "Photos not responding"},
+            ),
+        ):
             result = _write_tags_to_photos(MagicMock(), 1, "U1", [], "/path")
         self.assertFalse(result["ok"])
         self.assertEqual(result["reason"], "Photos not responding")
@@ -5594,17 +6383,23 @@ class TestApplyBatch(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         from db.db import Database
+
         self.db = Database(Path(self._tmp.name) / "test.db")
         # Two photos, each with a pending non-conflict proposal
         for fid, uid in (("FA", "UA"), ("FB", "UB")):
-            self.db.upsert_photo({
-                "flickr_id": fid, "uuid": uid,
-                "privacy_state": "candidate_public",
-                "flickr_tags": '["foo"]', "flickr_tags_hash": f"H{fid}",
-                "photos_tags": '[]', "photos_tags_hash": "PH_EMPTY",
-                "meta_synced_flickr_at": "2026-01-01T00:00:00+00:00",
-                "meta_synced_photos_at": "2026-01-01T00:00:00+00:00",
-            })
+            self.db.upsert_photo(
+                {
+                    "flickr_id": fid,
+                    "uuid": uid,
+                    "privacy_state": "candidate_public",
+                    "flickr_tags": '["foo"]',
+                    "flickr_tags_hash": f"H{fid}",
+                    "photos_tags": "[]",
+                    "photos_tags_hash": "PH_EMPTY",
+                    "meta_synced_flickr_at": "2026-01-01T00:00:00+00:00",
+                    "meta_synced_photos_at": "2026-01-01T00:00:00+00:00",
+                }
+            )
         self.pid_a = self._insert_proposal("FA", "HFA")
         self.pid_b = self._insert_proposal("FB", "HFB")
 
@@ -5614,15 +6409,19 @@ class TestApplyBatch(unittest.TestCase):
 
     def _insert_proposal(self, flickr_id, src_hash):
         photo_id = self.db.get_photo_by_flickr_id(flickr_id)["id"]
-        self.db.upsert_proposal({
-            "photo_id": photo_id, "field": "tags",
-            "proposed_value": '["foo"]',
-            "source": "flickr", "target": "photos",
-            "conflict_type": "non_conflict",
-            "source_hash_at_creation": src_hash,
-            "target_hash_at_creation": "PH_EMPTY",
-            "created_at": "2026-01-01T00:00:00+00:00",
-        })
+        self.db.upsert_proposal(
+            {
+                "photo_id": photo_id,
+                "field": "tags",
+                "proposed_value": '["foo"]',
+                "source": "flickr",
+                "target": "photos",
+                "conflict_type": "non_conflict",
+                "source_hash_at_creation": src_hash,
+                "target_hash_at_creation": "PH_EMPTY",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
         self.db.conn.commit()
         return self.db.conn.execute(
             "SELECT id FROM metadata_proposals WHERE photo_id=? ORDER BY id DESC LIMIT 1",
@@ -5635,6 +6434,7 @@ class TestApplyBatch(unittest.TestCase):
         from flickr.proposal_applier import apply_batch
 
         call_order = []
+
         def side_effect(db, proposal_id, library_path, flickr_client=None):
             call_order.append(proposal_id)
             if proposal_id == self.pid_a:
@@ -5653,8 +6453,7 @@ class TestApplyBatch(unittest.TestCase):
         from unittest.mock import patch
         from flickr.proposal_applier import apply_batch
 
-        with patch("flickr.proposal_applier.apply_proposal",
-                   side_effect=RuntimeError("boom")):
+        with patch("flickr.proposal_applier.apply_proposal", side_effect=RuntimeError("boom")):
             result = apply_batch(self.db, library_path="")
 
         self.assertEqual(len(result["errors"]), 2)
@@ -5665,8 +6464,10 @@ class TestApplyBatch(unittest.TestCase):
         from unittest.mock import patch
         from flickr.proposal_applier import apply_batch
 
-        with patch("flickr.proposal_applier.apply_proposal",
-                   return_value={"ok": False, "reason": "photo not found"}):
+        with patch(
+            "flickr.proposal_applier.apply_proposal",
+            return_value={"ok": False, "reason": "photo not found"},
+        ):
             result = apply_batch(self.db, library_path="")
 
         self.assertEqual(result["failed"], 2)
@@ -5678,8 +6479,10 @@ class TestApplyBatch(unittest.TestCase):
         from unittest.mock import patch
         from flickr.proposal_applier import apply_batch
 
-        with patch("flickr.proposal_applier.apply_proposal",
-                   return_value={"ok": False, "reason": "source_changed"}):
+        with patch(
+            "flickr.proposal_applier.apply_proposal",
+            return_value={"ok": False, "reason": "source_changed"},
+        ):
             result = apply_batch(self.db, library_path="")
 
         self.assertEqual(result["superseded"], 2)
@@ -5690,8 +6493,7 @@ class TestApplyBatch(unittest.TestCase):
         from unittest.mock import patch
         from flickr.proposal_applier import apply_batch
 
-        with patch("flickr.proposal_applier.apply_proposal",
-                   return_value={"ok": True}):
+        with patch("flickr.proposal_applier.apply_proposal", return_value={"ok": True}):
             result = apply_batch(self.db, library_path="")
 
         self.assertEqual(result["applied"], 2)
@@ -5699,6 +6501,7 @@ class TestApplyBatch(unittest.TestCase):
 
     def test_count_pending_returns_correct_count(self):
         from flickr.proposal_applier import _count_pending
+
         self.assertEqual(_count_pending(self.db), 2)
 
     def test_count_pending_empty_db(self):
@@ -5706,6 +6509,7 @@ class TestApplyBatch(unittest.TestCase):
         from pathlib import Path
         from db.db import Database
         from flickr.proposal_applier import _count_pending
+
         with tempfile.TemporaryDirectory() as tmp:
             db = Database(Path(tmp) / "empty.db")
             self.assertEqual(_count_pending(db), 0)
@@ -5713,6 +6517,7 @@ class TestApplyBatch(unittest.TestCase):
 
     def test_count_pending_filters_by_conflict_type(self):
         from flickr.proposal_applier import _count_pending
+
         self.assertEqual(_count_pending(self.db, conflict_types=["collision"]), 0)
         self.assertEqual(_count_pending(self.db, conflict_types=["non_conflict"]), 2)
 
@@ -5723,15 +6528,21 @@ class TestApplyManualMerge(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         from db.db import Database
+
         self.db = Database(Path(self._tmp.name) / "test.db")
-        self.db.upsert_photo({
-            "flickr_id": "F1", "uuid": "U1",
-            "privacy_state": "candidate_public",
-            "flickr_tags": '["nature","travel"]', "flickr_tags_hash": "FH1",
-            "photos_tags": '["nature","vacation"]', "photos_tags_hash": "PH1",
-            "meta_synced_flickr_at": "2026-01-01T00:00:00+00:00",
-            "meta_synced_photos_at": "2026-01-01T00:00:00+00:00",
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "F1",
+                "uuid": "U1",
+                "privacy_state": "candidate_public",
+                "flickr_tags": '["nature","travel"]',
+                "flickr_tags_hash": "FH1",
+                "photos_tags": '["nature","vacation"]',
+                "photos_tags_hash": "PH1",
+                "meta_synced_flickr_at": "2026-01-01T00:00:00+00:00",
+                "meta_synced_photos_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
         self.photo_id = self.db.get_photo_by_flickr_id("F1")["id"]
 
     def tearDown(self):
@@ -5741,19 +6552,23 @@ class TestApplyManualMerge(unittest.TestCase):
     def _seed_collision_pair(self, src_hash="FH1", tgt_hash="PH1"):
         """Insert the two proposals that form a collision pair."""
         for src, tgt in (("flickr", "photos"), ("photos", "flickr")):
-            self.db.upsert_proposal({
-                "photo_id": self.photo_id, "field": "tags",
-                "proposed_value": '["nature","travel"]',
-                "source": src, "target": tgt,
-                "conflict_type": "collision",
-                "source_hash_at_creation": src_hash if src == "flickr" else tgt_hash,
-                "target_hash_at_creation": tgt_hash if tgt == "photos" else src_hash,
-                "created_at": "2026-01-01T00:00:00+00:00",
-            })
+            self.db.upsert_proposal(
+                {
+                    "photo_id": self.photo_id,
+                    "field": "tags",
+                    "proposed_value": '["nature","travel"]',
+                    "source": src,
+                    "target": tgt,
+                    "conflict_type": "collision",
+                    "source_hash_at_creation": src_hash if src == "flickr" else tgt_hash,
+                    "target_hash_at_creation": tgt_hash if tgt == "photos" else src_hash,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                }
+            )
         self.db.conn.commit()
         rows = self.db.conn.execute(
             "SELECT id, source FROM metadata_proposals WHERE photo_id=? ORDER BY id",
-            (self.photo_id,)
+            (self.photo_id,),
         ).fetchall()
         # primary = flickr→photos; sibling = photos→flickr
         primary = next(r["id"] for r in rows if r["source"] == "flickr")
@@ -5762,17 +6577,24 @@ class TestApplyManualMerge(unittest.TestCase):
 
     def test_rejects_non_tag_proposal(self):
         from flickr.proposal_applier import apply_manual_merge
-        self.db.upsert_proposal({
-            "photo_id": self.photo_id, "field": "title",
-            "proposed_value": "My Photo",
-            "source": "flickr", "target": "photos", "conflict_type": "collision",
-            "source_hash_at_creation": "H", "target_hash_at_creation": "H",
-            "created_at": "2026-01-01T00:00:00+00:00",
-        })
+
+        self.db.upsert_proposal(
+            {
+                "photo_id": self.photo_id,
+                "field": "title",
+                "proposed_value": "My Photo",
+                "source": "flickr",
+                "target": "photos",
+                "conflict_type": "collision",
+                "source_hash_at_creation": "H",
+                "target_hash_at_creation": "H",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
         self.db.conn.commit()
         pid = self.db.conn.execute(
             "SELECT id FROM metadata_proposals WHERE photo_id=? ORDER BY id DESC LIMIT 1",
-            (self.photo_id,)
+            (self.photo_id,),
         ).fetchone()["id"]
         result = apply_manual_merge(self.db, pid, ["tag"], library_path="")
         self.assertFalse(result["ok"])
@@ -5780,17 +6602,24 @@ class TestApplyManualMerge(unittest.TestCase):
 
     def test_rejects_non_collision_proposal(self):
         from flickr.proposal_applier import apply_manual_merge
-        self.db.upsert_proposal({
-            "photo_id": self.photo_id, "field": "tags",
-            "proposed_value": '["a"]',
-            "source": "flickr", "target": "photos", "conflict_type": "non_conflict",
-            "source_hash_at_creation": "FH1", "target_hash_at_creation": "PH1",
-            "created_at": "2026-01-01T00:00:00+00:00",
-        })
+
+        self.db.upsert_proposal(
+            {
+                "photo_id": self.photo_id,
+                "field": "tags",
+                "proposed_value": '["a"]',
+                "source": "flickr",
+                "target": "photos",
+                "conflict_type": "non_conflict",
+                "source_hash_at_creation": "FH1",
+                "target_hash_at_creation": "PH1",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
         self.db.conn.commit()
         pid = self.db.conn.execute(
             "SELECT id FROM metadata_proposals WHERE photo_id=? ORDER BY id DESC LIMIT 1",
-            (self.photo_id,)
+            (self.photo_id,),
         ).fetchone()["id"]
         result = apply_manual_merge(self.db, pid, ["a"], library_path="")
         self.assertFalse(result["ok"])
@@ -5798,6 +6627,7 @@ class TestApplyManualMerge(unittest.TestCase):
 
     def test_source_changed_supersedes(self):
         from flickr.proposal_applier import apply_manual_merge
+
         primary, _ = self._seed_collision_pair(src_hash="STALE")
         result = apply_manual_merge(self.db, primary, ["nature"], library_path="")
         self.assertFalse(result["ok"])
@@ -5810,14 +6640,20 @@ class TestApplyManualMerge(unittest.TestCase):
     def test_applies_to_flickr_and_marks_applied(self):
         from unittest.mock import MagicMock
         from flickr.proposal_applier import apply_manual_merge
+
         primary, sibling = self._seed_collision_pair()
 
         mock_flickr = MagicMock()
-        with unittest.mock.patch("flickr.proposal_applier._photos_is_responsive", return_value=False):
+        with unittest.mock.patch(
+            "flickr.proposal_applier._photos_is_responsive", return_value=False
+        ):
             # Photos not running — only Flickr write happens (uuid present but Photos blocked)
-            result = apply_manual_merge(
-                self.db, primary, ["nature", "travel", "vacation"],
-                library_path="", flickr_client=mock_flickr,
+            apply_manual_merge(
+                self.db,
+                primary,
+                ["nature", "travel", "vacation"],
+                library_path="",
+                flickr_client=mock_flickr,
             )
 
         # Flickr write attempted
@@ -5827,11 +6663,13 @@ class TestApplyManualMerge(unittest.TestCase):
             "SELECT flickr_tags FROM photos WHERE id=?", (self.photo_id,)
         ).fetchone()
         import json
+
         self.assertIn("nature", json.loads(row["flickr_tags"]))
 
     def test_sibling_resolved_on_success(self):
         from unittest.mock import MagicMock, patch
         from flickr.proposal_applier import apply_manual_merge
+
         primary, sibling = self._seed_collision_pair()
 
         mock_flickr = MagicMock()
@@ -5840,11 +6678,16 @@ class TestApplyManualMerge(unittest.TestCase):
         mock_ps = MagicMock()
         mock_ps.Photo.return_value = mock_photo
 
-        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
-             patch.dict("sys.modules", {"photoscript": mock_ps}):
+        with (
+            patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
+            patch.dict("sys.modules", {"photoscript": mock_ps}),
+        ):
             result = apply_manual_merge(
-                self.db, primary, ["nature", "travel", "vacation"],
-                library_path="", flickr_client=mock_flickr,
+                self.db,
+                primary,
+                ["nature", "travel", "vacation"],
+                library_path="",
+                flickr_client=mock_flickr,
             )
 
         self.assertTrue(result["ok"], result)
@@ -5867,17 +6710,25 @@ class TestApplyCollisionReverse(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         from db.db import Database
+
         self.db = Database(Path(self._tmp.name) / "test.db")
-        self.db.upsert_photo({
-            "flickr_id": "F1", "uuid": "U1",
-            "privacy_state": "candidate_public",
-            "flickr_tags": '["travel"]',   "flickr_tags_hash": "FH1",
-            "photos_tags": '["nature"]',   "photos_tags_hash": "PH1",
-            "flickr_title": "Flickr Title",  "photos_title": "Photos Title",
-            "flickr_description": "Flickr desc", "photos_description": "Photos desc",
-            "meta_synced_flickr_at": "2026-01-01T00:00:00+00:00",
-            "meta_synced_photos_at": "2026-01-01T00:00:00+00:00",
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "F1",
+                "uuid": "U1",
+                "privacy_state": "candidate_public",
+                "flickr_tags": '["travel"]',
+                "flickr_tags_hash": "FH1",
+                "photos_tags": '["nature"]',
+                "photos_tags_hash": "PH1",
+                "flickr_title": "Flickr Title",
+                "photos_title": "Photos Title",
+                "flickr_description": "Flickr desc",
+                "photos_description": "Photos desc",
+                "meta_synced_flickr_at": "2026-01-01T00:00:00+00:00",
+                "meta_synced_photos_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
         self.photo_id = self.db.get_photo_by_flickr_id("F1")["id"]
 
     def tearDown(self):
@@ -5886,15 +6737,19 @@ class TestApplyCollisionReverse(unittest.TestCase):
 
     def _seed_collision(self, field="tags", supersede_sibling=False):
         for src, tgt in (("flickr", "photos"), ("photos", "flickr")):
-            self.db.upsert_proposal({
-                "photo_id": self.photo_id, "field": field,
-                "proposed_value": '["travel"]' if field == "tags" else "Flickr value",
-                "source": src, "target": tgt,
-                "conflict_type": "collision",
-                "source_hash_at_creation": "FH1" if src == "flickr" else "PH1",
-                "target_hash_at_creation": "PH1" if tgt == "photos" else "FH1",
-                "created_at": "2026-01-01T00:00:00+00:00",
-            })
+            self.db.upsert_proposal(
+                {
+                    "photo_id": self.photo_id,
+                    "field": field,
+                    "proposed_value": '["travel"]' if field == "tags" else "Flickr value",
+                    "source": src,
+                    "target": tgt,
+                    "conflict_type": "collision",
+                    "source_hash_at_creation": "FH1" if src == "flickr" else "PH1",
+                    "target_hash_at_creation": "PH1" if tgt == "photos" else "FH1",
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                }
+            )
         self.db.conn.commit()
         rows = self.db.conn.execute(
             "SELECT id, source FROM metadata_proposals WHERE photo_id=? AND field=? ORDER BY id",
@@ -5912,6 +6767,7 @@ class TestApplyCollisionReverse(unittest.TestCase):
     def test_writes_photos_tags_to_flickr(self):
         from unittest.mock import MagicMock
         from flickr.proposal_applier import apply_collision_reverse
+
         primary, sibling = self._seed_collision(field="tags")
         mock_flickr = MagicMock()
         result = apply_collision_reverse(self.db, primary, flickr_client=mock_flickr)
@@ -5921,6 +6777,7 @@ class TestApplyCollisionReverse(unittest.TestCase):
     def test_marks_primary_rejected_sibling_applied(self):
         from unittest.mock import MagicMock
         from flickr.proposal_applier import apply_collision_reverse
+
         primary, sibling = self._seed_collision(field="tags")
         apply_collision_reverse(self.db, primary, flickr_client=MagicMock())
         p_status = self.db.conn.execute(
@@ -5936,6 +6793,7 @@ class TestApplyCollisionReverse(unittest.TestCase):
         """The key regression: sibling superseded by sync run should not block apply."""
         from unittest.mock import MagicMock
         from flickr.proposal_applier import apply_collision_reverse
+
         primary, sibling = self._seed_collision(field="tags", supersede_sibling=True)
         result = apply_collision_reverse(self.db, primary, flickr_client=MagicMock())
         self.assertTrue(result["ok"], result)
@@ -5947,14 +6805,18 @@ class TestApplyCollisionReverse(unittest.TestCase):
     def test_writes_photos_title_to_flickr(self):
         from unittest.mock import MagicMock
         from flickr.proposal_applier import apply_collision_reverse
+
         primary, _ = self._seed_collision(field="title")
         mock_flickr = MagicMock()
         result = apply_collision_reverse(self.db, primary, flickr_client=mock_flickr)
         self.assertTrue(result["ok"], result)
-        mock_flickr.set_meta.assert_called_once_with("F1", title="Photos Title", description="Flickr desc")
+        mock_flickr.set_meta.assert_called_once_with(
+            "F1", title="Photos Title", description="Flickr desc"
+        )
 
     def test_no_flickr_client_returns_error(self):
         from flickr.proposal_applier import apply_collision_reverse
+
         primary, _ = self._seed_collision(field="tags")
         result = apply_collision_reverse(self.db, primary, flickr_client=None)
         self.assertFalse(result["ok"])
@@ -5963,6 +6825,7 @@ class TestApplyCollisionReverse(unittest.TestCase):
     def test_not_found_returns_error(self):
         from flickr.proposal_applier import apply_collision_reverse
         from unittest.mock import MagicMock
+
         result = apply_collision_reverse(self.db, 9999, flickr_client=MagicMock())
         self.assertFalse(result["ok"])
         self.assertIn("not found", result["reason"])
@@ -5970,6 +6833,7 @@ class TestApplyCollisionReverse(unittest.TestCase):
     def test_already_resolved_returns_error(self):
         from unittest.mock import MagicMock
         from flickr.proposal_applier import apply_collision_reverse
+
         primary, _ = self._seed_collision(field="tags")
         self.db.resolve_proposal(primary, "rejected")
         result = apply_collision_reverse(self.db, primary, flickr_client=MagicMock())
@@ -5982,11 +6846,13 @@ class TestGetPendingProposals(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         from db.db import Database
+
         self.db = Database(Path(self._tmp.name) / "test.db")
         # One photo per conflict type to avoid idempotency deduplication
         for fid in ("A", "B", "C"):
-            self.db.upsert_photo({"flickr_id": fid, "uuid": f"U-{fid}",
-                                   "privacy_state": "candidate_public"})
+            self.db.upsert_photo(
+                {"flickr_id": fid, "uuid": f"U-{fid}", "privacy_state": "candidate_public"}
+            )
         self.pid_a = self.db.get_photo_by_flickr_id("A")["id"]
         self.pid_b = self.db.get_photo_by_flickr_id("B")["id"]
         self.pid_c = self.db.get_photo_by_flickr_id("C")["id"]
@@ -5996,14 +6862,19 @@ class TestGetPendingProposals(unittest.TestCase):
         self._tmp.cleanup()
 
     def _add(self, photo_id, conflict_type, target="photos"):
-        self.db.upsert_proposal({
-            "photo_id": photo_id, "field": "tags",
-            "proposed_value": '["x"]',
-            "source": "flickr", "target": target,
-            "conflict_type": conflict_type,
-            "source_hash_at_creation": "SH", "target_hash_at_creation": "TH",
-            "created_at": "2026-01-01T00:00:00+00:00",
-        })
+        self.db.upsert_proposal(
+            {
+                "photo_id": photo_id,
+                "field": "tags",
+                "proposed_value": '["x"]',
+                "source": "flickr",
+                "target": target,
+                "conflict_type": conflict_type,
+                "source_hash_at_creation": "SH",
+                "target_hash_at_creation": "TH",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
         self.db.conn.commit()
 
     def test_collision_sorts_first(self):
@@ -6033,41 +6904,47 @@ class TestGetPendingProposals(unittest.TestCase):
 # Reviewer UI — photo detail page
 # ---------------------------------------------------------------------------
 
+
 class TestPhotoDetailTemplate(unittest.TestCase):
     """photo_detail route renders x-apple-photos:// link iff uuid is set."""
 
     def setUp(self):
         import reviewer.app as reviewer_app
+
         self._tmp = tempfile.TemporaryDirectory()
-        db_path   = Path(self._tmp.name) / "test.db"
-        self._db  = Database(db_path)
+        db_path = Path(self._tmp.name) / "test.db"
+        self._db = Database(db_path)
 
         # Wire the module-level _db used by the Flask app
         reviewer_app._db = self._db
 
-        self._app    = reviewer_app.app
+        self._app = reviewer_app.app
         self._app.config["TESTING"] = True
         self._client = self._app.test_client()
 
         # Photo with uuid (Photos-matched)
-        self.matched_id = self._db.upsert_photo({
-            "uuid":              "AAAA-1111",
-            "flickr_id":         "flickr-detail-001",
-            "original_filename": "IMG_detail.JPG",
-            "privacy_state":     "candidate_public",
-            "proposed_tags":     [],
-            "apple_persons":     [],
-            "apple_labels":      [],
-        })
+        self.matched_id = self._db.upsert_photo(
+            {
+                "uuid": "AAAA-1111",
+                "flickr_id": "flickr-detail-001",
+                "original_filename": "IMG_detail.JPG",
+                "privacy_state": "candidate_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
         # Flickr-only photo (no uuid)
-        self.flickr_only_id = self._db.upsert_photo({
-            "flickr_id":         "flickr-detail-002",
-            "original_filename": "flickr_only.JPG",
-            "privacy_state":     "candidate_public",
-            "proposed_tags":     [],
-            "apple_persons":     [],
-            "apple_labels":      [],
-        })
+        self.flickr_only_id = self._db.upsert_photo(
+            {
+                "flickr_id": "flickr-detail-002",
+                "original_filename": "flickr_only.JPG",
+                "privacy_state": "candidate_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
 
     def tearDown(self):
         self._db.close()
@@ -6110,11 +6987,13 @@ class TestPhotoDetailTemplate(unittest.TestCase):
 
     def test_open_in_photos_api_osascript_error_returns_ok_false(self):
         from unittest.mock import patch
+
         with patch("reviewer.app.subprocess.run") as mock_run:
-            mock_run.return_value.__class__ = type("R", (), {
-                "returncode": 1, "stderr": "Photos not running"
-            })
+            mock_run.return_value.__class__ = type(
+                "R", (), {"returncode": 1, "stderr": "Photos not running"}
+            )
             import types
+
             r = types.SimpleNamespace(returncode=1, stderr="Photos not running")
             mock_run.return_value = r
             with self._app.test_request_context():
@@ -6130,6 +7009,7 @@ class TestCmdAll(unittest.TestCase):
     def _import_bp(cls):
         import importlib.util
         from importlib.machinery import SourceFileLoader
+
         bp_path = str(Path(__file__).parent.parent / "bp")
         loader = SourceFileLoader("bp_module", bp_path)
         spec = importlib.util.spec_from_loader("bp_module", loader)
@@ -6139,21 +7019,42 @@ class TestCmdAll(unittest.TestCase):
 
     def _args(self, **kwargs):
         import argparse
+
         base = dict(
-            config="config/config.yml", verbose=False, dry_run=False,
-            all=False, days=None, backfill=False, limit=None,
-            fix=False, apply_proposals=False, album=None, mode="truncate",
-            photo_id=None, conflicts_only=False, force=False,
-            port=5173, debug=False, oneliner=False,
+            config="config/config.yml",
+            verbose=False,
+            dry_run=False,
+            all=False,
+            days=None,
+            backfill=False,
+            limit=None,
+            fix=False,
+            apply_proposals=False,
+            album=None,
+            mode="truncate",
+            photo_id=None,
+            conflicts_only=False,
+            force=False,
+            port=5173,
+            debug=False,
+            oneliner=False,
         )
         base.update(kwargs)
         return argparse.Namespace(**base)
 
     def _patch_steps(self, bp, overrides=None):
         """Replace all cmd_* steps with no-ops; apply per-name overrides."""
-        names = ("cmd_scan", "cmd_poll", "cmd_thumbs", "cmd_pipeline",
-                 "cmd_reconcile", "cmd_sync_albums", "cmd_sync_album_collections",
-                 "cmd_sync_names_from_flickr", "cmd_checkpoint")
+        names = (
+            "cmd_scan",
+            "cmd_poll",
+            "cmd_thumbs",
+            "cmd_pipeline",
+            "cmd_reconcile",
+            "cmd_sync_albums",
+            "cmd_sync_album_collections",
+            "cmd_sync_names_from_flickr",
+            "cmd_checkpoint",
+        )
         originals = {n: getattr(bp, n) for n in names}
         for n in names:
             setattr(bp, n, (overrides or {}).get(n, lambda a: None))
@@ -6166,23 +7067,26 @@ class TestCmdAll(unittest.TestCase):
     def test_all_nine_steps_called_in_order(self):
         bp = self._import_bp()
         import threading
+
         called = []
         lock = threading.Lock()
         labels = {
-            "cmd_scan":                      "scan",
-            "cmd_poll":                      "poll",
-            "cmd_thumbs":                    "thumbs",
-            "cmd_sync_names_from_flickr":    "sync_names_from_flickr",
-            "cmd_pipeline":                  "pipeline",
-            "cmd_reconcile":                 "reconcile",
-            "cmd_sync_albums":               "sync_albums",
-            "cmd_sync_album_collections":    "sync_album_collections",
-            "cmd_checkpoint":                "checkpoint",
+            "cmd_scan": "scan",
+            "cmd_poll": "poll",
+            "cmd_thumbs": "thumbs",
+            "cmd_sync_names_from_flickr": "sync_names_from_flickr",
+            "cmd_pipeline": "pipeline",
+            "cmd_reconcile": "reconcile",
+            "cmd_sync_albums": "sync_albums",
+            "cmd_sync_album_collections": "sync_album_collections",
+            "cmd_checkpoint": "checkpoint",
         }
         originals = self._patch_steps(
             bp,
-            {n: (lambda lbl: lambda a: (lock.acquire(), called.append(lbl), lock.release()))(lbl)
-             for n, lbl in labels.items()},
+            {
+                n: (lambda lbl: lambda a: (lock.acquire(), called.append(lbl), lock.release()))(lbl)
+                for n, lbl in labels.items()
+            },
         )
         try:
             bp.cmd_all(self._args())
@@ -6206,17 +7110,20 @@ class TestCmdAll(unittest.TestCase):
             called.append("scan")
             raise SystemExit(1)
 
-        originals = self._patch_steps(bp, {
-            "cmd_scan": fail_scan,
-            "cmd_poll":                    lambda a: called.append("poll"),
-            "cmd_thumbs":                  lambda a: called.append("thumbs"),
-            "cmd_sync_names_from_flickr":  lambda a: called.append("sync_names_from_flickr"),
-            "cmd_pipeline":                lambda a: called.append("pipeline"),
-            "cmd_reconcile":               lambda a: called.append("reconcile"),
-            "cmd_sync_albums":             lambda a: called.append("sync_albums"),
-            "cmd_sync_album_collections":  lambda a: called.append("sync_album_collections"),
-            "cmd_checkpoint":              lambda a: called.append("checkpoint"),
-        })
+        originals = self._patch_steps(
+            bp,
+            {
+                "cmd_scan": fail_scan,
+                "cmd_poll": lambda a: called.append("poll"),
+                "cmd_thumbs": lambda a: called.append("thumbs"),
+                "cmd_sync_names_from_flickr": lambda a: called.append("sync_names_from_flickr"),
+                "cmd_pipeline": lambda a: called.append("pipeline"),
+                "cmd_reconcile": lambda a: called.append("reconcile"),
+                "cmd_sync_albums": lambda a: called.append("sync_albums"),
+                "cmd_sync_album_collections": lambda a: called.append("sync_album_collections"),
+                "cmd_checkpoint": lambda a: called.append("checkpoint"),
+            },
+        )
         try:
             bp.cmd_all(self._args())
         finally:
@@ -6231,13 +7138,18 @@ class TestCmdAll(unittest.TestCase):
         captured = {}
 
         def cap(name):
-            def fn(args): captured[name] = vars(args)
+            def fn(args):
+                captured[name] = vars(args)
+
             return fn
 
-        originals = self._patch_steps(bp, {
-            "cmd_scan":      cap("scan"),
-            "cmd_reconcile": cap("reconcile"),
-        })
+        originals = self._patch_steps(
+            bp,
+            {
+                "cmd_scan": cap("scan"),
+                "cmd_reconcile": cap("reconcile"),
+            },
+        )
         try:
             bp.cmd_all(self._args())
         finally:
@@ -6253,14 +7165,17 @@ class TestCheckpoint(unittest.TestCase):
 
     def setUp(self):
         import tempfile
+
         self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         self.tmp.close()
         from db.db import Database
+
         self.db = Database(self.tmp.name)
 
     def tearDown(self):
         self.db.close()
         import os
+
         for ext in ("", "-wal", "-shm"):
             try:
                 os.unlink(self.tmp.name + ext)
@@ -6291,10 +7206,12 @@ class TestFlickrClientRotate(unittest.TestCase):
 
     def _make_client(self):
         from flickr.flickr_client import FlickrClient
+
         return FlickrClient("key", "secret", "token", "tsecret", rate_limit_delay=0)
 
     def _mock_response(self, json_data=None):
         from unittest.mock import MagicMock
+
         resp = MagicMock()
         resp.status_code = 200
         resp.json.return_value = json_data or {"stat": "ok"}
@@ -6303,16 +7220,17 @@ class TestFlickrClientRotate(unittest.TestCase):
 
     def test_valid_degrees_calls_api(self):
         from unittest.mock import patch
+
         c = self._make_client()
         ok = self._mock_response({"stat": "ok"})
-        with patch.object(c._session, 'post', return_value=ok) as mock_post:
+        with patch.object(c._session, "post", return_value=ok) as mock_post:
             c.rotate("flickr123", 90)
         args, kwargs = mock_post.call_args
         body = kwargs.get("data") or (args[1] if len(args) > 1 else {})
         self.assertIn("flickr.photos.transform.rotate", str(body))
 
     def test_invalid_degrees_raises(self):
-        from flickr.flickr_client import FlickrClient
+
         c = self._make_client()
         with self.assertRaises(ValueError):
             c.rotate("flickr123", 45)
@@ -6333,40 +7251,47 @@ class TestRotateFlickrApi(unittest.TestCase):
 
     def setUp(self):
         import reviewer.app as reviewer_app
+
         self._tmp = tempfile.TemporaryDirectory()
-        db_path   = Path(self._tmp.name) / "test.db"
-        self._db  = Database(db_path)
-        reviewer_app._db     = self._db
+        db_path = Path(self._tmp.name) / "test.db"
+        self._db = Database(db_path)
+        reviewer_app._db = self._db
         reviewer_app._client = None
-        self._app    = reviewer_app.app
+        self._app = reviewer_app.app
         self._app.config["TESTING"] = True
         self._client = self._app.test_client()
 
-        self.photo_id = self._db.upsert_photo({
-            "flickr_id":         "flickr-rotate-001",
-            "original_filename": "rotate_test.JPG",
-            "privacy_state":     "candidate_public",
-            "proposed_tags":     [],
-            "apple_persons":     [],
-            "apple_labels":      [],
-        })
-        self.no_flickr_id = self._db.upsert_photo({
-            "uuid":              "BBBB-2222",
-            "original_filename": "local_only.JPG",
-            "privacy_state":     "candidate_public",
-            "proposed_tags":     [],
-            "apple_persons":     [],
-            "apple_labels":      [],
-        })
+        self.photo_id = self._db.upsert_photo(
+            {
+                "flickr_id": "flickr-rotate-001",
+                "original_filename": "rotate_test.JPG",
+                "privacy_state": "candidate_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+        self.no_flickr_id = self._db.upsert_photo(
+            {
+                "uuid": "BBBB-2222",
+                "original_filename": "local_only.JPG",
+                "privacy_state": "candidate_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
 
     def tearDown(self):
         import reviewer.app as reviewer_app
+
         reviewer_app._client = None
         self._db.close()
         self._tmp.cleanup()
 
     def _post(self, photo_id, degrees):
         import json
+
         with self._app.test_request_context():
             return self._client.post(
                 f"/api/photos/{photo_id}/rotate-flickr",
@@ -6395,6 +7320,7 @@ class TestRotateFlickrApi(unittest.TestCase):
     def test_rotate_calls_client_and_returns_ok(self):
         from unittest.mock import MagicMock
         import reviewer.app as reviewer_app
+
         mock_c = MagicMock()
         mock_c.rotate.return_value = {"stat": "ok"}
         mock_c.get_photo_info.return_value = {
@@ -6432,6 +7358,7 @@ class TestInstallDaemons(unittest.TestCase):
     def _import_bp(cls):
         import importlib.util
         from importlib.machinery import SourceFileLoader
+
         bp_path = str(Path(__file__).parent.parent / "bp")
         loader = SourceFileLoader("bp_module", bp_path)
         spec = importlib.util.spec_from_loader("bp_module", loader)
@@ -6441,10 +7368,12 @@ class TestInstallDaemons(unittest.TestCase):
 
     def _args(self, dry_run=False):
         import argparse
+
         return argparse.Namespace(dry_run=dry_run)
 
     def test_tokens_substituted_in_installed_files(self):
-        import tempfile, shutil
+        import tempfile
+
         bp = self._import_bp()
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_home = Path(tmpdir) / "home"
@@ -6461,13 +7390,14 @@ class TestInstallDaemons(unittest.TestCase):
             for f in installed:
                 text = f.read_text()
                 self.assertNotIn("__REPO__", text)
-                self.assertNotIn("__UV__",   text)
+                self.assertNotIn("__UV__", text)
                 self.assertNotIn("__HOME__", text)
                 self.assertIn(fake_uv, text)
                 self.assertIn(str(fake_home), text)
 
     def test_dry_run_writes_no_files(self):
         import tempfile
+
         bp = self._import_bp()
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_home = Path(tmpdir) / "home"
@@ -6488,6 +7418,7 @@ class TestInstallDaemons(unittest.TestCase):
 
     def test_poller_plist_runs_thumbs_after_poll(self):
         import tempfile
+
         bp = self._import_bp()
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_home = Path(tmpdir) / "home"
@@ -6503,6 +7434,7 @@ class TestInstallDaemons(unittest.TestCase):
 
     def test_reconcile_plist_has_weekly_calendar_interval(self):
         import tempfile
+
         bp = self._import_bp()
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_home = Path(tmpdir) / "home"
@@ -6521,6 +7453,7 @@ class TestInstallDaemons(unittest.TestCase):
     def test_label_uses_new_bundle_id(self):
         """The installed plists use com.blue-pearmain.* labels, not the old com.cdevers.* form."""
         import tempfile
+
         bp = self._import_bp()
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_home = Path(tmpdir) / "home"
@@ -6543,6 +7476,7 @@ class TestUninstallDaemons(unittest.TestCase):
     def _import_bp(cls):
         import importlib.util
         from importlib.machinery import SourceFileLoader
+
         bp_path = str(Path(__file__).parent.parent / "bp")
         loader = SourceFileLoader("bp_module", bp_path)
         spec = importlib.util.spec_from_loader("bp_module", loader)
@@ -6552,6 +7486,7 @@ class TestUninstallDaemons(unittest.TestCase):
 
     def _args(self, dry_run=False):
         import argparse
+
         return argparse.Namespace(dry_run=dry_run)
 
     def _install_fake_plists(self, fake_agents: Path):
@@ -6567,6 +7502,7 @@ class TestUninstallDaemons(unittest.TestCase):
 
     def test_removes_installed_files(self):
         import tempfile
+
         bp = self._import_bp()
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_home = Path(tmpdir) / "home"
@@ -6579,6 +7515,7 @@ class TestUninstallDaemons(unittest.TestCase):
 
     def test_dry_run_leaves_files_intact(self):
         import tempfile
+
         bp = self._import_bp()
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_home = Path(tmpdir) / "home"
@@ -6594,6 +7531,7 @@ class TestUninstallDaemons(unittest.TestCase):
 
     def test_tolerates_missing_files(self):
         import tempfile
+
         bp = self._import_bp()
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_home = Path(tmpdir) / "home"
@@ -6609,13 +7547,19 @@ class TestSetPhotoText(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         from db.db import Database
+
         self.db = Database(Path(self._tmp.name) / "test.db")
-        self.db.upsert_photo({
-            "flickr_id": "F1", "uuid": "U1",
-            "privacy_state": "candidate_public",
-            "flickr_title": "Old Flickr", "photos_title": "Old Photos",
-            "flickr_description": "Old F desc", "photos_description": "Old P desc",
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "F1",
+                "uuid": "U1",
+                "privacy_state": "candidate_public",
+                "flickr_title": "Old Flickr",
+                "photos_title": "Old Photos",
+                "flickr_description": "Old F desc",
+                "photos_description": "Old P desc",
+            }
+        )
         self.photo_id = self.db.get_photo_by_flickr_id("F1")["id"]
 
     def tearDown(self):
@@ -6625,19 +7569,34 @@ class TestSetPhotoText(unittest.TestCase):
     def test_writes_to_flickr_via_set_meta(self):
         from unittest.mock import MagicMock
         from flickr.proposal_applier import set_photo_text
+
         mock_client = MagicMock()
-        with unittest.mock.patch("flickr.proposal_applier._photos_is_responsive", return_value=False):
-            result = set_photo_text(self.db, self.photo_id, "New Title", "New Desc",
-                                    "/fake/lib", flickr_client=mock_client)
+        with unittest.mock.patch(
+            "flickr.proposal_applier._photos_is_responsive", return_value=False
+        ):
+            result = set_photo_text(
+                self.db,
+                self.photo_id,
+                "New Title",
+                "New Desc",
+                "/fake/lib",
+                flickr_client=mock_client,
+            )
         self.assertTrue(result["ok"], result)
-        mock_client.set_meta.assert_called_once_with("F1", title="New Title", description="New Desc")
+        mock_client.set_meta.assert_called_once_with(
+            "F1", title="New Title", description="New Desc"
+        )
 
     def test_updates_flickr_cache_in_db(self):
         from unittest.mock import MagicMock
         from flickr.proposal_applier import set_photo_text
-        with unittest.mock.patch("flickr.proposal_applier._photos_is_responsive", return_value=False):
-            set_photo_text(self.db, self.photo_id, "T2", "D2", "/fake/lib",
-                           flickr_client=MagicMock())
+
+        with unittest.mock.patch(
+            "flickr.proposal_applier._photos_is_responsive", return_value=False
+        ):
+            set_photo_text(
+                self.db, self.photo_id, "T2", "D2", "/fake/lib", flickr_client=MagicMock()
+            )
         row = self.db.get_photo(self.photo_id)
         self.assertEqual(row["flickr_title"], "T2")
         self.assertEqual(row["flickr_description"], "D2")
@@ -6645,62 +7604,86 @@ class TestSetPhotoText(unittest.TestCase):
     def test_supersedes_pending_title_proposals(self):
         from unittest.mock import MagicMock
         from flickr.proposal_applier import set_photo_text
+
         for src, tgt in (("flickr", "photos"), ("photos", "flickr")):
-            self.db.upsert_proposal({
-                "photo_id": self.photo_id, "field": "title",
-                "proposed_value": "v", "source": src, "target": tgt,
-                "conflict_type": "collision",
-                "source_hash_at_creation": "h1", "target_hash_at_creation": "h2",
-                "created_at": "2026-01-01T00:00:00+00:00",
-            })
+            self.db.upsert_proposal(
+                {
+                    "photo_id": self.photo_id,
+                    "field": "title",
+                    "proposed_value": "v",
+                    "source": src,
+                    "target": tgt,
+                    "conflict_type": "collision",
+                    "source_hash_at_creation": "h1",
+                    "target_hash_at_creation": "h2",
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                }
+            )
         self.db.conn.commit()
-        with unittest.mock.patch("flickr.proposal_applier._photos_is_responsive", return_value=False):
-            set_photo_text(self.db, self.photo_id, "T", "D", "/fake/lib",
-                           flickr_client=MagicMock())
-        statuses = [r["status"] for r in self.db.conn.execute(
-            "SELECT status FROM metadata_proposals WHERE photo_id=? AND field='title'",
-            (self.photo_id,),
-        ).fetchall()]
+        with unittest.mock.patch(
+            "flickr.proposal_applier._photos_is_responsive", return_value=False
+        ):
+            set_photo_text(self.db, self.photo_id, "T", "D", "/fake/lib", flickr_client=MagicMock())
+        statuses = [
+            r["status"]
+            for r in self.db.conn.execute(
+                "SELECT status FROM metadata_proposals WHERE photo_id=? AND field='title'",
+                (self.photo_id,),
+            ).fetchall()
+        ]
         self.assertTrue(all(s == "superseded" for s in statuses), statuses)
 
     def test_photo_not_found_returns_error(self):
         from unittest.mock import MagicMock
         from flickr.proposal_applier import set_photo_text
+
         result = set_photo_text(self.db, 9999, "T", "D", "/fake/lib", flickr_client=MagicMock())
         self.assertFalse(result["ok"])
         self.assertIn("not found", result["reason"])
 
     def test_no_flickr_client_produces_warning(self):
         from flickr.proposal_applier import set_photo_text
-        with unittest.mock.patch("flickr.proposal_applier._photos_is_responsive", return_value=False):
-            result = set_photo_text(self.db, self.photo_id, "T", "D", "/fake/lib",
-                                    flickr_client=None)
+
+        with unittest.mock.patch(
+            "flickr.proposal_applier._photos_is_responsive", return_value=False
+        ):
+            result = set_photo_text(
+                self.db, self.photo_id, "T", "D", "/fake/lib", flickr_client=None
+            )
         self.assertTrue(result["ok"], result)
         self.assertIn("Flickr", " ".join(result.get("warnings", [])))
 
     def test_flickr_api_error_produces_warning(self):
         from unittest.mock import MagicMock
         from flickr.proposal_applier import set_photo_text
+
         mock_client = MagicMock()
         mock_client.set_meta.side_effect = Exception("API down")
-        with unittest.mock.patch("flickr.proposal_applier._photos_is_responsive", return_value=False):
-            result = set_photo_text(self.db, self.photo_id, "T", "D", "/fake/lib",
-                                    flickr_client=mock_client)
+        with unittest.mock.patch(
+            "flickr.proposal_applier._photos_is_responsive", return_value=False
+        ):
+            result = set_photo_text(
+                self.db, self.photo_id, "T", "D", "/fake/lib", flickr_client=mock_client
+            )
         self.assertTrue(result["ok"], result)
         self.assertTrue(any("Flickr" in w for w in result.get("warnings", [])))
 
     def test_writes_to_photos_via_photoscript(self):
         from unittest.mock import MagicMock, patch
         from flickr.proposal_applier import set_photo_text
+
         mock_photo = MagicMock()
         mock_photo.title = ""
         mock_photo.description = ""
         mock_ps = MagicMock()
         mock_ps.Photo.return_value = mock_photo
-        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
-             patch.dict("sys.modules", {"photoscript": mock_ps}):
-            result = set_photo_text(self.db, self.photo_id, "T3", "D3", "/fake/lib",
-                                    flickr_client=MagicMock())
+        with (
+            patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
+            patch.dict("sys.modules", {"photoscript": mock_ps}),
+        ):
+            result = set_photo_text(
+                self.db, self.photo_id, "T3", "D3", "/fake/lib", flickr_client=MagicMock()
+            )
         self.assertTrue(result["ok"], result)
         self.assertEqual(mock_photo.title, "T3")
         self.assertEqual(mock_photo.description, "D3")
@@ -6709,11 +7692,16 @@ class TestSetPhotoText(unittest.TestCase):
         import sys
         from unittest.mock import patch, MagicMock
         from flickr.proposal_applier import _apply_text_to_photos
+
         row = {"field": "title", "uuid": "U1", "photo_id": 1, "id": 10}
-        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
-             patch.dict(sys.modules, {"photoscript": MagicMock()}), \
-             patch("flickr.proposal_applier._run_with_timeout",
-                   return_value={"ok": False, "reason": "Photos not responding"}):
+        with (
+            patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
+            patch.dict(sys.modules, {"photoscript": MagicMock()}),
+            patch(
+                "flickr.proposal_applier._run_with_timeout",
+                return_value={"ok": False, "reason": "Photos not responding"},
+            ),
+        ):
             result = _apply_text_to_photos(MagicMock(), row, "new title")
         self.assertFalse(result["ok"])
         self.assertEqual(result["reason"], "Photos not responding")
@@ -6722,10 +7710,15 @@ class TestSetPhotoText(unittest.TestCase):
         import sys
         from unittest.mock import patch, MagicMock
         from flickr.proposal_applier import _write_text_to_photos_both
-        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
-             patch.dict(sys.modules, {"photoscript": MagicMock()}), \
-             patch("flickr.proposal_applier._run_with_timeout",
-                   return_value={"ok": False, "reason": "Photos not responding"}):
+
+        with (
+            patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
+            patch.dict(sys.modules, {"photoscript": MagicMock()}),
+            patch(
+                "flickr.proposal_applier._run_with_timeout",
+                return_value={"ok": False, "reason": "Photos not responding"},
+            ),
+        ):
             result = _write_text_to_photos_both(MagicMock(), 1, "U1", "title", "desc")
         self.assertFalse(result["ok"])
         self.assertEqual(result["reason"], "Photos not responding")
@@ -6737,28 +7730,39 @@ class TestStaleUuid(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         from db.db import Database
+
         self.db = Database(Path(self._tmp.name) / "test.db")
         # Migration must be applied so uuid_stale column and 'failed' status exist
         from db.migrations.migrate_010_stale_uuid import run as run_migration
+
         run_migration(str(Path(self._tmp.name) / "test.db"))
         # Seed a photo with both uuid and flickr_id
-        self.db.upsert_photo({
-            "flickr_id": "F1", "uuid": "U1",
-            "privacy_state": "candidate_public",
-            "photos_tags": '["nature"]', "photos_tags_hash": "PH1",
-            "flickr_tags": '[]',          "flickr_tags_hash": "FH0",
-        })
+        self.db.upsert_photo(
+            {
+                "flickr_id": "F1",
+                "uuid": "U1",
+                "privacy_state": "candidate_public",
+                "photos_tags": '["nature"]',
+                "photos_tags_hash": "PH1",
+                "flickr_tags": "[]",
+                "flickr_tags_hash": "FH0",
+            }
+        )
         self.photo_id = self.db.get_photo_by_flickr_id("F1")["id"]
         # Seed a pending non_conflict proposal: flickr→photos tags
-        self.db.upsert_proposal({
-            "photo_id": self.photo_id, "field": "tags",
-            "proposed_value": '["nature"]',
-            "source": "flickr", "target": "photos",
-            "conflict_type": "non_conflict",
-            "source_hash_at_creation": "FH0",
-            "target_hash_at_creation": "PH1",
-            "created_at": "2026-01-01T00:00:00+00:00",
-        })
+        self.db.upsert_proposal(
+            {
+                "photo_id": self.photo_id,
+                "field": "tags",
+                "proposed_value": '["nature"]',
+                "source": "flickr",
+                "target": "photos",
+                "conflict_type": "non_conflict",
+                "source_hash_at_creation": "FH0",
+                "target_hash_at_creation": "PH1",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
         self.db.conn.commit()
         self.proposal_id = self.db.conn.execute(
             "SELECT id FROM metadata_proposals WHERE photo_id=? AND status='pending'",
@@ -6772,6 +7776,7 @@ class TestStaleUuid(unittest.TestCase):
     def _mock_stale_uuid(self):
         """Return a context manager that makes photoscript.Photo raise 'invalid photo ID: U1'."""
         from unittest.mock import patch, MagicMock
+
         mock_ps = MagicMock()
         mock_ps.Photo.side_effect = Exception("invalid photo ID: U1")
         return patch.dict("sys.modules", {"photoscript": mock_ps})
@@ -6779,8 +7784,11 @@ class TestStaleUuid(unittest.TestCase):
     def test_stale_uuid_marks_proposal_failed(self):
         from unittest.mock import patch
         from flickr.proposal_applier import apply_proposal
-        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
-             self._mock_stale_uuid():
+
+        with (
+            patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
+            self._mock_stale_uuid(),
+        ):
             result = apply_proposal(self.db, self.proposal_id, "/fake/lib")
         self.assertFalse(result["ok"])
         self.assertEqual(result["reason"], "stale_uuid")
@@ -6794,8 +7802,11 @@ class TestStaleUuid(unittest.TestCase):
     def test_stale_uuid_sets_flag_on_photo(self):
         from unittest.mock import patch
         from flickr.proposal_applier import apply_proposal
-        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
-             self._mock_stale_uuid():
+
+        with (
+            patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
+            self._mock_stale_uuid(),
+        ):
             apply_proposal(self.db, self.proposal_id, "/fake/lib")
         flag = self.db.conn.execute(
             "SELECT uuid_stale FROM photos WHERE id=?", (self.photo_id,)
@@ -6805,8 +7816,11 @@ class TestStaleUuid(unittest.TestCase):
     def test_stale_uuid_in_apply_batch_counted_as_failed_not_error(self):
         from unittest.mock import patch
         from flickr.proposal_applier import apply_batch
-        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
-             self._mock_stale_uuid():
+
+        with (
+            patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
+            self._mock_stale_uuid(),
+        ):
             totals = apply_batch(self.db, "/fake/lib")
         self.assertEqual(totals["failed"], 1)
         self.assertEqual(totals["errors"], [])
@@ -6815,9 +7829,12 @@ class TestStaleUuid(unittest.TestCase):
         import logging
         from unittest.mock import patch
         from flickr.proposal_applier import apply_batch
-        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
-             self._mock_stale_uuid(), \
-             self.assertLogs("blue-pearmain.proposal_applier", level="DEBUG") as cm:
+
+        with (
+            patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
+            self._mock_stale_uuid(),
+            self.assertLogs("blue-pearmain.proposal_applier", level="DEBUG") as cm,
+        ):
             apply_batch(self.db, "/fake/lib")
         # No WARNING-level per-proposal stale UUID message
         warnings = [r for r in cm.records if r.levelno >= logging.WARNING]
@@ -6832,10 +7849,13 @@ class TestStaleUuid(unittest.TestCase):
     def test_non_uuid_error_leaves_proposal_pending(self):
         from unittest.mock import patch, MagicMock
         from flickr.proposal_applier import apply_proposal
+
         mock_ps = MagicMock()
         mock_ps.Photo.side_effect = Exception("permission denied")
-        with patch("flickr.proposal_applier._photos_is_responsive", return_value=True), \
-             patch.dict("sys.modules", {"photoscript": mock_ps}):
+        with (
+            patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
+            patch.dict("sys.modules", {"photoscript": mock_ps}),
+        ):
             result = apply_proposal(self.db, self.proposal_id, "/fake/lib")
         self.assertFalse(result["ok"])
         self.assertNotEqual(result["reason"], "stale_uuid")
@@ -6852,6 +7872,7 @@ class TestStaleUuid(unittest.TestCase):
         import tempfile
         from db.db import Database
         from db.migrations.migrate_009_placeholder import run as run_migration
+
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = str(Path(tmpdir) / "idempotent.db")
             db = Database(db_path)
@@ -6859,6 +7880,7 @@ class TestStaleUuid(unittest.TestCase):
             run_migration(db_path)  # first run
             run_migration(db_path)  # second run — must not raise
             import sqlite3
+
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             row = conn.execute(
@@ -6871,6 +7893,7 @@ class TestStaleUuid(unittest.TestCase):
         import tempfile
         from db.db import Database
         from db.migrations.migrate_010_stale_uuid import run as run_migration
+
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = str(Path(tmpdir) / "idempotent.db")
             db = Database(db_path)
@@ -6878,6 +7901,7 @@ class TestStaleUuid(unittest.TestCase):
             run_migration(db_path)  # first run
             run_migration(db_path)  # second run — must not raise
             import sqlite3
+
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             # uuid_stale column must exist
@@ -6897,9 +7921,9 @@ class TestStaleUuid(unittest.TestCase):
 
 
 class TestMigration011(unittest.TestCase):
-
     def _run_migration(self, db_path: str):
-        import importlib.util, sys
+        import importlib.util
+
         spec = importlib.util.spec_from_file_location(
             "migrate_011",
             Path(__file__).parent.parent / "db/migrations/migrate_011_folders.py",
@@ -6912,14 +7936,19 @@ class TestMigration011(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = str(Path(tmp) / "test.db")
             from db.db import Database
+
             db = Database(db_path)
             db.close()
             self._run_migration(db_path)
             import sqlite3
+
             conn = sqlite3.connect(db_path)
-            tables = {r[0] for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()}
+            tables = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
             self.assertIn("folders", tables)
             conn.close()
 
@@ -6927,10 +7956,12 @@ class TestMigration011(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = str(Path(tmp) / "test.db")
             from db.db import Database
+
             db = Database(db_path)
             db.close()
             self._run_migration(db_path)
             import sqlite3
+
             conn = sqlite3.connect(db_path)
             cols = {r[1] for r in conn.execute("PRAGMA table_info(folders)").fetchall()}
             self.assertIn("parent_id", cols)
@@ -6941,10 +7972,12 @@ class TestMigration011(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = str(Path(tmp) / "test.db")
             from db.db import Database
+
             db = Database(db_path)
             db.close()
             self._run_migration(db_path)
             import sqlite3
+
             conn = sqlite3.connect(db_path)
             cols = {r[1] for r in conn.execute("PRAGMA table_info(albums)").fetchall()}
             self.assertIn("folder_id", cols)
@@ -6954,6 +7987,7 @@ class TestMigration011(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = str(Path(tmp) / "idempotent.db")
             from db.db import Database
+
             db = Database(db_path)
             db.close()
             self._run_migration(db_path)
@@ -6971,6 +8005,7 @@ class TestMigrate012FlickrName(unittest.TestCase):
     def test_migration_adds_flickr_name_to_albums(self):
         from db.db import Database
         from db.migrations.migrate_012_flickr_name import run
+
         db = Database(Path(self.db_path))
         run(self.db_path)
         row = db.conn.execute("PRAGMA table_info(albums)").fetchall()
@@ -6981,6 +8016,7 @@ class TestMigrate012FlickrName(unittest.TestCase):
     def test_migration_adds_flickr_name_to_folders(self):
         from db.db import Database
         from db.migrations.migrate_012_flickr_name import run
+
         db = Database(Path(self.db_path))
         run(self.db_path)
         row = db.conn.execute("PRAGMA table_info(folders)").fetchall()
@@ -6991,6 +8027,7 @@ class TestMigrate012FlickrName(unittest.TestCase):
     def test_migration_is_idempotent(self):
         from db.db import Database
         from db.migrations.migrate_012_flickr_name import run
+
         db = Database(Path(self.db_path))
         run(self.db_path)
         run(self.db_path)  # second run must not raise
@@ -7003,6 +8040,7 @@ class TestSyncCollections(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         from db.db import Database
+
         self.db = Database(Path(self._tmp.name) / "test.db")
 
     def tearDown(self):
@@ -7011,6 +8049,7 @@ class TestSyncCollections(unittest.TestCase):
 
     def _make_flickr(self, **side_effects):
         from unittest.mock import MagicMock
+
         m = MagicMock()
         m.create_collection.return_value = "col-new"
         m.edit_collection_sets.return_value = None
@@ -7034,6 +8073,7 @@ class TestSyncCollections(unittest.TestCase):
 
     def test_creates_collection_for_new_folder(self):
         from flickr.sync_collections import sync_collections
+
         self._seed_folder("uuid-f1", "Travel")
         flickr = self._make_flickr()
 
@@ -7041,11 +8081,14 @@ class TestSyncCollections(unittest.TestCase):
 
         flickr.create_collection.assert_called_once_with("Travel", description="")
         self.assertEqual(result["created"], 1)
-        row = self.db.conn.execute("SELECT flickr_collection_id FROM folders WHERE apple_uuid='uuid-f1'").fetchone()
+        row = self.db.conn.execute(
+            "SELECT flickr_collection_id FROM folders WHERE apple_uuid='uuid-f1'"
+        ).fetchone()
         self.assertEqual(row["flickr_collection_id"], "col-new")
 
     def test_skips_create_for_existing_collection(self):
         from flickr.sync_collections import sync_collections
+
         self._seed_folder("uuid-f1", "Travel", collection_id="col-existing")
         flickr = self._make_flickr()
 
@@ -7055,9 +8098,10 @@ class TestSyncCollections(unittest.TestCase):
 
     def test_edit_sets_called_with_album_photoset_ids(self):
         from flickr.sync_collections import sync_collections
+
         fid = self._seed_folder("uuid-f1", "Travel", collection_id="col-1")
         self._seed_album("uuid-a1", "Paris", folder_id=fid, flickr_set_id="ps-111")
-        self._seed_album("uuid-a2", "Rome",  folder_id=fid, flickr_set_id="ps-222")
+        self._seed_album("uuid-a2", "Rome", folder_id=fid, flickr_set_id="ps-222")
         flickr = self._make_flickr()
 
         sync_collections(self.db, flickr)
@@ -7068,6 +8112,7 @@ class TestSyncCollections(unittest.TestCase):
 
     def test_skips_albums_without_flickr_set_id(self):
         from flickr.sync_collections import sync_collections
+
         fid = self._seed_folder("uuid-f1", "Travel", collection_id="col-1")
         self._seed_album("uuid-a1", "Not Pushed Yet", folder_id=fid, flickr_set_id=None)
         flickr = self._make_flickr()
@@ -7079,6 +8124,7 @@ class TestSyncCollections(unittest.TestCase):
 
     def test_parent_collection_includes_child_collection_id(self):
         from flickr.sync_collections import sync_collections
+
         parent_id = self._seed_folder("uuid-parent", "Europe", collection_id="col-parent")
         self._seed_folder("uuid-child", "France", parent_id=parent_id, collection_id="col-child")
         flickr = self._make_flickr()
@@ -7092,11 +8138,10 @@ class TestSyncCollections(unittest.TestCase):
     def test_nested_new_folders_parent_gets_child_collection_on_first_sync(self):
         """First-time sync: parent AND child both new — parent collection must include child."""
         from flickr.sync_collections import sync_collections
-        from unittest.mock import MagicMock, call
 
         # Both folders have no collection_id (first time sync)
-        parent_fid = self._seed_folder("uuid-parent", "Europe")   # no collection_id
-        child_fid  = self._seed_folder("uuid-child", "France", parent_id=parent_fid)  # no collection_id
+        parent_fid = self._seed_folder("uuid-parent", "Europe")  # no collection_id
+        self._seed_folder("uuid-child", "France", parent_id=parent_fid)  # no collection_id
 
         # create_collection returns unique IDs per call
         flickr = self._make_flickr()
@@ -7107,10 +8152,13 @@ class TestSyncCollections(unittest.TestCase):
         # edit_collection_sets on the parent must include col-france as a sub-collection
         calls = flickr.edit_collection_sets.call_args_list
         parent_call = next(c for c in calls if c[0][0] == "col-europe")
-        self.assertIn("col-france", parent_call[0][2], "parent collection must include child on first sync")
+        self.assertIn(
+            "col-france", parent_call[0][2], "parent collection must include child on first sync"
+        )
 
     def test_no_folders_is_noop(self):
         from flickr.sync_collections import sync_collections
+
         flickr = self._make_flickr()
         result = sync_collections(self.db, flickr)
         flickr.create_collection.assert_not_called()
@@ -7120,6 +8168,7 @@ class TestSyncCollections(unittest.TestCase):
 
     def test_dry_run_makes_no_api_calls(self):
         from flickr.sync_collections import sync_collections
+
         self._seed_folder("uuid-f1", "Travel")
         flickr = self._make_flickr()
 
@@ -7131,22 +8180,26 @@ class TestSyncCollections(unittest.TestCase):
     def test_stale_collection_id_cleared_and_recreated(self):
         from flickr.sync_collections import sync_collections
         from flickr.flickr_client import FlickrError
+
         fid = self._seed_folder("uuid-f1", "Travel", collection_id="col-stale")
         flickr = self._make_flickr()
         flickr.edit_collection_sets.side_effect = [
             FlickrError(2, "Collection not found"),  # first call fails
-            None,                                     # second call succeeds
+            None,  # second call succeeds
         ]
         flickr.create_collection.return_value = "col-new"
 
         sync_collections(self.db, flickr)
 
         flickr.create_collection.assert_called_once()
-        row = self.db.conn.execute("SELECT flickr_collection_id FROM folders WHERE id=?", (fid,)).fetchone()
+        row = self.db.conn.execute(
+            "SELECT flickr_collection_id FROM folders WHERE id=?", (fid,)
+        ).fetchone()
         self.assertEqual(row["flickr_collection_id"], "col-new")
 
     def test_updates_collection_title_for_existing_collection(self):
         from flickr.sync_collections import sync_collections
+
         self._seed_folder("uuid-f1", "New Name", collection_id="col-existing")
         flickr = self._make_flickr()
 
@@ -7156,6 +8209,7 @@ class TestSyncCollections(unittest.TestCase):
 
     def test_dry_run_does_not_call_edit_collection_meta(self):
         from flickr.sync_collections import sync_collections
+
         self._seed_folder("uuid-f1", "Travel", collection_id="col-existing")
         flickr = self._make_flickr()
 
@@ -7165,6 +8219,7 @@ class TestSyncCollections(unittest.TestCase):
 
     def test_edit_collection_meta_error_is_logged_and_counter_still_increments(self):
         from flickr.sync_collections import sync_collections
+
         self._seed_folder("uuid-f1", "My Folder", collection_id="col-existing")
         flickr = self._make_flickr()
         flickr.edit_collection_meta.side_effect = Exception("API timeout")
@@ -7176,6 +8231,7 @@ class TestSyncCollections(unittest.TestCase):
 
     def test_writes_flickr_name_for_existing_collection(self):
         from flickr.sync_collections import sync_collections
+
         fid = self._seed_folder("uuid-f1", "Travel", collection_id="col-existing")
         flickr = self._make_flickr()
 
@@ -7193,6 +8249,7 @@ class TestSyncNamesFromFlickr(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         from db.db import Database
+
         self.db = Database(Path(self._tmp.name) / "test.db")
 
     def tearDown(self):
@@ -7217,6 +8274,7 @@ class TestSyncNamesFromFlickr(unittest.TestCase):
 
     def _make_flickr(self, photosets=None, collections=None):
         from unittest.mock import MagicMock
+
         m = MagicMock()
         m.get_photosets_titled.return_value = photosets or {}
         m.get_collections_flat.return_value = collections or {}
@@ -7225,14 +8283,19 @@ class TestSyncNamesFromFlickr(unittest.TestCase):
     def test_renames_photos_album_when_flickr_title_changed(self):
         from unittest.mock import patch
         from flickr.sync_names_from_flickr import sync_names_from_flickr
+
         aid = self._seed_album("uuid-1", "Old Name", flickr_set_id="ps-1", flickr_name="Old Name")
         flickr = self._make_flickr(photosets={"ps-1": "New Flickr Name"})
 
-        with patch("flickr.sync_names_from_flickr._rename_photos_album", return_value=True) as mock_rename:
+        with patch(
+            "flickr.sync_names_from_flickr._rename_photos_album", return_value=True
+        ) as mock_rename:
             result = sync_names_from_flickr(self.db, flickr)
 
         mock_rename.assert_called_once_with("uuid-1", "New Flickr Name")
-        row = self.db.conn.execute("SELECT name, flickr_name FROM albums WHERE id = ?", (aid,)).fetchone()
+        row = self.db.conn.execute(
+            "SELECT name, flickr_name FROM albums WHERE id = ?", (aid,)
+        ).fetchone()
         self.assertEqual(row["name"], "New Flickr Name")
         self.assertEqual(row["flickr_name"], "New Flickr Name")
         self.assertEqual(result["albums_renamed"], 1)
@@ -7240,6 +8303,7 @@ class TestSyncNamesFromFlickr(unittest.TestCase):
     def test_skips_when_no_baseline(self):
         from unittest.mock import patch
         from flickr.sync_names_from_flickr import sync_names_from_flickr
+
         self._seed_album("uuid-1", "Old Name", flickr_set_id="ps-1")  # flickr_name=None
         flickr = self._make_flickr(photosets={"ps-1": "Whatever"})
 
@@ -7252,6 +8316,7 @@ class TestSyncNamesFromFlickr(unittest.TestCase):
     def test_skips_when_in_sync(self):
         from unittest.mock import patch
         from flickr.sync_names_from_flickr import sync_names_from_flickr
+
         self._seed_album("uuid-1", "Paris", flickr_set_id="ps-1", flickr_name="Paris")
         flickr = self._make_flickr(photosets={"ps-1": "Paris"})
 
@@ -7263,6 +8328,7 @@ class TestSyncNamesFromFlickr(unittest.TestCase):
     def test_skips_conflict_photos_wins(self):
         from unittest.mock import patch
         from flickr.sync_names_from_flickr import sync_names_from_flickr
+
         # Both renamed: DB name="Photos New", flickr_name="Old Name", Flickr title="Flickr New"
         self._seed_album("uuid-1", "Photos New", flickr_set_id="ps-1", flickr_name="Old Name")
         flickr = self._make_flickr(photosets={"ps-1": "Flickr New"})
@@ -7276,6 +8342,7 @@ class TestSyncNamesFromFlickr(unittest.TestCase):
     def test_dry_run_makes_no_changes(self):
         from unittest.mock import patch
         from flickr.sync_names_from_flickr import sync_names_from_flickr
+
         aid = self._seed_album("uuid-1", "Old Name", flickr_set_id="ps-1", flickr_name="Old Name")
         flickr = self._make_flickr(photosets={"ps-1": "New Flickr Name"})
 
@@ -7290,6 +8357,7 @@ class TestSyncNamesFromFlickr(unittest.TestCase):
     def test_skips_when_rename_fails(self):
         from unittest.mock import patch
         from flickr.sync_names_from_flickr import sync_names_from_flickr
+
         aid = self._seed_album("uuid-1", "Old Name", flickr_set_id="ps-1", flickr_name="Old Name")
         flickr = self._make_flickr(photosets={"ps-1": "New Flickr Name"})
 
@@ -7303,21 +8371,29 @@ class TestSyncNamesFromFlickr(unittest.TestCase):
     def test_renames_photos_folder_when_flickr_collection_changed(self):
         from unittest.mock import patch
         from flickr.sync_names_from_flickr import sync_names_from_flickr
-        fid = self._seed_folder("uuid-f1", "Old Folder", collection_id="col-1", flickr_name="Old Folder")
+
+        fid = self._seed_folder(
+            "uuid-f1", "Old Folder", collection_id="col-1", flickr_name="Old Folder"
+        )
         flickr = self._make_flickr(collections={"col-1": "New Folder Name"})
 
-        with patch("flickr.sync_names_from_flickr._rename_photos_folder", return_value=True) as mock_rename:
+        with patch(
+            "flickr.sync_names_from_flickr._rename_photos_folder", return_value=True
+        ) as mock_rename:
             result = sync_names_from_flickr(self.db, flickr)
 
         mock_rename.assert_called_once_with("uuid-f1", "New Folder Name")
-        row = self.db.conn.execute("SELECT name, flickr_name FROM folders WHERE id = ?", (fid,)).fetchone()
+        row = self.db.conn.execute(
+            "SELECT name, flickr_name FROM folders WHERE id = ?", (fid,)
+        ).fetchone()
         self.assertEqual(row["name"], "New Folder Name")
         self.assertEqual(row["flickr_name"], "New Folder Name")
         self.assertEqual(result["folders_renamed"], 1)
 
     def test_collections_error_skips_folders_section(self):
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
         from flickr.sync_names_from_flickr import sync_names_from_flickr
+
         self._seed_folder("uuid-f1", "Old Folder", collection_id="col-1", flickr_name="Old Folder")
         flickr = self._make_flickr()
         flickr.get_collections_flat.side_effect = Exception("something went wrong")
@@ -7335,6 +8411,7 @@ class TestSyncAlbumTitles(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         from db.db import Database
+
         self.db = Database(Path(self._tmp.name) / "test.db")
 
     def tearDown(self):
@@ -7343,6 +8420,7 @@ class TestSyncAlbumTitles(unittest.TestCase):
 
     def _make_flickr(self):
         from unittest.mock import MagicMock
+
         m = MagicMock()
         m.edit_photoset_meta.return_value = None
         return m
@@ -7355,8 +8433,9 @@ class TestSyncAlbumTitles(unittest.TestCase):
 
     def test_calls_edit_meta_for_each_pushed_album(self):
         from flickr.sync_albums import sync_album_titles
+
         self._seed_album("uuid-1", "Paris Trip", flickr_set_id="ps-111")
-        self._seed_album("uuid-2", "Rome Pics",  flickr_set_id="ps-222")
+        self._seed_album("uuid-2", "Rome Pics", flickr_set_id="ps-222")
         flickr = self._make_flickr()
 
         result = sync_album_titles(self.db, flickr)
@@ -7369,6 +8448,7 @@ class TestSyncAlbumTitles(unittest.TestCase):
 
     def test_skips_albums_without_flickr_set_id(self):
         from flickr.sync_albums import sync_album_titles
+
         self._seed_album("uuid-1", "Not Pushed Yet")  # no flickr_set_id
         flickr = self._make_flickr()
 
@@ -7378,6 +8458,7 @@ class TestSyncAlbumTitles(unittest.TestCase):
 
     def test_dry_run_makes_no_api_calls(self):
         from flickr.sync_albums import sync_album_titles
+
         self._seed_album("uuid-1", "Paris Trip", flickr_set_id="ps-111")
         flickr = self._make_flickr()
 
@@ -7388,6 +8469,7 @@ class TestSyncAlbumTitles(unittest.TestCase):
 
     def test_continues_on_api_error(self):
         from flickr.sync_albums import sync_album_titles
+
         self._seed_album("uuid-1", "Album A", flickr_set_id="ps-111")
         self._seed_album("uuid-2", "Album B", flickr_set_id="ps-222")
         flickr = self._make_flickr()
@@ -7400,6 +8482,7 @@ class TestSyncAlbumTitles(unittest.TestCase):
 
     def test_no_albums_is_noop(self):
         from flickr.sync_albums import sync_album_titles
+
         flickr = self._make_flickr()
         result = sync_album_titles(self.db, flickr)
         flickr.edit_photoset_meta.assert_not_called()
@@ -7407,27 +8490,25 @@ class TestSyncAlbumTitles(unittest.TestCase):
 
     def test_writes_flickr_name_after_successful_push(self):
         from flickr.sync_albums import sync_album_titles
+
         aid = self._seed_album("uuid-1", "Paris Trip", flickr_set_id="ps-111")
         flickr = self._make_flickr()
 
         sync_album_titles(self.db, flickr)
 
-        row = self.db.conn.execute(
-            "SELECT flickr_name FROM albums WHERE id = ?", (aid,)
-        ).fetchone()
+        row = self.db.conn.execute("SELECT flickr_name FROM albums WHERE id = ?", (aid,)).fetchone()
         self.assertEqual(row["flickr_name"], "Paris Trip")
 
     def test_does_not_write_flickr_name_on_api_error(self):
         from flickr.sync_albums import sync_album_titles
+
         aid = self._seed_album("uuid-1", "Paris Trip", flickr_set_id="ps-111")
         flickr = self._make_flickr()
         flickr.edit_photoset_meta.side_effect = Exception("timeout")
 
         sync_album_titles(self.db, flickr)
 
-        row = self.db.conn.execute(
-            "SELECT flickr_name FROM albums WHERE id = ?", (aid,)
-        ).fetchone()
+        row = self.db.conn.execute("SELECT flickr_name FROM albums WHERE id = ?", (aid,)).fetchone()
         self.assertIsNone(row["flickr_name"])
 
 
@@ -7437,30 +8518,50 @@ class TestPruneProposals(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.db = Database(Path(self._tmp.name) / "test.db")
-        self.photo_id = self.db.upsert_photo({
-            "uuid": "uuid-prune-001",
-            "original_filename": "IMG_prune.JPG",
-            "privacy_state": "approved_public",
-            "flickr_id": "flickr-prune-001",
-            "proposed_tags": ["unitedstates", "newyork"],
-            "apple_persons": [],
-            "apple_labels": [],
-        })
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-prune-001",
+                "original_filename": "IMG_prune.JPG",
+                "privacy_state": "approved_public",
+                "flickr_id": "flickr-prune-001",
+                "proposed_tags": ["unitedstates", "newyork"],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
 
     def tearDown(self):
         self.db.close()
         self._tmp.cleanup()
 
-    def _insert_proposal(self, photo_id, status, field, source, target,
-                         proposed_value=None, resolved_at=None, conflict_type="non_conflict"):
+    def _insert_proposal(
+        self,
+        photo_id,
+        status,
+        field,
+        source,
+        target,
+        proposed_value=None,
+        resolved_at=None,
+        conflict_type="non_conflict",
+    ):
         now = "2026-01-01T00:00:00+00:00"
         self.db.conn.execute(
             """INSERT INTO metadata_proposals
                (photo_id, status, field, source, target, proposed_value,
                 resolved_at, created_at, conflict_type)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (photo_id, status, field, source, target, proposed_value,
-             resolved_at or (now if status != "pending" else None), now, conflict_type),
+            (
+                photo_id,
+                status,
+                field,
+                source,
+                target,
+                proposed_value,
+                resolved_at or (now if status != "pending" else None),
+                now,
+                conflict_type,
+            ),
         )
         self.db.conn.commit()
         return self.db.conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
@@ -7469,21 +8570,28 @@ class TestPruneProposals(unittest.TestCase):
 
     def test_prune_deletes_old_resolved(self):
         self._insert_proposal(
-            self.photo_id, "applied", "tags", "flickr", "photos",
+            self.photo_id,
+            "applied",
+            "tags",
+            "flickr",
+            "photos",
             resolved_at="2020-01-01T00:00:00+00:00",
         )
         n = self.db.prune_proposals(older_than_days=90)
         self.assertEqual(n, 1)
-        count = self.db.conn.execute(
-            "SELECT COUNT(*) AS n FROM metadata_proposals"
-        ).fetchone()["n"]
+        count = self.db.conn.execute("SELECT COUNT(*) AS n FROM metadata_proposals").fetchone()["n"]
         self.assertEqual(count, 0)
 
     def test_prune_keeps_recent_resolved(self):
         from datetime import datetime, timedelta, timezone
+
         recent = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
         self._insert_proposal(
-            self.photo_id, "applied", "tags", "flickr", "photos",
+            self.photo_id,
+            "applied",
+            "tags",
+            "flickr",
+            "photos",
             resolved_at=recent,
         )
         n = self.db.prune_proposals(older_than_days=90)
@@ -7491,21 +8599,27 @@ class TestPruneProposals(unittest.TestCase):
 
     def test_prune_keeps_pending_regardless_of_age(self):
         self._insert_proposal(
-            self.photo_id, "pending", "tags", "flickr", "photos",
+            self.photo_id,
+            "pending",
+            "tags",
+            "flickr",
+            "photos",
         )
         n = self.db.prune_proposals(older_than_days=0)
         self.assertEqual(n, 0)
 
     def test_prune_dry_run_returns_count_without_deleting(self):
         self._insert_proposal(
-            self.photo_id, "superseded", "tags", "flickr", "photos",
+            self.photo_id,
+            "superseded",
+            "tags",
+            "flickr",
+            "photos",
             resolved_at="2020-01-01T00:00:00+00:00",
         )
         n = self.db.prune_proposals(older_than_days=90, dry_run=True)
         self.assertEqual(n, 1)
-        count = self.db.conn.execute(
-            "SELECT COUNT(*) AS n FROM metadata_proposals"
-        ).fetchone()["n"]
+        count = self.db.conn.execute("SELECT COUNT(*) AS n FROM metadata_proposals").fetchone()["n"]
         self.assertEqual(count, 1)
 
     # --- supersede_managed_tag_proposals ---
@@ -7513,44 +8627,54 @@ class TestPruneProposals(unittest.TestCase):
     def test_supersede_closes_all_managed_proposal(self):
         # proposed_value = only BP-managed tags; Photos has none
         self._insert_proposal(
-            self.photo_id, "pending", "tags", "flickr", "photos",
+            self.photo_id,
+            "pending",
+            "tags",
+            "flickr",
+            "photos",
             proposed_value='["unitedstates", "newyork"]',
         )
         n = self.db.supersede_managed_tag_proposals()
         self.assertEqual(n, 1)
-        row = self.db.conn.execute(
-            "SELECT status FROM metadata_proposals"
-        ).fetchone()
+        row = self.db.conn.execute("SELECT status FROM metadata_proposals").fetchone()
         self.assertEqual(row["status"], "superseded")
 
     def test_supersede_keeps_user_added_tag_proposal(self):
         # Flickr has a user-added tag ("vacation") not in Photos and not managed
         self._insert_proposal(
-            self.photo_id, "pending", "tags", "flickr", "photos",
+            self.photo_id,
+            "pending",
+            "tags",
+            "flickr",
+            "photos",
             proposed_value='["unitedstates", "vacation"]',
         )
         n = self.db.supersede_managed_tag_proposals()
         self.assertEqual(n, 0)
-        row = self.db.conn.execute(
-            "SELECT status FROM metadata_proposals"
-        ).fetchone()
+        row = self.db.conn.execute("SELECT status FROM metadata_proposals").fetchone()
         self.assertEqual(row["status"], "pending")
 
     def test_supersede_dry_run_does_not_update(self):
         self._insert_proposal(
-            self.photo_id, "pending", "tags", "flickr", "photos",
+            self.photo_id,
+            "pending",
+            "tags",
+            "flickr",
+            "photos",
             proposed_value='["unitedstates"]',
         )
         n = self.db.supersede_managed_tag_proposals(dry_run=True)
         self.assertEqual(n, 1)
-        row = self.db.conn.execute(
-            "SELECT status FROM metadata_proposals"
-        ).fetchone()
+        row = self.db.conn.execute("SELECT status FROM metadata_proposals").fetchone()
         self.assertEqual(row["status"], "pending")
 
     def test_supersede_ignores_non_tag_proposals(self):
         self._insert_proposal(
-            self.photo_id, "pending", "title", "flickr", "photos",
+            self.photo_id,
+            "pending",
+            "title",
+            "flickr",
+            "photos",
             proposed_value="New Title",
         )
         n = self.db.supersede_managed_tag_proposals()
@@ -7558,7 +8682,11 @@ class TestPruneProposals(unittest.TestCase):
 
     def test_supersede_ignores_photos_to_flickr_proposals(self):
         self._insert_proposal(
-            self.photo_id, "pending", "tags", "photos", "flickr",
+            self.photo_id,
+            "pending",
+            "tags",
+            "photos",
+            "flickr",
             proposed_value='["unitedstates"]',
         )
         n = self.db.supersede_managed_tag_proposals()
@@ -7570,30 +8698,39 @@ class TestDeduplicatorDimensionDivergence(unittest.TestCase):
 
     def _photo(self, id, fp, width, height, flickr_id=None, date_uploaded=None):
         from poller.deduplicator import PhotoRow
+
         return PhotoRow(
-            id=id, flickr_id=flickr_id, uuid=f"uuid-{id}",
+            id=id,
+            flickr_id=flickr_id,
+            uuid=f"uuid-{id}",
             original_filename="IMG_001.JPG",
             date_taken="2024-01-01T12:00:00",
             date_added_photos=None,
             date_uploaded_flickr=date_uploaded,
-            fingerprint=fp, width=width, height=height,
-            privacy_state="candidate_public", duplicate_group_id=None,
+            fingerprint=fp,
+            width=width,
+            height=height,
+            privacy_state="candidate_public",
+            duplicate_group_id=None,
         )
 
     # --- _pixels_ratio ---
 
     def test_pixels_ratio_none_when_any_dimensions_missing(self):
         from poller.deduplicator import _pixels_ratio
+
         photos = [self._photo(1, "a", 6000, 4000), self._photo(2, "b", None, None)]
         self.assertIsNone(_pixels_ratio(photos))
 
     def test_pixels_ratio_one_for_identical_dimensions(self):
         from poller.deduplicator import _pixels_ratio
+
         photos = [self._photo(1, "a", 6000, 4000), self._photo(2, "b", 6000, 4000)]
         self.assertAlmostEqual(_pixels_ratio(photos), 1.0)
 
     def test_pixels_ratio_correct_for_different_dimensions(self):
         from poller.deduplicator import _pixels_ratio
+
         # 6000×4000 = 24M, 3000×2000 = 6M → ratio 4.0
         photos = [self._photo(1, "a", 6000, 4000), self._photo(2, "b", 3000, 2000)]
         self.assertAlmostEqual(_pixels_ratio(photos), 4.0)
@@ -7602,6 +8739,7 @@ class TestDeduplicatorDimensionDivergence(unittest.TestCase):
 
     def test_classify_uncertain_when_dimensions_identical(self):
         from poller.deduplicator import _classify_group
+
         photos = [
             self._photo(1, "fp1", 6000, 4000),
             self._photo(2, "fp1", 6000, 4000),  # same fingerprint, same dims
@@ -7610,20 +8748,23 @@ class TestDeduplicatorDimensionDivergence(unittest.TestCase):
 
     def test_classify_not_duplicate_when_dimensions_diverge(self):
         from poller.deduplicator import _classify_group
+
         # Same fingerprint (so not snapbridge), but very different dimensions
         photos = [
-            self._photo(1, "fp1", 6000, 4000),   # 24M px
-            self._photo(2, "fp1", 3000, 2000),   # 6M px — ratio 4.0 >> 1.1
+            self._photo(1, "fp1", 6000, 4000),  # 24M px
+            self._photo(2, "fp1", 3000, 2000),  # 6M px — ratio 4.0 >> 1.1
         ]
         self.assertEqual(_classify_group(photos).group_type, "not_duplicate")
 
     def test_classify_uncertain_when_dimensions_missing(self):
         from poller.deduplicator import _classify_group
+
         photos = [self._photo(1, "fp1", None, None), self._photo(2, "fp1", None, None)]
         self.assertEqual(_classify_group(photos).group_type, "uncertain")
 
     def test_classify_snapbridge_not_reclassified_as_not_duplicate(self):
         from poller.deduplicator import _classify_group
+
         # Different fingerprints + different dimensions + 2 photos = snapbridge
         photos = [
             self._photo(1, "fp1", 6000, 4000),
@@ -7633,6 +8774,7 @@ class TestDeduplicatorDimensionDivergence(unittest.TestCase):
 
     def test_not_duplicate_group_has_no_keeper_or_discards(self):
         from poller.deduplicator import _classify_group
+
         photos = [
             self._photo(1, "fp1", 6000, 4000),
             self._photo(2, "fp1", 3000, 2000),
@@ -7644,6 +8786,7 @@ class TestDeduplicatorDimensionDivergence(unittest.TestCase):
 
     def test_classify_uncertain_when_ratio_just_below_threshold(self):
         from poller.deduplicator import _classify_group, _pixels_ratio, NOT_DUPLICATE_PIXEL_RATIO
+
         # 6000×4000 = 24M; 4899×4672 ≈ 22.9M → ratio ~1.047, just below 1.1
         photos = [
             self._photo(1, "fp1", 6000, 4000),
@@ -7658,6 +8801,7 @@ class TestDeduplicatorDimensionDivergence(unittest.TestCase):
     def _make_db_with_dedup(self):
         from db.db import Database
         from db.migrations.migrate_003_dimensions_and_dedup import run as migrate
+
         tmp = tempfile.mkdtemp()
         db_path = str(Path(tmp) / "test.db")
         db = Database(Path(db_path))
@@ -7667,6 +8811,7 @@ class TestDeduplicatorDimensionDivergence(unittest.TestCase):
     def test_write_groups_marks_not_duplicate_as_resolved(self):
         from poller.deduplicator import DuplicateGroup, _write_groups
         import shutil
+
         db, tmp = self._make_db_with_dedup()
         try:
             group = DuplicateGroup(
@@ -7690,6 +8835,7 @@ class TestDeduplicatorDimensionDivergence(unittest.TestCase):
     def test_write_groups_updates_existing_uncertain_to_resolved(self):
         from poller.deduplicator import DuplicateGroup, _write_groups
         import shutil
+
         db, tmp = self._make_db_with_dedup()
         try:
             key = "IMG_002.JPG|2024-01-01T12:00:00"
@@ -7716,15 +8862,18 @@ class TestConfirmPublicDecision(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         from db.db import Database
+
         self.db = Database(Path(self._tmp.name) / "test.db")
-        self.photo_id = self.db.upsert_photo({
-            "uuid": "uuid-confirm-001",
-            "original_filename": "Screenshot_confirm.PNG",
-            "privacy_state": "approved_public",
-            "proposed_tags": [],
-            "apple_persons": [],
-            "apple_labels": [],
-        })
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-confirm-001",
+                "original_filename": "Screenshot_confirm.PNG",
+                "privacy_state": "approved_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
 
     def tearDown(self):
         self.db.close()
@@ -7753,6 +8902,7 @@ class TestScreenshotPublicStatsFilter(unittest.TestCase):
         db_path = Path(self._tmp.name) / "test.db"
         from db.db import Database
         from db.migrations.migrate_013_screenshot_flag import run as migrate
+
         self.db = Database(db_path)
         migrate(str(db_path))
 
@@ -7761,16 +8911,21 @@ class TestScreenshotPublicStatsFilter(unittest.TestCase):
         self._tmp.cleanup()
 
     def _insert(self, uid: str, state: str, is_screenshot: int = 1) -> None:
-        self.db.upsert_photo({
-            "uuid": uid, "original_filename": f"{uid}.PNG",
-            "privacy_state": state, "proposed_tags": [],
-            "apple_persons": [], "apple_labels": [],
-            "is_screenshot": is_screenshot,
-        })
+        self.db.upsert_photo(
+            {
+                "uuid": uid,
+                "original_filename": f"{uid}.PNG",
+                "privacy_state": state,
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+                "is_screenshot": is_screenshot,
+            }
+        )
 
     def test_screenshot_public_count_only_includes_approved_public(self):
         self._insert("u1", "approved_public")
-        self._insert("u2", "already_public")   # confirmed — should NOT count
+        self._insert("u2", "already_public")  # confirmed — should NOT count
         counts = self.db.stats()["screenshot_counts"]
         self.assertEqual(counts["screenshot_public"], 1)
 
@@ -7787,6 +8942,7 @@ class TestReviewQueueScreenshots(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         from db.db import Database
         from db.migrations.migrate_013_screenshot_flag import run as migrate
+
         self.db = Database(Path(self._tmp.name) / "test.db")
         migrate(str(Path(self._tmp.name) / "test.db"))
 
@@ -7795,15 +8951,17 @@ class TestReviewQueueScreenshots(unittest.TestCase):
         self._tmp.cleanup()
 
     def _insert(self, uuid: str, state: str, is_screenshot: int = 0) -> int:
-        return self.db.upsert_photo({
-            "uuid": uuid,
-            "original_filename": f"{uuid}.JPG",
-            "privacy_state": state,
-            "proposed_tags": [],
-            "apple_persons": [],
-            "apple_labels": [],
-            "is_screenshot": is_screenshot,
-        })
+        return self.db.upsert_photo(
+            {
+                "uuid": uuid,
+                "original_filename": f"{uuid}.JPG",
+                "privacy_state": state,
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+                "is_screenshot": is_screenshot,
+            }
+        )
 
     def test_review_queue_returns_is_screenshot_field(self):
         self._insert("u1", "candidate_public", 0)
@@ -7847,6 +9005,7 @@ class TestMigrate013ScreenshotFlag(unittest.TestCase):
     def test_migration_adds_is_screenshot_column(self):
         from db.db import Database
         from db.migrations.migrate_013_screenshot_flag import run
+
         db = Database(Path(self.db_path))
         run(self.db_path)
         cols = {r["name"] for r in db.conn.execute("PRAGMA table_info(photos)").fetchall()}
@@ -7856,6 +9015,7 @@ class TestMigrate013ScreenshotFlag(unittest.TestCase):
     def test_migration_backfills_from_privacy_reason(self):
         from db.db import Database
         from db.migrations.migrate_013_screenshot_flag import run
+
         db = Database(Path(self.db_path))
         db.conn.execute(
             """INSERT INTO photos (flickr_id, privacy_state, privacy_reason)
@@ -7870,6 +9030,7 @@ class TestMigrate013ScreenshotFlag(unittest.TestCase):
     def test_migration_does_not_set_flag_for_other_reasons(self):
         from db.db import Database
         from db.migrations.migrate_013_screenshot_flag import run
+
         db = Database(Path(self.db_path))
         db.conn.execute(
             """INSERT INTO photos (flickr_id, privacy_state, privacy_reason)
@@ -7884,6 +9045,7 @@ class TestMigrate013ScreenshotFlag(unittest.TestCase):
     def test_migration_is_idempotent(self):
         from db.db import Database
         from db.migrations.migrate_013_screenshot_flag import run
+
         db = Database(Path(self.db_path))
         run(self.db_path)
         run(self.db_path)  # second run must not raise
@@ -7898,6 +9060,7 @@ class TestScreenshotStats(unittest.TestCase):
         self.db_path = str(Path(self._tmp.name) / "test.db")
         from db.db import Database
         from db.migrations.migrate_013_screenshot_flag import run as migrate
+
         self.db = Database(Path(self.db_path))
         migrate(self.db_path)
 
@@ -7924,7 +9087,7 @@ class TestScreenshotStats(unittest.TestCase):
 
     def test_public_counts_only_approved_public(self):
         self._insert("s3", "approved_public", 1)
-        self._insert("s4", "already_public", 1)   # confirmed — no longer in this bucket
+        self._insert("s4", "already_public", 1)  # confirmed — no longer in this bucket
         self._insert("s5", "approved_public", 0)  # not a screenshot
         counts = self.db.stats()["screenshot_counts"]
         self.assertEqual(counts["screenshot_public"], 1)
@@ -7936,9 +9099,9 @@ class TestScreenshotStats(unittest.TestCase):
         self.assertEqual(counts["screenshot_private"], 1)
 
     def test_counts_are_independent(self):
-        self._insert("s9",  "auto_private",   1)
+        self._insert("s9", "auto_private", 1)
         self._insert("s10", "approved_public", 1)
-        self._insert("s11", "keep_private",    1)
+        self._insert("s11", "keep_private", 1)
         counts = self.db.stats()["screenshot_counts"]
         self.assertEqual(counts["screenshot_unreviewed"], 1)
         self.assertEqual(counts["screenshot_public"], 1)
@@ -7952,7 +9115,6 @@ class TestScreenshotStats(unittest.TestCase):
 
 
 class TestMigrate014MergedIntoId(unittest.TestCase):
-
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.db_path = str(Path(self._tmp.name) / "test.db")
@@ -7963,6 +9125,7 @@ class TestMigrate014MergedIntoId(unittest.TestCase):
     def test_migration_adds_merged_into_id_column(self):
         from db.db import Database
         from db.migrations.migrate_014_merged_into_id import run
+
         db = Database(Path(self.db_path))
         run(self.db_path)
         cols = {r["name"] for r in db.conn.execute("PRAGMA table_info(photos)").fetchall()}
@@ -7972,6 +9135,7 @@ class TestMigrate014MergedIntoId(unittest.TestCase):
     def test_migration_is_idempotent(self):
         from db.db import Database
         from db.migrations.migrate_014_merged_into_id import run
+
         db = Database(Path(self.db_path))
         run(self.db_path)
         run(self.db_path)  # must not raise
@@ -7986,35 +9150,42 @@ class TestMergeFlickrDonorInGroup(unittest.TestCase):
         """Create a temp DB with duplicate_groups support and a ready-to-merge group."""
         from db.db import Database
         from db.migrations.migrate_003_dimensions_and_dedup import run as migrate_003
+
         tmp = tempfile.mkdtemp()
         db_path = str(Path(tmp) / "test.db")
         db = Database(Path(db_path))
-        migrate_003(db_path)  # adds duplicate_groups table + duplicate_role/duplicate_group_id columns
+        migrate_003(
+            db_path
+        )  # adds duplicate_groups table + duplicate_role/duplicate_group_id columns
 
         # Flickr-only donor: flickr_id set, no uuid
-        donor_id = db.upsert_photo({
-            "flickr_id":            "F001",
-            "flickr_secret":        "sec123",
-            "flickr_server":        "65535",
-            "flickr_farm":          66,
-            "original_filename":    "IMG_9999.JPG",
-            "date_taken":           "2024-06-15 12:00:00",
-            "date_uploaded_flickr": "2024-06-15 18:00:00",
-            "privacy_state":        "candidate_public",
-        })
+        donor_id = db.upsert_photo(
+            {
+                "flickr_id": "F001",
+                "flickr_secret": "sec123",
+                "flickr_server": "65535",
+                "flickr_farm": 66,
+                "original_filename": "IMG_9999.JPG",
+                "date_taken": "2024-06-15 12:00:00",
+                "date_uploaded_flickr": "2024-06-15 18:00:00",
+                "privacy_state": "candidate_public",
+            }
+        )
 
         # Photos-linked target: uuid set, no flickr_id
-        target_id = db.upsert_photo({
-            "uuid":              "U001",
-            "original_filename": "IMG_9999.JPG",
-            "date_taken":        "2024-06-15T12:00:00-04:00",
-            "privacy_state":     "candidate_public",
-            "width":             4000,
-            "height":            3000,
-            "apple_labels":      [],
-            "apple_persons":     [],
-            "proposed_tags":     [],
-        })
+        target_id = db.upsert_photo(
+            {
+                "uuid": "U001",
+                "original_filename": "IMG_9999.JPG",
+                "date_taken": "2024-06-15T12:00:00-04:00",
+                "privacy_state": "candidate_public",
+                "width": 4000,
+                "height": 3000,
+                "apple_labels": [],
+                "apple_persons": [],
+                "proposed_tags": [],
+            }
+        )
 
         # Create duplicate group and link both photos to it
         db.conn.execute(
@@ -8041,6 +9212,7 @@ class TestMergeFlickrDonorInGroup(unittest.TestCase):
     def tearDown(self):
         self.db.close()
         import shutil
+
         shutil.rmtree(self._tmp)
 
     def _row(self, photo_id):
@@ -8134,54 +9306,62 @@ class TestMergeFlickrDonorInGroup(unittest.TestCase):
 
 class TestPhotosIsResponsive(unittest.TestCase):
     def test_returns_true_when_osascript_succeeds(self):
-        from unittest.mock import patch, MagicMock, call
+        from unittest.mock import patch, MagicMock
         from flickr.proposal_applier import _photos_is_responsive
+
         pgrep_ok = MagicMock()
         pgrep_ok.returncode = 0
         osascript_ok = MagicMock()
         osascript_ok.returncode = 0
-        with patch("flickr.proposal_applier.subprocess.run",
-                   side_effect=[pgrep_ok, osascript_ok]):
+        with patch("flickr.proposal_applier.subprocess.run", side_effect=[pgrep_ok, osascript_ok]):
             self.assertTrue(_photos_is_responsive())
 
     def test_returns_false_when_osascript_nonzero(self):
         from unittest.mock import patch, MagicMock
         from flickr.proposal_applier import _photos_is_responsive
+
         pgrep_ok = MagicMock()
         pgrep_ok.returncode = 0
         osascript_fail = MagicMock()
         osascript_fail.returncode = 1
-        with patch("flickr.proposal_applier.subprocess.run",
-                   side_effect=[pgrep_ok, osascript_fail]):
+        with patch(
+            "flickr.proposal_applier.subprocess.run", side_effect=[pgrep_ok, osascript_fail]
+        ):
             self.assertFalse(_photos_is_responsive())
 
     def test_returns_false_on_subprocess_timeout(self):
         import subprocess
         from unittest.mock import patch, MagicMock
         from flickr.proposal_applier import _photos_is_responsive
+
         pgrep_ok = MagicMock()
         pgrep_ok.returncode = 0
-        with patch("flickr.proposal_applier.subprocess.run",
-                   side_effect=[pgrep_ok,
-                                 subprocess.TimeoutExpired("osascript", 3)]):
+        with patch(
+            "flickr.proposal_applier.subprocess.run",
+            side_effect=[pgrep_ok, subprocess.TimeoutExpired("osascript", 3)],
+        ):
             self.assertFalse(_photos_is_responsive())
 
     def test_returns_false_when_photos_not_running(self):
         from unittest.mock import patch, MagicMock
         from flickr.proposal_applier import _photos_is_responsive
+
         pgrep_fail = MagicMock()
         pgrep_fail.returncode = 1
-        with patch("flickr.proposal_applier.subprocess.run",
-                   return_value=pgrep_fail) as mock_run:
+        with patch("flickr.proposal_applier.subprocess.run", return_value=pgrep_fail) as mock_run:
             result = _photos_is_responsive()
         self.assertFalse(result)
-        self.assertEqual(mock_run.call_count, 1,
-                         "Should not send AppleScript when pgrep says Photos is not running")
+        self.assertEqual(
+            mock_run.call_count,
+            1,
+            "Should not send AppleScript when pgrep says Photos is not running",
+        )
 
 
 class TestRunWithTimeout(unittest.TestCase):
     def test_returns_fn_result_on_success(self):
         from flickr.proposal_applier import _run_with_timeout
+
         result = _run_with_timeout(lambda: {"ok": True, "value": 42})
         self.assertEqual(result, {"ok": True, "value": 42})
 
@@ -8189,21 +9369,29 @@ class TestRunWithTimeout(unittest.TestCase):
         import time
         import threading
         from flickr.proposal_applier import _run_with_timeout
+
         blocker = threading.Event()
+
         def slow():
             blocker.wait(timeout=5)
             return {"ok": True}
+
         start = time.monotonic()
         result = _run_with_timeout(slow, timeout=0.05)
         elapsed = time.monotonic() - start
         blocker.set()  # release thread immediately so it doesn't linger
         self.assertFalse(result["ok"])
         self.assertEqual(result["reason"], "Photos not responding")
-        self.assertLess(elapsed, 1.0, f"_run_with_timeout took {elapsed:.2f}s — should return immediately after timeout")
+        self.assertLess(
+            elapsed,
+            1.0,
+            f"_run_with_timeout took {elapsed:.2f}s — should return immediately after timeout",
+        )
 
     def test_returns_error_when_fn_raises(self):
         from flickr.proposal_applier import _run_with_timeout
-        result = _run_with_timeout(lambda: 1/0)
+
+        result = _run_with_timeout(lambda: 1 / 0)
         self.assertFalse(result["ok"])
         self.assertEqual(result["reason"], "division by zero")
 
@@ -8212,46 +9400,51 @@ class TestMetadataPullerPhotosIsResponsive(unittest.TestCase):
     def test_returns_true_when_pgrep_succeeds_and_osascript_succeeds(self):
         from unittest.mock import patch, MagicMock
         from flickr.metadata_puller import _photos_is_responsive
+
         pgrep_ok = MagicMock()
         pgrep_ok.returncode = 0
         osascript_ok = MagicMock()
         osascript_ok.returncode = 0
-        with patch("flickr.metadata_puller.subprocess.run",
-                   side_effect=[pgrep_ok, osascript_ok]):
+        with patch("flickr.metadata_puller.subprocess.run", side_effect=[pgrep_ok, osascript_ok]):
             self.assertTrue(_photos_is_responsive())
 
     def test_returns_false_when_pgrep_fails(self):
         from unittest.mock import patch, MagicMock
         from flickr.metadata_puller import _photos_is_responsive
+
         pgrep_fail = MagicMock()
         pgrep_fail.returncode = 1
-        with patch("flickr.metadata_puller.subprocess.run",
-                   return_value=pgrep_fail) as mock_run:
+        with patch("flickr.metadata_puller.subprocess.run", return_value=pgrep_fail) as mock_run:
             result = _photos_is_responsive()
         self.assertFalse(result)
-        self.assertEqual(mock_run.call_count, 1,
-                         "Should not send AppleScript when pgrep says Photos is not running")
+        self.assertEqual(
+            mock_run.call_count,
+            1,
+            "Should not send AppleScript when pgrep says Photos is not running",
+        )
 
     def test_returns_false_when_osascript_times_out(self):
         import subprocess
         from unittest.mock import patch, MagicMock
         from flickr.metadata_puller import _photos_is_responsive
+
         pgrep_ok = MagicMock()
         pgrep_ok.returncode = 0
-        with patch("flickr.metadata_puller.subprocess.run",
-                   side_effect=[pgrep_ok,
-                                 subprocess.TimeoutExpired("osascript", 3)]):
+        with patch(
+            "flickr.metadata_puller.subprocess.run",
+            side_effect=[pgrep_ok, subprocess.TimeoutExpired("osascript", 3)],
+        ):
             self.assertFalse(_photos_is_responsive())
 
     def test_returns_false_when_osascript_returns_nonzero(self):
         from unittest.mock import patch, MagicMock
         from flickr.metadata_puller import _photos_is_responsive
+
         pgrep_ok = MagicMock()
         pgrep_ok.returncode = 0
         osascript_fail = MagicMock()
         osascript_fail.returncode = 1
-        with patch("flickr.metadata_puller.subprocess.run",
-                   side_effect=[pgrep_ok, osascript_fail]):
+        with patch("flickr.metadata_puller.subprocess.run", side_effect=[pgrep_ok, osascript_fail]):
             self.assertFalse(_photos_is_responsive())
 
 
@@ -8267,29 +9460,31 @@ class TestDeletePhoto(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_delete_removes_photo_row(self):
-        photo_id = self.db.upsert_photo({
-            "uuid": "GHOST-0001",
-            "flickr_id": None,
-            "privacy_state": "candidate_public",
-            "proposed_tags": [],
-            "apple_persons": [],
-            "apple_labels": [],
-        })
+        photo_id = self.db.upsert_photo(
+            {
+                "uuid": "GHOST-0001",
+                "flickr_id": None,
+                "privacy_state": "candidate_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
         self.db.delete_photo(photo_id)
-        row = self.db.conn.execute(
-            "SELECT id FROM photos WHERE id = ?", (photo_id,)
-        ).fetchone()
+        row = self.db.conn.execute("SELECT id FROM photos WHERE id = ?", (photo_id,)).fetchone()
         self.assertIsNone(row)
 
     def test_delete_cascades_to_photo_albums(self):
-        photo_id = self.db.upsert_photo({
-            "uuid": "GHOST-0002",
-            "flickr_id": None,
-            "privacy_state": "candidate_public",
-            "proposed_tags": [],
-            "apple_persons": [],
-            "apple_labels": [],
-        })
+        photo_id = self.db.upsert_photo(
+            {
+                "uuid": "GHOST-0002",
+                "flickr_id": None,
+                "privacy_state": "candidate_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
         album_id = self.db.upsert_album("album-uuid-0001", "Test Album")
         self.db.upsert_photo_album(photo_id, album_id)
         row = self.db.conn.execute(
@@ -8308,6 +9503,7 @@ class TestDeletePhoto(unittest.TestCase):
 def _make_mock_photos(*uuids: str):
     """Return MagicMock photo objects with the given .uuid values."""
     from unittest.mock import MagicMock
+
     result = []
     for u in uuids:
         p = MagicMock()
@@ -8328,24 +9524,28 @@ class TestSyncDeletedPhotos(unittest.TestCase):
         self._tmp.cleanup()
 
     def _insert_photos_only(self, uuid: str) -> int:
-        return self.db.upsert_photo({
-            "uuid": uuid,
-            "flickr_id": None,
-            "privacy_state": "candidate_public",
-            "proposed_tags": [],
-            "apple_persons": [],
-            "apple_labels": [],
-        })
+        return self.db.upsert_photo(
+            {
+                "uuid": uuid,
+                "flickr_id": None,
+                "privacy_state": "candidate_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
 
     def _insert_linked(self, uuid: str, flickr_id: str) -> int:
-        return self.db.upsert_photo({
-            "uuid": uuid,
-            "flickr_id": flickr_id,
-            "privacy_state": "approved_public",
-            "proposed_tags": [],
-            "apple_persons": [],
-            "apple_labels": [],
-        })
+        return self.db.upsert_photo(
+            {
+                "uuid": uuid,
+                "flickr_id": flickr_id,
+                "privacy_state": "approved_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
 
     def test_absent_uuid_photos_only_is_deleted_with_cascade(self):
         from unittest.mock import MagicMock
@@ -8399,9 +9599,7 @@ class TestSyncDeletedPhotos(unittest.TestCase):
 
         self.assertEqual(deleted, 0)
         self.assertIsNotNone(
-            self.db.conn.execute(
-                "SELECT id FROM photos WHERE uuid = 'GHOST-0001'"
-            ).fetchone()
+            self.db.conn.execute("SELECT id FROM photos WHERE uuid = 'GHOST-0001'").fetchone()
         )
 
     def test_mass_deletion_guard_fires_above_ten_percent(self):
@@ -8447,9 +9645,7 @@ class TestSyncDeletedPhotos(unittest.TestCase):
             self._insert_photos_only(f"KEEP-{i:04d}")
 
         mock_photosdb = MagicMock()
-        mock_photosdb.photos.return_value = _make_mock_photos(
-            *[f"KEEP-{i:04d}" for i in range(20)]
-        )
+        mock_photosdb.photos.return_value = _make_mock_photos(*[f"KEEP-{i:04d}" for i in range(20)])
 
         deleted = sync_deleted_photos(mock_photosdb, self.db, dry_run=False)
 
@@ -8494,8 +9690,10 @@ class TestSyncDeletedPhotos(unittest.TestCase):
         mock_osxphotos = MagicMock()
         mock_osxphotos.PhotosDB.return_value = mock_photosdb
 
-        with patch.dict(sys.modules, {"osxphotos": mock_osxphotos}), \
-             patch("poller.scanner.sync_deleted_photos") as mock_sync:
+        with (
+            patch.dict(sys.modules, {"osxphotos": mock_osxphotos}),
+            patch("poller.scanner.sync_deleted_photos") as mock_sync,
+        ):
             since = datetime(2026, 1, 1, tzinfo=timezone.utc)
             scanned, matched, enriched, inserted, linked, deleted = scan(
                 library_path="/fake/library",
@@ -8512,6 +9710,7 @@ class TestSyncDeletedPhotos(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # bp CLI: _inject_argv
 # ---------------------------------------------------------------------------
+
 
 class TestInjectArgv(unittest.TestCase):
     """_inject_argv must produce a sys.argv where every element is a string."""

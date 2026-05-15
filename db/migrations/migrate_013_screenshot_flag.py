@@ -55,14 +55,10 @@ def run(db_path: str, dry_run: bool = False) -> None:
     conn.execute("BEGIN")
 
     if "is_screenshot" not in existing_cols:
-        conn.execute(
-            "ALTER TABLE photos ADD COLUMN is_screenshot INTEGER NOT NULL DEFAULT 0"
-        )
+        conn.execute("ALTER TABLE photos ADD COLUMN is_screenshot INTEGER NOT NULL DEFAULT 0")
 
     # Backfill: any row already classified as a screenshot by the scanner
-    conn.execute(
-        "UPDATE photos SET is_screenshot = 1 WHERE privacy_reason = 'screenshot'"
-    )
+    conn.execute("UPDATE photos SET is_screenshot = 1 WHERE privacy_reason = 'screenshot'")
 
     conn.execute(
         "INSERT OR IGNORE INTO schema_migrations (name, applied_at) VALUES (?, ?)",
@@ -89,4 +85,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

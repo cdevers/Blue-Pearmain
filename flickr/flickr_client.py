@@ -26,21 +26,21 @@ log = logging.getLogger("blue-pearmain.flickr")
 
 # HTTP codes that are transient and worth retrying.
 # 429 (rate limit) is explicitly here — do not move it to _PERMANENT_HTTP_CODES.
-_TRANSIENT_HTTP_CODES  = {429, 500, 502, 503, 504}
+_TRANSIENT_HTTP_CODES = {429, 500, 502, 503, 504}
 
 # HTTP codes that are permanent client errors — raise immediately, never retry.
 # Note: 429 is intentionally absent; it belongs in _TRANSIENT_HTTP_CODES above.
-_PERMANENT_HTTP_CODES  = {400, 401, 403, 404, 405, 410}
+_PERMANENT_HTTP_CODES = {400, 401, 403, 404, 405, 410}
 
 # Flickr application-level error codes that are transient
 _TRANSIENT_FLICKR_CODES = {
-    0,    # generic "something went wrong" — often transient
+    0,  # generic "something went wrong" — often transient
     106,  # service unavailable
 }
 
 # Specific Flickr error codes with special handling
-FLICKR_ERR_NOT_FOUND    = 1  # Photo not found (e.g. manually deleted on Flickr)
-FLICKR_ERR_MAX_TAGS     = 2  # Maximum number of tags reached (75 tag limit)
+FLICKR_ERR_NOT_FOUND = 1  # Photo not found (e.g. manually deleted on Flickr)
+FLICKR_ERR_MAX_TAGS = 2  # Maximum number of tags reached (75 tag limit)
 FLICKR_ERR_ALREADY_IN_SET = 3  # Photo already in photoset — idempotent success
 
 
@@ -106,8 +106,8 @@ class FlickrClient:
           Permanent errors (4xx, non-transient Flickr codes): raise immediately.
         """
         p = {
-            "method":         method,
-            "format":         "json",
+            "method": method,
+            "format": "json",
             "nojsoncallback": 1,
         }
         if params:
@@ -121,11 +121,11 @@ class FlickrClient:
             else:
                 resp = self._session.get(REST_URL, params=p, timeout=30)
         except requests.Timeout:
-            return self._retry(method, params, http_method, max_retries, _attempt,
-                               reason="timeout")
+            return self._retry(method, params, http_method, max_retries, _attempt, reason="timeout")
         except requests.ConnectionError:
-            return self._retry(method, params, http_method, max_retries, _attempt,
-                               reason="connection error")
+            return self._retry(
+                method, params, http_method, max_retries, _attempt, reason="connection error"
+            )
 
         # Permanent client errors — raise immediately, no retry
         if resp.status_code in _PERMANENT_HTTP_CODES:
@@ -143,19 +143,31 @@ class FlickrClient:
                         time.sleep(delay)
                     except ValueError:
                         pass  # non-numeric header — exponential backoff will run via _retry
-            return self._retry(method, params, http_method, max_retries, _attempt,
-                               reason=f"HTTP {resp.status_code}")
+            return self._retry(
+                method,
+                params,
+                http_method,
+                max_retries,
+                _attempt,
+                reason=f"HTTP {resp.status_code}",
+            )
 
         resp.raise_for_status()
         data = resp.json()
 
         if data.get("stat") != "ok":
-            err  = data.get("message", "unknown error")
+            err = data.get("message", "unknown error")
             code = data.get("code", -1)
             err_obj = FlickrError(code, err)
             if err_obj.transient:
-                return self._retry(method, params, http_method, max_retries, _attempt,
-                                   reason=f"Flickr error {code}")
+                return self._retry(
+                    method,
+                    params,
+                    http_method,
+                    max_retries,
+                    _attempt,
+                    reason=f"Flickr error {code}",
+                )
             raise err_obj
 
         return data
@@ -178,7 +190,7 @@ class FlickrClient:
               (default 4), 8s backoff ceiling. Network hiccups typically recover quickly.
         """
         photo_id = (params or {}).get("photo_id", "")
-        context  = f" photo_id={photo_id}" if photo_id else ""
+        context = f" photo_id={photo_id}" if photo_id else ""
 
         if "429" in reason:
             effective_max_retries = 8
@@ -191,9 +203,11 @@ class FlickrClient:
             log.error(
                 f"Flickr {method}{context} failed after {effective_max_retries} retries ({reason})"
             )
-            raise FlickrError(-1, f"Flickr call failed after {effective_max_retries} retries ({reason})")
+            raise FlickrError(
+                -1, f"Flickr call failed after {effective_max_retries} retries ({reason})"
+            )
 
-        delay = min(2 ** attempt, backoff_cap) + random.uniform(0, 0.5)
+        delay = min(2**attempt, backoff_cap) + random.uniform(0, 0.5)
         log.warning(
             f"Flickr {method}{context} failed ({reason}), "
             f"retry {attempt + 1}/{effective_max_retries} in {delay:.1f}s"
@@ -228,11 +242,11 @@ class FlickrClient:
         return self._call(
             "flickr.photos.recentlyUpdated",
             {
-                "min_date":      min_upload_date,
+                "min_date": min_upload_date,
                 "privacy_filter": privacy_filter or "",
-                "page":          page,
-                "per_page":      per_page,
-                "extras":        extras or default_extras,
+                "page": page,
+                "per_page": per_page,
+                "extras": extras or default_extras,
             },
         )
 
@@ -249,9 +263,9 @@ class FlickrClient:
         """
         params: dict[str, Any] = {
             "privacy_filter": privacy_filter,
-            "page":          page,
-            "per_page":      per_page,
-            "extras":        "date_upload,date_taken,geo,tags,url_m,url_l,description",
+            "page": page,
+            "per_page": per_page,
+            "extras": "date_upload,date_taken,geo,tags,url_m,url_l,description",
         }
         if min_upload_date:
             params["min_upload_date"] = min_upload_date
@@ -279,10 +293,10 @@ class FlickrClient:
         extras: str | None = None,
     ) -> dict:
         params: dict[str, Any] = {
-            "user_id":  user_id,
-            "page":     page,
+            "user_id": user_id,
+            "page": page,
             "per_page": per_page,
-            "extras":   extras or "date_upload,date_taken,geo,tags,url_m,url_l,description",
+            "extras": extras or "date_upload,date_taken,geo,tags,url_m,url_l,description",
         }
         if min_upload_date:
             params["min_upload_date"] = min_upload_date
@@ -313,12 +327,12 @@ class FlickrClient:
         return self._call(
             "flickr.photos.setPerms",
             {
-                "photo_id":      photo_id,
-                "is_public":     is_public,
-                "is_friend":     is_friend,
-                "is_family":     is_family,
-                "perm_comment":  perm_comment,
-                "perm_addmeta":  perm_addmeta,
+                "photo_id": photo_id,
+                "is_public": is_public,
+                "is_friend": is_friend,
+                "is_family": is_family,
+                "perm_comment": perm_comment,
+                "perm_addmeta": perm_addmeta,
             },
             http_method="POST",
         )
@@ -326,11 +340,7 @@ class FlickrClient:
     def add_tags(self, photo_id: str, tags: list[str]) -> dict:
         """Add tags to a photo (does not remove existing tags)."""
         # Flickr expects space-separated tags; multi-word tags must be quoted
-        tag_str = " ".join(
-            f'"{t}"' if " " in t else t
-            for t in tags
-            if t.strip()
-        )
+        tag_str = " ".join(f'"{t}"' if " " in t else t for t in tags if t.strip())
         return self._call(
             "flickr.photos.addTags",
             {"photo_id": photo_id, "tags": tag_str},
@@ -339,11 +349,7 @@ class FlickrClient:
 
     def set_tags(self, photo_id: str, tags: list[str]) -> dict:
         """Replace all tags on a photo (destructive — use add_tags to append)."""
-        tag_str = " ".join(
-            f'"{t}"' if " " in t else t
-            for t in tags
-            if t.strip()
-        )
+        tag_str = " ".join(f'"{t}"' if " " in t else t for t in tags if t.strip())
         return self._call(
             "flickr.photos.setTags",
             {"photo_id": photo_id, "tags": tag_str},
@@ -444,8 +450,8 @@ class FlickrClient:
         self._call(
             "flickr.collections.editSets",
             {
-                "collection_id":  collection_id,
-                "photoset_ids":   " ".join(photoset_ids),
+                "collection_id": collection_id,
+                "photoset_ids": " ".join(photoset_ids),
                 "collection_ids": " ".join(sub_collection_ids),
             },
             http_method="POST",

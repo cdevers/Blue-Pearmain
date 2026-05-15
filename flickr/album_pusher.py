@@ -41,8 +41,8 @@ def push_photo_to_albums(db, flickr, photo_id: int) -> int:
 
     updated = 0
     for row in pending:
-        album_id    = row["album_id"]
-        album_name  = row["album_name"]
+        album_id = row["album_id"]
+        album_name = row["album_name"]
         flickr_set_id = row["flickr_set_id"]
 
         try:
@@ -53,7 +53,9 @@ def push_photo_to_albums(db, flickr, photo_id: int) -> int:
                 db.set_album_flickr_name(album_id, album_name)
                 log.info(
                     "created photoset %r (id=%s) for album %r",
-                    album_name, flickr_set_id, album_name,
+                    album_name,
+                    flickr_set_id,
+                    album_name,
                 )
             else:
                 flickr.add_photo_to_photoset(flickr_set_id, flickr_id)
@@ -62,7 +64,9 @@ def push_photo_to_albums(db, flickr, photo_id: int) -> int:
             updated += 1
             log.debug(
                 "added flickr_id=%s to photoset %s (%r)",
-                flickr_id, flickr_set_id, album_name,
+                flickr_id,
+                flickr_set_id,
+                album_name,
             )
 
         except FlickrError as e:
@@ -72,19 +76,25 @@ def push_photo_to_albums(db, flickr, photo_id: int) -> int:
                 updated += 1
                 log.debug(
                     "flickr_id=%s already in photoset %s (%r) — marking pushed",
-                    flickr_id, flickr_set_id, album_name,
+                    flickr_id,
+                    flickr_set_id,
+                    album_name,
                 )
             elif e.code == FLICKR_ERR_NOT_FOUND:
                 # Photo deleted from Flickr — mark done to prevent retries
                 db.mark_album_pushed(photo_id, album_id)
                 log.warning(
                     "flickr_id=%s not found on Flickr (deleted?) — skipping album push for %r",
-                    flickr_id, album_name,
+                    flickr_id,
+                    album_name,
                 )
             else:
                 log.error(
                     "album push failed photo_id=%s album_id=%s (%r): %s",
-                    photo_id, album_id, album_name, e,
+                    photo_id,
+                    album_id,
+                    album_name,
+                    e,
                 )
 
     return updated

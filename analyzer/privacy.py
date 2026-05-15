@@ -16,8 +16,13 @@ from db.db import haversine_m
 
 # Apple label strings that indicate people are present in the frame
 PEOPLE_LABELS = {
-    "people", "person", "crowd", "audience",
-    "performer", "singer", "entertainer",
+    "people",
+    "person",
+    "crowd",
+    "audience",
+    "performer",
+    "singer",
+    "entertainer",
     # add more as you observe false-negatives in practice
 }
 
@@ -87,7 +92,7 @@ def classify(photo: dict, zones: list[dict], self_name: str = "") -> tuple[str, 
     # 5. Apple's people/crowd labels
     # ------------------------------------------------------------------
     labels = _get_labels(photo)
-    labels_lower = {l.lower() for l in labels}
+    labels_lower = {lbl.lower() for lbl in labels}
     matched = labels_lower & PEOPLE_LABELS
     if matched:
         return "needs_review", f"people label(s): {', '.join(sorted(matched))}"
@@ -111,10 +116,12 @@ def classify(photo: dict, zones: list[dict], self_name: str = "") -> tuple[str, 
 #   (b) flat db dict (JSON-serialised lists, flattened fields)
 # ---------------------------------------------------------------------------
 
+
 def _get_persons(photo: dict) -> list[str]:
     persons = photo.get("persons") or photo.get("apple_persons") or []
     if isinstance(persons, str):
         import json
+
         try:
             persons = json.loads(persons)
         except Exception:
@@ -126,11 +133,12 @@ def _get_labels(photo: dict) -> list[str]:
     labels = photo.get("labels") or photo.get("apple_labels") or []
     if isinstance(labels, str):
         import json
+
         try:
             labels = json.loads(labels)
         except Exception:
             labels = []
-    return [str(l) for l in labels if l]
+    return [str(lbl) for lbl in labels if lbl]
 
 
 def _count_unknown_faces(photo: dict) -> int:
@@ -158,7 +166,4 @@ def _confident_human_count(photo: dict) -> int:
     """Count humans[] entries in media_analysis above confidence threshold."""
     media = photo.get("media_analysis") or {}
     humans = media.get("humans") or []
-    return sum(
-        1 for h in humans
-        if h.get("humanConfidence", 0) >= HUMAN_CONFIDENCE_THRESHOLD
-    )
+    return sum(1 for h in humans if h.get("humanConfidence", 0) >= HUMAN_CONFIDENCE_THRESHOLD)

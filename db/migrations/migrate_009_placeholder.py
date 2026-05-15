@@ -56,7 +56,7 @@ def run(db_path: str, dry_run: bool = False):
 
 def main():
     parser = argparse.ArgumentParser(description="Blue Pearmain DB migration 009 (placeholder)")
-    parser.add_argument("--config",  default="config/config.yml")
+    parser.add_argument("--config", default="config/config.yml")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 

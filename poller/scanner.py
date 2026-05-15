@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import logging
 import sys
 import unicodedata
@@ -45,10 +44,7 @@ log = logging.getLogger("blue-pearmain.scanner")
 def _normalise_tag(tag: str) -> str:
     # Flickr normalizes tags to alphanumeric-only ("close-up" → "closeup",
     # "new york" → "newyork"). Keep only isalnum() chars so hashes align.
-    return "".join(
-        c for c in unicodedata.normalize("NFC", tag.strip().casefold())
-        if c.isalnum()
-    )
+    return "".join(c for c in unicodedata.normalize("NFC", tag.strip().casefold()) if c.isalnum())
 
 
 def _compute_tags_hash(tags: list[str]) -> str:
@@ -60,6 +56,7 @@ def _compute_tags_hash(tags: list[str]) -> str:
 # Config
 # ---------------------------------------------------------------------------
 
+
 def load_config(path: Path) -> dict:
     if not path.exists():
         log.error(f"Config file not found: {path}")
@@ -69,8 +66,10 @@ def load_config(path: Path) -> dict:
 
 
 def setup_logging(config: dict, verbose: bool):
-    level = logging.DEBUG if verbose else getattr(
-        logging, config.get("logging", {}).get("level", "INFO").upper(), logging.INFO
+    level = (
+        logging.DEBUG
+        if verbose
+        else getattr(logging, config.get("logging", {}).get("level", "INFO").upper(), logging.INFO)
     )
     handlers: list[logging.Handler] = [logging.StreamHandler()]
     log_file = config.get("logging", {}).get("file")
@@ -88,6 +87,7 @@ def setup_logging(config: dict, verbose: bool):
 # ---------------------------------------------------------------------------
 # osxphotos → flat DB dict
 # ---------------------------------------------------------------------------
+
 
 def photos_record_to_db(photo) -> dict:
     """
@@ -114,24 +114,24 @@ def photos_record_to_db(photo) -> dict:
     # Camera
     exif = photo.exif_info
     if exif:
-        row["camera_make"]  = exif.camera_make  or ""
+        row["camera_make"] = exif.camera_make or ""
         row["camera_model"] = exif.camera_model or ""
-        row["lens_model"]   = exif.lens_model   or ""
+        row["lens_model"] = exif.lens_model or ""
 
     # Location
     if photo.latitude is not None:
-        row["latitude"]  = photo.latitude
+        row["latitude"] = photo.latitude
         row["longitude"] = photo.longitude
 
     place = photo.place
     if place:
         addr = place.address or {}
-        row["place_city"]         = getattr(addr, "city",           None) or ""
-        row["place_state"]        = getattr(addr, "state_province", None) or ""
-        row["place_country"]      = getattr(addr, "country",        None) or ""
+        row["place_city"] = getattr(addr, "city", None) or ""
+        row["place_state"] = getattr(addr, "state_province", None) or ""
+        row["place_country"] = getattr(addr, "country", None) or ""
         row["place_country_code"] = getattr(addr, "iso_country_code", None) or ""
-        row["place_address"]      = place.address_str or ""
-        row["place_ishome"]       = 1 if place.ishome else 0
+        row["place_address"] = place.address_str or ""
+        row["place_ishome"] = 1 if place.ishome else 0
 
         # Neighbourhood — first entry of additional_city_info if present
         names = place.names or {}
@@ -140,13 +140,13 @@ def photos_record_to_db(photo) -> dict:
             row["place_neighborhood"] = extra_city[0]
 
     # Photos metadata cache (title, description, keywords)
-    photos_title       = getattr(photo, "title",       None) or ""
+    photos_title = getattr(photo, "title", None) or ""
     photos_description = getattr(photo, "description", None) or ""
-    photos_tags        = list(getattr(photo, "keywords", None) or [])
-    row["photos_title"]          = photos_title
-    row["photos_description"]    = photos_description
-    row["photos_tags"]           = photos_tags  # auto-serialised to JSON by upsert_photo
-    row["photos_tags_hash"]      = _compute_tags_hash(photos_tags)
+    photos_tags = list(getattr(photo, "keywords", None) or [])
+    row["photos_title"] = photos_title
+    row["photos_description"] = photos_description
+    row["photos_tags"] = photos_tags  # auto-serialised to JSON by upsert_photo
+    row["photos_tags_hash"] = _compute_tags_hash(photos_tags)
     row["meta_synced_photos_at"] = datetime.now(timezone.utc).isoformat()
 
     # Apple ML labels
@@ -155,8 +155,8 @@ def photos_record_to_db(photo) -> dict:
 
     # Apple ML persons
     persons = list(photo.persons or [])
-    row["apple_persons"]      = persons
-    row["apple_named_faces"]  = sum(1 for p in persons if p and p != "_UNKNOWN_")
+    row["apple_persons"] = persons
+    row["apple_named_faces"] = sum(1 for p in persons if p and p != "_UNKNOWN_")
     row["apple_unknown_faces"] = sum(1 for p in persons if p == "_UNKNOWN_")
 
     # Human count from media_analysis
@@ -167,7 +167,7 @@ def photos_record_to_db(photo) -> dict:
         # Apple AI caption
         caption_data = ma.get("image_caption") or {}
         if isinstance(caption_data, dict):
-            row["apple_ai_caption"]      = caption_data.get("imageCaptionText", "")
+            row["apple_ai_caption"] = caption_data.get("imageCaptionText", "")
             row["apple_ai_caption_conf"] = caption_data.get("imageCaptionConfidence", 0.0)
 
     # Apple aesthetic score
@@ -177,14 +177,14 @@ def photos_record_to_db(photo) -> dict:
 
     # Special media type flags — store in privacy_reason if screenshot
     row["_is_screenshot"] = bool(getattr(photo, "screenshot", False))
-    row["_is_selfie"]     = bool(getattr(photo, "selfie", False))
-    row["_is_live"]       = bool(getattr(photo, "live_photo", False))
+    row["_is_selfie"] = bool(getattr(photo, "selfie", False))
+    row["_is_live"] = bool(getattr(photo, "live_photo", False))
 
     # Fingerprint for matching
     row["fingerprint"] = getattr(photo, "fingerprint", None) or ""
 
     # Dimensions
-    row["width"]  = getattr(photo, "width",  None)
+    row["width"] = getattr(photo, "width", None)
     row["height"] = getattr(photo, "height", None)
 
     return row
@@ -193,6 +193,7 @@ def photos_record_to_db(photo) -> dict:
 # ---------------------------------------------------------------------------
 # Album sync helper
 # ---------------------------------------------------------------------------
+
 
 def sync_photo_albums(photo, photo_db_id: int, db: Database, dry_run: bool) -> None:
     """
@@ -244,6 +245,7 @@ def sync_photo_albums(photo, photo_db_id: int, db: Database, dry_run: bool) -> N
 # Matching logic
 # ---------------------------------------------------------------------------
 
+
 def normalise_dt(dt_str: str | None) -> str | None:
     """
     Strip timezone info and sub-second precision from a datetime string,
@@ -255,7 +257,7 @@ def normalise_dt(dt_str: str | None) -> str | None:
     # Truncate at the dot (sub-seconds) or +/- (timezone)
     for sep in (".", "+", "-"):
         if sep in dt_str[10:]:  # only look after the date part
-            dt_str = dt_str[:10 + dt_str[10:].index(sep)]
+            dt_str = dt_str[: 10 + dt_str[10:].index(sep)]
     return dt_str[:19].replace("T", " ")  # always YYYY-MM-DD HH:MM:SS
 
 
@@ -355,10 +357,12 @@ def find_flickr_match(photo_row: dict, db: Database) -> list[dict]:
     lon = photo_row.get("longitude")
     if lat and lon and len(candidates) > 1:
         from db.db import haversine_m
+
         def dist(c):
             if c.get("latitude") and c.get("longitude"):
                 return haversine_m(lat, lon, c["latitude"], c["longitude"])
             return float("inf")
+
         candidates.sort(key=dist)
 
     return candidates
@@ -367,6 +371,7 @@ def find_flickr_match(photo_row: dict, db: Database) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Enrichment: merge Photos data into a DB record
 # ---------------------------------------------------------------------------
+
 
 def build_enriched_row(
     photo_row: dict,
@@ -383,29 +388,48 @@ def build_enriched_row(
 
     # Fields we always take from Photos (more authoritative than Flickr)
     for field in (
-        "uuid", "original_filename", "date_taken", "date_added_photos",
-        "date_analyzed", "camera_make", "camera_model", "lens_model",
-        "apple_labels", "apple_persons", "apple_named_faces",
-        "apple_unknown_faces", "apple_human_count",
-        "apple_ai_caption", "apple_ai_caption_conf",
-        "apple_aesthetic_score", "fingerprint",
-        "width", "height",
-        "photos_title", "photos_description", "photos_tags",
-        "photos_tags_hash", "meta_synced_photos_at",
+        "uuid",
+        "original_filename",
+        "date_taken",
+        "date_added_photos",
+        "date_analyzed",
+        "camera_make",
+        "camera_model",
+        "lens_model",
+        "apple_labels",
+        "apple_persons",
+        "apple_named_faces",
+        "apple_unknown_faces",
+        "apple_human_count",
+        "apple_ai_caption",
+        "apple_ai_caption_conf",
+        "apple_aesthetic_score",
+        "fingerprint",
+        "width",
+        "height",
+        "photos_title",
+        "photos_description",
+        "photos_tags",
+        "photos_tags_hash",
+        "meta_synced_photos_at",
     ):
         if photo_row.get(field) is not None:
             merged[field] = photo_row[field]
 
     # Location: Photos GPS is usually more precise than Flickr's
     if photo_row.get("latitude"):
-        merged["latitude"]  = photo_row["latitude"]
+        merged["latitude"] = photo_row["latitude"]
         merged["longitude"] = photo_row["longitude"]
 
     # Place fields
     for field in (
-        "place_city", "place_state", "place_country",
-        "place_country_code", "place_address",
-        "place_neighborhood", "place_ishome",
+        "place_city",
+        "place_state",
+        "place_country",
+        "place_country_code",
+        "place_address",
+        "place_neighborhood",
+        "place_ishome",
     ):
         if photo_row.get(field) is not None:
             merged[field] = photo_row[field]
@@ -414,20 +438,25 @@ def build_enriched_row(
     is_screenshot = photo_row.get("_is_screenshot", False)
     merged["is_screenshot"] = 1 if is_screenshot else 0
     if is_screenshot and existing.get("privacy_state") not in (
-        "approved_public", "keep_private", "already_public"
+        "approved_public",
+        "keep_private",
+        "already_public",
     ):
-        merged["privacy_state"]  = "auto_private"
+        merged["privacy_state"] = "auto_private"
         merged["privacy_reason"] = "screenshot"
-        merged["proposed_tags"]  = []
+        merged["proposed_tags"] = []
         return merged
 
     # Re-run privacy classifier with enriched data
     # Only update state if not already human-reviewed
     if existing.get("privacy_state") not in (
-        "approved_public", "keep_private", "already_public", "skipped"
+        "approved_public",
+        "keep_private",
+        "already_public",
+        "skipped",
     ):
         state, reason = classify(merged, zones, self_name=self_name)
-        merged["privacy_state"]  = state
+        merged["privacy_state"] = state
         merged["privacy_reason"] = reason
 
     # Re-propose tags with enriched data
@@ -439,6 +468,7 @@ def build_enriched_row(
 # ---------------------------------------------------------------------------
 # Main scan loop
 # ---------------------------------------------------------------------------
+
 
 def scan(
     library_path: str,
@@ -462,13 +492,13 @@ def scan(
     log.info(f"Opening Photos library: {library_path}")
     photosdb = osxphotos.PhotosDB(dbfile=library_path)
 
-    zones     = db.active_zones()
-    scanned   = 0
-    matched   = 0
-    enriched  = 0
-    inserted  = 0
-    linked    = 0  # Photos-only records late-linked to a Flickr record
-    deleted   = 0
+    zones = db.active_zones()
+    scanned = 0
+    matched = 0
+    enriched = 0
+    inserted = 0
+    linked = 0  # Photos-only records late-linked to a Flickr record
+    deleted = 0
 
     # Build a query — osxphotos supports filtering by date
     if since:
@@ -519,8 +549,8 @@ def scan(
 
             # Skip full re-enrichment only when Apple's ML analysis AND the
             # Photos metadata cache are both unchanged since last scan.
-            analysis_unchanged = (
-                existing_by_uuid.get("date_analyzed") == photo_row.get("date_analyzed")
+            analysis_unchanged = existing_by_uuid.get("date_analyzed") == photo_row.get(
+                "date_analyzed"
             )
             photos_cache_fresh = (
                 existing_by_uuid.get("meta_synced_photos_at") is not None
@@ -529,9 +559,7 @@ def scan(
             )
             if analysis_unchanged and photos_cache_fresh:
                 continue
-            enriched_row = build_enriched_row(
-                photo_row, existing_by_uuid, zones, self_name
-            )
+            enriched_row = build_enriched_row(photo_row, existing_by_uuid, zones, self_name)
             if not dry_run:
                 db.upsert_photo(enriched_row)
             enriched += 1
@@ -563,9 +591,9 @@ def scan(
                         f"duplicate of flickr:{primary['flickr_id']}",
                     )
 
-            state  = enriched_row.get("privacy_state", "?")
+            state = enriched_row.get("privacy_state", "?")
             reason = enriched_row.get("privacy_reason", "")
-            tags   = enriched_row.get("proposed_tags", [])
+            tags = enriched_row.get("proposed_tags", [])
             log.debug(
                 f"  Matched {photo.original_filename} → "
                 f"flickr:{primary['flickr_id']} | {state} | tags: {tags[:5]}"
@@ -580,14 +608,14 @@ def scan(
             photo_row["is_screenshot"] = 1 if is_screenshot else 0
 
             if is_screenshot:
-                photo_row["privacy_state"]  = "auto_private"
+                photo_row["privacy_state"] = "auto_private"
                 photo_row["privacy_reason"] = "screenshot"
-                photo_row["proposed_tags"]  = []
+                photo_row["proposed_tags"] = []
             else:
                 state, reason = classify(photo_row, zones, self_name=self_name)
-                photo_row["privacy_state"]  = state
+                photo_row["privacy_state"] = state
                 photo_row["privacy_reason"] = reason
-                photo_row["proposed_tags"]  = propose_tags(photo_row)
+                photo_row["proposed_tags"] = propose_tags(photo_row)
 
             if not dry_run:
                 row_id = db.upsert_photo(photo_row)
@@ -678,6 +706,7 @@ def backfill_dimensions(db, library) -> int:
     Returns the number of rows updated.
     """
     import logging
+
     log = logging.getLogger(__name__)
 
     rows = db.conn.execute("""
@@ -704,8 +733,7 @@ def backfill_dimensions(db, library) -> int:
         h = getattr(photo, "height", None)
         if w and h:
             db.conn.execute(
-                "UPDATE photos SET width = ?, height = ? WHERE id = ?",
-                (w, h, row["id"])
+                "UPDATE photos SET width = ?, height = ? WHERE id = ?", (w, h, row["id"])
             )
             updated += 1
 
@@ -718,12 +746,12 @@ def main():
     parser = argparse.ArgumentParser(
         description="Blue Pearmain scanner — sync Apple Photos → local DB"
     )
-    parser.add_argument("--config",  default="config/config.yml", help="Path to config.yml")
-    parser.add_argument("--all",     action="store_true",         help="Scan entire library")
-    parser.add_argument("--days",    type=int, default=7,         help="Days to look back (default 7)")
-    parser.add_argument("--dry-run", action="store_true",         help="Don't write to DB")
-    parser.add_argument("--verbose", action="store_true",         help="Debug logging")
-    parser.add_argument("--library", default=None,                help="Override Photos library path")
+    parser.add_argument("--config", default="config/config.yml", help="Path to config.yml")
+    parser.add_argument("--all", action="store_true", help="Scan entire library")
+    parser.add_argument("--days", type=int, default=7, help="Days to look back (default 7)")
+    parser.add_argument("--dry-run", action="store_true", help="Don't write to DB")
+    parser.add_argument("--verbose", action="store_true", help="Debug logging")
+    parser.add_argument("--library", default=None, help="Override Photos library path")
     args = parser.parse_args()
 
     config_path = Path(args.config)

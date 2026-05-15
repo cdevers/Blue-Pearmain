@@ -35,8 +35,10 @@ log = logging.getLogger("blue-pearmain.link-orphans")
 
 
 def setup_logging(config: dict, verbose: bool) -> None:
-    level = logging.DEBUG if verbose else getattr(
-        logging, config.get("logging", {}).get("level", "INFO").upper(), logging.INFO
+    level = (
+        logging.DEBUG
+        if verbose
+        else getattr(logging, config.get("logging", {}).get("level", "INFO").upper(), logging.INFO)
     )
     handlers: list[logging.Handler] = [logging.StreamHandler()]
     log_file = config.get("logging", {}).get("file")
@@ -87,7 +89,7 @@ def find_orphan_pairs(db: Database, limit: int) -> list[tuple[int, int]]:
     log.info("  %d Photos-only records loaded.", len(photos_rows))
 
     pairs: list[tuple[int, int]] = []
-    claimed: set[int] = set()   # Flickr ids already assigned to a pair
+    claimed: set[int] = set()  # Flickr ids already assigned to a pair
 
     total = len(photos_rows)
     for i, row in enumerate(photos_rows):
@@ -112,10 +114,12 @@ def find_orphan_pairs(db: Database, limit: int) -> list[tuple[int, int]]:
 
         candidate_keys: list[str] = []
         seen_keys: set[str] = set()
-        for base in sorted(raw_bases):   # deterministic order
+        for base in sorted(raw_bases):  # deterministic order
             for delta in (0, 1, 2, 3):
                 try:
-                    key = (datetime.fromisoformat(base) + timedelta(seconds=delta)).strftime("%Y-%m-%d %H:%M:%S")
+                    key = (datetime.fromisoformat(base) + timedelta(seconds=delta)).strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    )
                 except ValueError:
                     continue
                 if key not in seen_keys:
@@ -173,7 +177,7 @@ def link_orphans(db: Database, dry_run: bool, limit: int) -> tuple[int, int]:
 
     linked = 0
     failed = 0
-    total  = len(pairs)
+    total = len(pairs)
     for i, (flickr_rec_id, photos_rec_id) in enumerate(pairs, 1):
         if i % 1_000 == 0 or i == total:
             log.info("  Merging: %d / %d …", i, total)
@@ -187,13 +191,16 @@ def link_orphans(db: Database, dry_run: bool, limit: int) -> tuple[int, int]:
             else:
                 log.warning(
                     "  Skipped pair (photos=%d, flickr=%d): preconditions not met",
-                    photos_rec_id, flickr_rec_id,
+                    photos_rec_id,
+                    flickr_rec_id,
                 )
                 failed += 1
         except Exception as exc:
             log.error(
                 "  Failed to link pair (photos=%d, flickr=%d): %s",
-                photos_rec_id, flickr_rec_id, exc,
+                photos_rec_id,
+                flickr_rec_id,
+                exc,
             )
             failed += 1
 
@@ -204,9 +211,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Blue Pearmain link-orphans — merge split Photos/Flickr records"
     )
-    parser.add_argument("--config",  default="config/config.yml", help="Path to config.yml")
+    parser.add_argument("--config", default="config/config.yml", help="Path to config.yml")
     parser.add_argument("--dry-run", action="store_true", help="Identify pairs but don't write")
-    parser.add_argument("--limit",   type=int, default=100_000, help="Max pairs to process (default 100000)")
+    parser.add_argument(
+        "--limit", type=int, default=100_000, help="Max pairs to process (default 100000)"
+    )
     parser.add_argument("--verbose", action="store_true", help="Debug logging")
     args = parser.parse_args()
 

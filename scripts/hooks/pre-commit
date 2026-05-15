@@ -4,3 +4,13 @@ if git diff --cached --name-only | grep -q "^pyproject.toml$"; then
     uv lock || { echo "uv lock failed"; exit 1; }
     git add uv.lock
 fi
+
+# Check formatting and lint on staged Python files.
+STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$')
+if [ -n "$STAGED" ]; then
+    uv run --with ruff ruff format --check $STAGED || {
+        echo "ruff format: run 'uv run --with ruff ruff format .' to fix"
+        exit 1
+    }
+    uv run --with ruff ruff check $STAGED || exit 1
+fi

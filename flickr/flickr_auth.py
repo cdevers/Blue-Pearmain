@@ -27,8 +27,8 @@ from requests_oauthlib import OAuth1Session
 
 # Flickr OAuth endpoints
 REQUEST_TOKEN_URL = "https://www.flickr.com/services/oauth/request_token"
-AUTHORIZE_URL     = "https://www.flickr.com/services/oauth/authorize"
-ACCESS_TOKEN_URL  = "https://www.flickr.com/services/oauth/access_token"
+AUTHORIZE_URL = "https://www.flickr.com/services/oauth/authorize"
+ACCESS_TOKEN_URL = "https://www.flickr.com/services/oauth/access_token"
 
 
 def load_config(path: Path) -> dict:
@@ -62,13 +62,13 @@ def run_auth_flow(api_key: str, api_secret: str) -> tuple[str, str, str, str]:
         print("Check that your api_key and api_secret are correct.")
         sys.exit(1)
 
-    request_token  = resp["oauth_token"]
+    request_token = resp["oauth_token"]
     request_secret = resp["oauth_token_secret"]
 
     # Step 2: send user to Flickr to approve
     # perms=delete gives us read + write + delete (needed to set privacy)
     auth_url = f"{AUTHORIZE_URL}?oauth_token={request_token}&perms=write"
-    print(f"\nStep 2: opening Flickr authorisation page...")
+    print("\nStep 2: opening Flickr authorisation page...")
     print(f"  URL: {auth_url}\n")
     webbrowser.open(auth_url)
 
@@ -95,10 +95,10 @@ def run_auth_flow(api_key: str, api_secret: str) -> tuple[str, str, str, str]:
         print("The verifier code may be wrong or expired. Try again.")
         sys.exit(1)
 
-    access_token        = resp["oauth_token"]
+    access_token = resp["oauth_token"]
     access_token_secret = resp["oauth_token_secret"]
-    user_nsid           = resp.get("user_nsid", "")
-    username            = resp.get("username", "")
+    user_nsid = resp.get("user_nsid", "")
+    username = resp.get("username", "")
 
     print(f"\nAuthorised as: {username} ({user_nsid})")
     return access_token, access_token_secret, user_nsid, username
@@ -115,8 +115,8 @@ def verify_token(api_key: str, api_secret: str, token: str, token_secret: str) -
     resp = oauth.get(
         "https://api.flickr.com/services/rest/",
         params={
-            "method":         "flickr.auth.oauth.checkToken",
-            "format":         "json",
+            "method": "flickr.auth.oauth.checkToken",
+            "format": "json",
             "nojsoncallback": 1,
         },
     )
@@ -142,7 +142,7 @@ def main():
     config = load_config(config_path)
 
     flickr_cfg = config.get("flickr", {})
-    api_key    = flickr_cfg.get("api_key", "")
+    api_key = flickr_cfg.get("api_key", "")
     api_secret = flickr_cfg.get("api_secret", "")
 
     if not api_key or not api_secret:
@@ -151,7 +151,7 @@ def main():
 
     # --verify-only mode
     if args.verify_only:
-        token        = flickr_cfg.get("oauth_token", "")
+        token = flickr_cfg.get("oauth_token", "")
         token_secret = flickr_cfg.get("oauth_token_secret", "")
         if not token or not token_secret:
             print("No saved token found. Run without --verify-only to authorise.")
@@ -164,7 +164,7 @@ def main():
         return
 
     # Check if we already have a valid token
-    existing_token  = flickr_cfg.get("oauth_token", "")
+    existing_token = flickr_cfg.get("oauth_token", "")
     existing_secret = flickr_cfg.get("oauth_token_secret", "")
     if existing_token and existing_secret:
         print("Found existing token. Verifying...")
@@ -182,11 +182,11 @@ def main():
     # Save back to config
     if "flickr" not in config:
         config["flickr"] = {}
-    config["flickr"]["oauth_token"]        = token
+    config["flickr"]["oauth_token"] = token
     config["flickr"]["oauth_token_secret"] = token_secret
-    config["flickr"]["user_nsid"]          = user_nsid
+    config["flickr"]["user_nsid"] = user_nsid
     if username:
-        config["flickr"]["username"]       = username
+        config["flickr"]["username"] = username
     save_config(config_path, config)
 
     # Verify it works
