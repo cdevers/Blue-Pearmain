@@ -55,9 +55,7 @@
         <integer>0</integer>
     </dict>
 
-    <!-- Stdout/stderr for debugging -->
-    <key>StandardOutPath</key>
-    <string>__HOME__/Library/Logs/BluePearmain/reconcile.log</string>
+    <!-- Stderr for uncaught exceptions; stdout is handled by RotatingFileHandler -->
     <key>StandardErrorPath</key>
     <string>__HOME__/Library/Logs/BluePearmain/reconcile.log</string>
 

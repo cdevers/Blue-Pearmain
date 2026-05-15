@@ -937,10 +937,9 @@ def main() -> None:
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(levelname)s %(message)s",
-    )
+    from poller.bp_logging import configure
+
+    configure("dedup", args.verbose)
 
     if args.write:
         args.dry_run = False

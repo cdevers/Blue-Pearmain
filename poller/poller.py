@@ -75,23 +75,10 @@ def load_config(path: Path) -> dict:
         return yaml.safe_load(f)
 
 
-def setup_logging(config: dict, verbose: bool):
-    level = (
-        logging.DEBUG
-        if verbose
-        else getattr(logging, config.get("logging", {}).get("level", "INFO").upper(), logging.INFO)
-    )
-    handlers: list[logging.Handler] = [logging.StreamHandler()]
-    log_file = config.get("logging", {}).get("file")
-    if log_file:
-        Path(log_file).parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(logging.FileHandler(log_file))
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S",
-        handlers=handlers,
-    )
+def setup_logging(config: dict, verbose: bool) -> None:
+    from poller.bp_logging import configure
+
+    configure("poller", verbose)
 
 
 # ---------------------------------------------------------------------------

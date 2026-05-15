@@ -1387,10 +1387,9 @@ def main():
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.DEBUG if args.debug else logging.INFO,
-        format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
-    )
+    from poller.bp_logging import configure
+
+    configure("reviewer", args.debug)
 
     if args.host not in ("127.0.0.1", "localhost"):
         import socket

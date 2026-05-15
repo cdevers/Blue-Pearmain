@@ -56,9 +56,7 @@
     <key>RunAtLoad</key>
     <true/>
 
-    <!-- Stdout/stderr for debugging -->
-    <key>StandardOutPath</key>
-    <string>__HOME__/Library/Logs/BluePearmain/reviewer.log</string>
+    <!-- Stderr for uncaught exceptions; stdout is handled by RotatingFileHandler -->
     <key>StandardErrorPath</key>
     <string>__HOME__/Library/Logs/BluePearmain/reviewer.log</string>
 

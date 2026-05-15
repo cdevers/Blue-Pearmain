@@ -170,12 +170,8 @@ def cmd_pipeline(args):
     import logging
     import yaml
     from pathlib import Path as _Path
-
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S",
-    )
+    from poller.bp_logging import configure
+    configure("pipeline", args.verbose)
     log = logging.getLogger("blue-pearmain.pipeline")
 
     with open(args.config) as f:
@@ -647,11 +643,8 @@ def cmd_all(args):
     """
     import logging
     import threading
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S",
-    )
+    from poller.bp_logging import configure
+    configure("all", args.verbose)
     log = logging.getLogger("blue-pearmain.all")
 
     dry_run = getattr(args, "dry_run", False)

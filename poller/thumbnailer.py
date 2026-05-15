@@ -42,12 +42,10 @@ from flickr.flickr_client import FlickrClient
 log = logging.getLogger("blue-pearmain.thumbnailer")
 
 
-def setup_logging(verbose: bool):
-    logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.INFO,
-        format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S",
-    )
+def setup_logging(verbose: bool) -> None:
+    from poller.bp_logging import configure
+
+    configure("thumbs", verbose)
 
 
 def derivative_path(uuid: str, library_path: str) -> str | None:
