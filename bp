@@ -637,13 +637,8 @@ def cmd_all(args):
     Each step runs independently; a failure is logged and the sequence continues.
     Not included: 'scan --all' can be skipped with --skip-scan; 'bp poll --backfill'
     and 'bp scan' incremental are intentionally excluded (manual operations).
-
-    Reconcile runs in a background thread so sync-albums and sync-album-collections
-    can proceed while reconcile works through the Flickr API. The background thread
-    is joined before checkpoint to ensure all writes are complete before the WAL flush.
     """
     import logging
-    import threading
     from poller.bp_logging import configure
     configure("all", args.verbose)
     log = logging.getLogger("blue-pearmain.all")
@@ -657,44 +652,18 @@ def cmd_all(args):
         ("poll",                   cmd_poll,                    _step_args(args, backfill=False, dry_run=dry_run, days=None)),
         ("sync-names-from-flickr", cmd_sync_names_from_flickr, _step_args(args, dry_run=dry_run)),
         ("pipeline",               cmd_pipeline,                _step_args(args, limit=None,     dry_run=dry_run)),
-        ("reconcile",       cmd_reconcile,   _step_args(args, fix=not dry_run, apply_proposals=False, limit=None)),
-        ("sync-albums",            cmd_sync_albums,            _step_args(args, dry_run=dry_run, album=None,    limit=None)),
-        ("sync-album-collections", cmd_sync_album_collections, _step_args(args, dry_run=dry_run, remove=False,   force=False)),
+        ("reconcile",              cmd_reconcile,               _step_args(args, fix=not dry_run, apply_proposals=False, limit=None)),
+        ("sync-albums",            cmd_sync_albums,             _step_args(args, dry_run=dry_run, album=None,   limit=None)),
+        ("sync-album-collections", cmd_sync_album_collections,  _step_args(args, dry_run=dry_run, remove=False, force=False)),
     ]
     if not dry_run:
-        steps.insert(2, ("thumbs",     cmd_thumbs,     args))
+        steps.insert(2, ("thumbs",     cmd_thumbs,     _step_args(args, icloud=False, icloud_limit=50)))
         steps.append(   ("checkpoint", cmd_checkpoint, _step_args(args, mode="truncate")))
 
     errors = []
-    bg_reconcile: threading.Thread | None = None
-    bg_errors: list[str] = []   # written by bg thread, read after join()
 
     for name, fn, step_args in steps:
-        # Join before checkpoint so all DB writes land before WAL flush
-        if name == "checkpoint" and bg_reconcile is not None:
-            log.info("all: waiting for background reconcile to finish...")
-            bg_reconcile.join()
-            errors.extend(bg_errors)
-            bg_reconcile = None
-
         log.info("all: -> %s", name)
-
-        if name == "reconcile":
-            def _run(f=fn, sa=step_args):
-                try:
-                    f(sa)
-                except SystemExit as e:
-                    code = e.code if e.code is not None else 0
-                    if code != 0:
-                        bg_errors.append("reconcile")
-                except Exception as exc:
-                    log.warning("all: reconcile (background) failed: %s", exc)
-                    bg_errors.append("reconcile")
-            bg_reconcile = threading.Thread(target=_run, daemon=True)
-            bg_reconcile.start()
-            log.info("all: reconcile running in background — continuing with sync-albums")
-            continue
-
         try:
             fn(step_args)
         except SystemExit as e:
@@ -705,12 +674,6 @@ def cmd_all(args):
         except Exception as exc:
             log.warning("all: %s failed: %s -- continuing", name, exc)
             errors.append(name)
-
-    # Dry-run has no checkpoint step; still wait for background reconcile
-    if bg_reconcile is not None and bg_reconcile.is_alive():
-        log.info("all: waiting for background reconcile to finish...")
-        bg_reconcile.join()
-        errors.extend(bg_errors)
 
     if errors:
         log.warning("all: completed with %d error(s): %s", len(errors), ", ".join(errors))
