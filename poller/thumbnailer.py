@@ -177,10 +177,10 @@ def run(
             else:
                 icloud_queued += 1
 
-        if executor is not None:
-            executor.shutdown(wait=False)
-        if tmpdir is not None:
-            shutil.rmtree(tmpdir, ignore_errors=True)
+    if executor is not None:
+        executor.shutdown(wait=False)
+    if tmpdir is not None:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     if not dry_run:
         db.conn.commit()
