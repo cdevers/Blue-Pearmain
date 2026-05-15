@@ -181,7 +181,7 @@ bp thumbs                         # Cache thumbnail paths
 bp ui                             # Open http://localhost:5173 and start reviewing
 ```
 
-The thumbnailer populates `thumbnail_path` for each photo using the best available source: a locally cached Photos derivative JPEG, a stored Flickr URL, or nothing. When serving thumbnails, the review UI falls back to fetching directly from Flickr's CDN for any matched photo that has a Flickr ID but no local file — so photos that haven't been downloaded from iCloud will still display if they've been uploaded to Flickr. Purely local photos with no Flickr match will show a "no preview" placeholder until iCloud downloads them.
+The thumbnailer populates `thumbnail_path` for each photo using the best available source: a locally cached Photos derivative JPEG, a stored Flickr URL, or (for Photos-only records whose originals live in iCloud) an iCloud download triggered via osxphotos — up to 4 concurrent downloads with a 60-second wait. Photos still not resolved are queued for the next run. When serving thumbnails, the review UI falls back to fetching directly from Flickr's CDN for any matched photo that has a Flickr ID but no local file — so photos that haven't been downloaded from iCloud will still display if they've been uploaded to Flickr. Purely local photos with no Flickr match will show a "no preview" placeholder until iCloud downloads them.
 
 For ongoing use, all three services run as launchd agents — no terminal window required. The poller runs hourly, the pipeline every 6 hours, and the reviewer stays always-on. Run `bp install-daemons` to write the plists and get the exact `launchctl bootstrap` commands to load them. See [`docs/daemon-setup.md`](docs/daemon-setup.md) for full launchctl reference: loading, logs, restart, stale-state recovery, and uninstalling.
 
@@ -533,7 +533,7 @@ The Flickr client uses exponential backoff with jitter; write operations update 
 python -m pytest tests/ -q
 ```
 
-677 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, and reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration). See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
+686 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, and reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration). See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
 
 ## License
 
