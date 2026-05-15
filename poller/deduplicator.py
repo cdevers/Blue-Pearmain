@@ -672,6 +672,91 @@ def _delete_flickr_discards(
 
 
 # ---------------------------------------------------------------------------
+# Delete discards
+# ---------------------------------------------------------------------------
+
+def _delete_discards(
+    conn: sqlite3.Connection,
+    client: Any,
+    dry_run: bool,
+) -> tuple[int, int, int]:
+    """Delete approved_public discard records from Flickr.
+
+    Queries duplicate_groups for unresolved groups whose discard is
+    approved_public and not yet flickr_deleted. Calls client.delete_photo()
+    for each. Treats FlickrError(1) (photo not found) as success.
+
+    Returns (deleted, already_gone, errors).
+    """
+    from flickr.flickr_client import FlickrError
+
+    rows = conn.execute("""
+        SELECT p.id, p.flickr_id, p.privacy_state,
+               dg.id AS group_id, dg.group_type, dg.notes
+        FROM photos p
+        JOIN duplicate_groups dg ON p.duplicate_group_id = dg.id
+        WHERE p.duplicate_role = 'discard'
+          AND p.privacy_state = 'approved_public'
+          AND (p.flickr_deleted IS NULL OR p.flickr_deleted = 0)
+          AND dg.resolved = 0
+    """).fetchall()
+
+    if not rows:
+        print("No discards eligible for deletion.")
+        return 0, 0, 0
+
+    label = "to delete" if not dry_run else "eligible for deletion"
+    print(f"\nDiscards {label}: {len(rows)}")
+    for r in rows:
+        try:
+            summary = json.loads(r["notes"]).get("summary", "") if r["notes"] else ""
+        except (json.JSONDecodeError, TypeError):
+            summary = r["notes"] or ""
+        print(f"  flickr_id={r['flickr_id']}  group_type={r['group_type']}  privacy={r['privacy_state']}")
+        if summary:
+            print(f"    {summary}")
+
+    if dry_run:
+        print("\nDry run — no Flickr API calls made. Use --apply to delete.")
+        return 0, 0, 0
+
+    deleted = already_gone = errors = 0
+    for r in rows:
+        photo_id  = r["id"]
+        flickr_id = r["flickr_id"]
+        group_id  = r["group_id"]
+        try:
+            client.delete_photo(flickr_id)
+            conn.execute(
+                "UPDATE photos SET flickr_deleted = 1,"
+                " updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+                (photo_id,),
+            )
+            conn.execute("UPDATE duplicate_groups SET resolved = 1 WHERE id = ?", (group_id,))
+            conn.commit()
+            deleted += 1
+            print(f"  deleted  flickr_id={flickr_id}")
+        except FlickrError as exc:
+            if exc.code == 1:
+                conn.execute(
+                    "UPDATE photos SET flickr_deleted = 1,"
+                    " updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+                    (photo_id,),
+                )
+                conn.execute("UPDATE duplicate_groups SET resolved = 1 WHERE id = ?", (group_id,))
+                conn.commit()
+                already_gone += 1
+                print(f"  already gone (Flickr error 1)  flickr_id={flickr_id}")
+            else:
+                errors += 1
+                log.error("Failed to delete flickr_id=%s: %s", flickr_id, exc)
+                print(f"  error (code {exc.code})  flickr_id={flickr_id}")
+
+    print(f"\nDone: {deleted} deleted, {already_gone} already gone, {errors} error(s)")
+    return deleted, already_gone, errors
+
+
+# ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
 
@@ -819,6 +904,14 @@ def main() -> None:
         if args.confirm:
             log.error("--confirm is not supported with --flickr (use --flickr --write to group only)")
             sys.exit(1)
+        if args.delete_discards:
+            log.info("Loading Flickr client for delete-discards …")
+            from flickr.flickr_client import FlickrClient
+            client = FlickrClient.from_config(config)
+            dry_run = not args.apply
+            _delete_discards(conn, client, dry_run=dry_run)
+            conn.close()
+            return
         log.info("Scanning for re-upload duplicates in %s …", db_path)
         groups, conflicts = _fetch_reupload_candidates(conn, include_approved=args.include_approved)
         if args.include_approved:

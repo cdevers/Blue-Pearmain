@@ -554,5 +554,181 @@ class TestFetchReuploadCandidates(unittest.TestCase):
         self.assertEqual(groups[0].group_type, "reupload_uncertain")
 
 
+# ---------------------------------------------------------------------------
+# _delete_discards helpers
+# ---------------------------------------------------------------------------
+
+def _make_dedup_db():
+    """In-memory DB with photos + duplicate_groups tables for delete-discards tests."""
+    conn = _sqlite3.connect(":memory:")
+    conn.row_factory = _sqlite3.Row
+    conn.execute("""
+        CREATE TABLE photos (
+            id INTEGER PRIMARY KEY,
+            flickr_id TEXT,
+            uuid TEXT,
+            privacy_state TEXT DEFAULT 'candidate_public',
+            duplicate_role TEXT,
+            duplicate_group_id INTEGER,
+            flickr_deleted INTEGER DEFAULT 0,
+            updated_at TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE duplicate_groups (
+            id INTEGER PRIMARY KEY,
+            match_key TEXT UNIQUE,
+            group_type TEXT,
+            keeper_id INTEGER,
+            photo_count INTEGER DEFAULT 0,
+            resolved INTEGER DEFAULT 0,
+            notes TEXT,
+            updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+        )
+    """)
+    return conn
+
+
+def _insert_group_and_discard(
+    conn,
+    group_id: int = 1,
+    discard_flickr_id: str = "54060000000",
+    privacy_state: str = "approved_public",
+    flickr_deleted: int = 0,
+    resolved: int = 0,
+    notes: str | None = None,
+):
+    """Insert a keeper + discard pair into a duplicate_group for testing."""
+    import json as _json
+    default_notes = _json.dumps({
+        "keeper_flickr_id": "48922000000",
+        "discard_flickr_id": discard_flickr_id,
+        "summary": f"DSC_0042.JPG | 2022-08-14T10:23:11 | linked=48922000000 → orphan={discard_flickr_id}",
+    })
+    conn.execute(
+        "INSERT INTO duplicate_groups (id, match_key, group_type, keeper_id, photo_count, resolved, notes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (group_id, f"reupload:48922000000:{discard_flickr_id}", "reupload_uncertain", 10, 2, resolved, notes or default_notes),
+    )
+    conn.execute(
+        "INSERT INTO photos (id, flickr_id, uuid, privacy_state, duplicate_role, duplicate_group_id, flickr_deleted) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (10, "48922000000", "AAAA", "approved_public", "keeper", group_id, 0),
+    )
+    conn.execute(
+        "INSERT INTO photos (id, flickr_id, uuid, privacy_state, duplicate_role, duplicate_group_id, flickr_deleted) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (20, discard_flickr_id, None, privacy_state, "discard", group_id, flickr_deleted),
+    )
+
+
+# ---------------------------------------------------------------------------
+# TestDeleteDiscards
+# ---------------------------------------------------------------------------
+
+class TestDeleteDiscards(unittest.TestCase):
+
+    def test_dry_run_no_api_calls(self):
+        from unittest.mock import MagicMock
+        from poller.deduplicator import _delete_discards
+        conn = _make_dedup_db()
+        _insert_group_and_discard(conn)
+        client = MagicMock()
+        deleted, already_gone, errors = _delete_discards(conn, client, dry_run=True)
+        self.assertEqual(deleted, 0)
+        self.assertEqual(already_gone, 0)
+        self.assertEqual(errors, 0)
+        client.delete_photo.assert_not_called()
+
+    def test_apply_success_sets_flickr_deleted_and_resolved(self):
+        from unittest.mock import MagicMock
+        from poller.deduplicator import _delete_discards
+        conn = _make_dedup_db()
+        _insert_group_and_discard(conn)
+        client = MagicMock()
+        deleted, already_gone, errors = _delete_discards(conn, client, dry_run=False)
+        self.assertEqual(deleted, 1)
+        self.assertEqual(already_gone, 0)
+        self.assertEqual(errors, 0)
+        client.delete_photo.assert_called_once_with("54060000000")
+        row = conn.execute(
+            "SELECT flickr_deleted FROM photos WHERE flickr_id = '54060000000'"
+        ).fetchone()
+        self.assertEqual(row["flickr_deleted"], 1)
+        group = conn.execute(
+            "SELECT resolved FROM duplicate_groups WHERE id = 1"
+        ).fetchone()
+        self.assertEqual(group["resolved"], 1)
+
+    def test_flickr_error_1_treated_as_success(self):
+        from unittest.mock import MagicMock
+        from flickr.flickr_client import FlickrError
+        from poller.deduplicator import _delete_discards
+        conn = _make_dedup_db()
+        _insert_group_and_discard(conn)
+        client = MagicMock()
+        client.delete_photo.side_effect = FlickrError(1, "Photo not found")
+        deleted, already_gone, errors = _delete_discards(conn, client, dry_run=False)
+        self.assertEqual(deleted, 0)
+        self.assertEqual(already_gone, 1)
+        self.assertEqual(errors, 0)
+        row = conn.execute(
+            "SELECT flickr_deleted FROM photos WHERE flickr_id = '54060000000'"
+        ).fetchone()
+        self.assertEqual(row["flickr_deleted"], 1)
+        group = conn.execute(
+            "SELECT resolved FROM duplicate_groups WHERE id = 1"
+        ).fetchone()
+        self.assertEqual(group["resolved"], 1)
+
+    def test_other_flickr_error_leaves_record_untouched(self):
+        from unittest.mock import MagicMock
+        from flickr.flickr_client import FlickrError
+        from poller.deduplicator import _delete_discards
+        conn = _make_dedup_db()
+        _insert_group_and_discard(conn)
+        client = MagicMock()
+        client.delete_photo.side_effect = FlickrError(99, "Insufficient permissions")
+        deleted, already_gone, errors = _delete_discards(conn, client, dry_run=False)
+        self.assertEqual(deleted, 0)
+        self.assertEqual(already_gone, 0)
+        self.assertEqual(errors, 1)
+        row = conn.execute(
+            "SELECT flickr_deleted FROM photos WHERE flickr_id = '54060000000'"
+        ).fetchone()
+        self.assertEqual(row["flickr_deleted"], 0)
+        group = conn.execute(
+            "SELECT resolved FROM duplicate_groups WHERE id = 1"
+        ).fetchone()
+        self.assertEqual(group["resolved"], 0)
+
+    def test_candidate_public_discard_excluded(self):
+        from unittest.mock import MagicMock
+        from poller.deduplicator import _delete_discards
+        conn = _make_dedup_db()
+        _insert_group_and_discard(conn, privacy_state="candidate_public")
+        client = MagicMock()
+        deleted, already_gone, errors = _delete_discards(conn, client, dry_run=False)
+        self.assertEqual(deleted + already_gone + errors, 0)
+        client.delete_photo.assert_not_called()
+
+    def test_already_flickr_deleted_excluded(self):
+        from unittest.mock import MagicMock
+        from poller.deduplicator import _delete_discards
+        conn = _make_dedup_db()
+        _insert_group_and_discard(conn, flickr_deleted=1)
+        client = MagicMock()
+        deleted, already_gone, errors = _delete_discards(conn, client, dry_run=False)
+        self.assertEqual(deleted + already_gone + errors, 0)
+        client.delete_photo.assert_not_called()
+
+    def test_resolved_group_excluded(self):
+        from unittest.mock import MagicMock
+        from poller.deduplicator import _delete_discards
+        conn = _make_dedup_db()
+        _insert_group_and_discard(conn, resolved=1)
+        client = MagicMock()
+        deleted, already_gone, errors = _delete_discards(conn, client, dry_run=False)
+        self.assertEqual(deleted + already_gone + errors, 0)
+        client.delete_photo.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
