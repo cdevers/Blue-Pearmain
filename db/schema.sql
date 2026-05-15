@@ -159,7 +159,7 @@ CREATE TABLE IF NOT EXISTS sync_runs (
 
 CREATE TABLE IF NOT EXISTS tag_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    photo_id    INTEGER NOT NULL REFERENCES photos(id),
+    photo_id    INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
     event_at    TEXT NOT NULL,
     destination TEXT NOT NULL,          -- 'flickr' | 'photos'
     tags_before TEXT,                   -- JSON array

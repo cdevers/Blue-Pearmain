@@ -914,7 +914,7 @@ class Database:
         self.conn.commit()
 
     def delete_photo(self, photo_id: int) -> None:
-        """Hard-delete a Photos-only record. ON DELETE CASCADE handles photo_albums, metadata_proposals, metadata_conflicts."""
+        """Hard-delete a Photos-only record. ON DELETE CASCADE handles photo_albums, metadata_proposals, metadata_conflicts, tag_events."""
         self.conn.execute("DELETE FROM photos WHERE id = ?", (photo_id,))
 
     def upsert_metadata_conflict(
