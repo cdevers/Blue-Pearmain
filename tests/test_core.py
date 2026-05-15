@@ -8205,5 +8205,55 @@ class TestMetadataPullerPhotosIsResponsive(unittest.TestCase):
             self.assertFalse(_photos_is_responsive())
 
 
+class TestDeletePhoto(unittest.TestCase):
+    """db.delete_photo() hard-deletes a Photos-only record and cascades to photo_albums."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(Path(self._tmp.name) / "test.db")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def test_delete_removes_photo_row(self):
+        photo_id = self.db.upsert_photo({
+            "uuid": "GHOST-0001",
+            "flickr_id": None,
+            "privacy_state": "candidate_public",
+            "proposed_tags": [],
+            "apple_persons": [],
+            "apple_labels": [],
+        })
+        self.db.delete_photo(photo_id)
+        row = self.db.conn.execute(
+            "SELECT id FROM photos WHERE id = ?", (photo_id,)
+        ).fetchone()
+        self.assertIsNone(row)
+
+    def test_delete_cascades_to_photo_albums(self):
+        photo_id = self.db.upsert_photo({
+            "uuid": "GHOST-0002",
+            "flickr_id": None,
+            "privacy_state": "candidate_public",
+            "proposed_tags": [],
+            "apple_persons": [],
+            "apple_labels": [],
+        })
+        album_id = self.db.upsert_album("album-uuid-0001", "Test Album")
+        self.db.upsert_photo_album(photo_id, album_id)
+        row = self.db.conn.execute(
+            "SELECT * FROM photo_albums WHERE photo_id = ?", (photo_id,)
+        ).fetchone()
+        self.assertIsNotNone(row)
+
+        self.db.delete_photo(photo_id)
+
+        row = self.db.conn.execute(
+            "SELECT * FROM photo_albums WHERE photo_id = ?", (photo_id,)
+        ).fetchone()
+        self.assertIsNone(row)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
