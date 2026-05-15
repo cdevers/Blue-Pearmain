@@ -599,6 +599,71 @@ def scan(
 # ---------------------------------------------------------------------------
 
 
+def sync_deleted_photos(photosdb, db: Database, dry_run: bool) -> int:
+    """Delete Photos-only DB records whose UUID is no longer in the Photos library.
+
+    Safe to call only during --all scans: photosdb.photos() must return the full
+    library (no date filter) so that absence of a UUID is meaningful.
+
+    Returns the count of records deleted (or would-be deleted in dry-run).
+    """
+    all_photos = photosdb.photos()
+
+    if len(all_photos) == 0:
+        log.error(
+            "sync_deleted_photos: osxphotos returned 0 photos — "
+            "aborting (plausibility guard: empty result indicates library read failure)"
+        )
+        return 0
+
+    current_uuids: set[str] = {p.uuid for p in all_photos}
+
+    rows = db.conn.execute(
+        "SELECT id, uuid FROM photos WHERE uuid IS NOT NULL AND flickr_id IS NULL"
+    ).fetchall()
+
+    if not rows:
+        log.info("sync_deleted_photos: no Photos-only records to check")
+        return 0
+
+    to_delete = [r for r in rows if r["uuid"] not in current_uuids]
+
+    if not to_delete:
+        log.info("sync_deleted_photos: all %d Photos-only records still present", len(rows))
+        return 0
+
+    deletion_ratio = len(to_delete) / len(rows)
+    if len(rows) >= 10 and deletion_ratio > 0.10:
+        log.warning(
+            "sync_deleted_photos: would delete %d/%d Photos-only records (%.0f%%) — "
+            "exceeds 10%% threshold, aborting. Investigate and re-run if intentional.",
+            len(to_delete),
+            len(rows),
+            deletion_ratio * 100,
+        )
+        return 0
+
+    for row in to_delete:
+        log.info(
+            "sync_deleted_photos: %s uuid=%s id=%d",
+            "would delete" if dry_run else "deleting",
+            row["uuid"],
+            row["id"],
+        )
+        if not dry_run:
+            db.delete_photo(row["id"])
+
+    if not dry_run:
+        db.conn.commit()
+
+    log.info(
+        "sync_deleted_photos: %s %d record(s)",
+        "dry-run, would delete" if dry_run else "deleted",
+        len(to_delete),
+    )
+    return len(to_delete)
+
+
 def backfill_dimensions(db, library) -> int:
     """
     Update width/height for all Apple-Photos-matched rows that are missing

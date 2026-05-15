@@ -8255,5 +8255,160 @@ class TestDeletePhoto(unittest.TestCase):
         self.assertIsNone(row)
 
 
+def _make_mock_photos(*uuids: str):
+    """Return MagicMock photo objects with the given .uuid values."""
+    from unittest.mock import MagicMock
+    result = []
+    for u in uuids:
+        p = MagicMock()
+        p.uuid = u
+        result.append(p)
+    return result
+
+
+class TestSyncDeletedPhotos(unittest.TestCase):
+    """sync_deleted_photos() detects and deletes Photos-only records absent from osxphotos."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(Path(self._tmp.name) / "test.db")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _insert_photos_only(self, uuid: str) -> int:
+        return self.db.upsert_photo({
+            "uuid": uuid,
+            "flickr_id": None,
+            "privacy_state": "candidate_public",
+            "proposed_tags": [],
+            "apple_persons": [],
+            "apple_labels": [],
+        })
+
+    def _insert_linked(self, uuid: str, flickr_id: str) -> int:
+        return self.db.upsert_photo({
+            "uuid": uuid,
+            "flickr_id": flickr_id,
+            "privacy_state": "approved_public",
+            "proposed_tags": [],
+            "apple_persons": [],
+            "apple_labels": [],
+        })
+
+    def test_absent_uuid_photos_only_is_deleted_with_cascade(self):
+        from unittest.mock import MagicMock
+        from poller.scanner import sync_deleted_photos
+
+        photo_id = self._insert_photos_only("GHOST-0001")
+        album_id = self.db.upsert_album("album-uuid-sync-01", "Test Album")
+        self.db.upsert_photo_album(photo_id, album_id)
+
+        mock_photosdb = MagicMock()
+        mock_photosdb.photos.return_value = _make_mock_photos("OTHER-UUID")
+
+        deleted = sync_deleted_photos(mock_photosdb, self.db, dry_run=False)
+
+        self.assertEqual(deleted, 1)
+        self.assertIsNone(
+            self.db.conn.execute("SELECT id FROM photos WHERE id = ?", (photo_id,)).fetchone()
+        )
+        self.assertIsNone(
+            self.db.conn.execute(
+                "SELECT * FROM photo_albums WHERE photo_id = ?", (photo_id,)
+            ).fetchone()
+        )
+
+    def test_linked_record_not_deleted_when_uuid_absent(self):
+        from unittest.mock import MagicMock
+        from poller.scanner import sync_deleted_photos
+
+        photo_id = self._insert_linked("LINKED-0001", "55555555")
+
+        mock_photosdb = MagicMock()
+        mock_photosdb.photos.return_value = _make_mock_photos("OTHER-UUID")
+
+        deleted = sync_deleted_photos(mock_photosdb, self.db, dry_run=False)
+
+        self.assertEqual(deleted, 0)
+        self.assertIsNotNone(
+            self.db.conn.execute("SELECT id FROM photos WHERE id = ?", (photo_id,)).fetchone()
+        )
+
+    def test_zero_photos_guard_prevents_all_deletions(self):
+        from unittest.mock import MagicMock
+        from poller.scanner import sync_deleted_photos
+
+        self._insert_photos_only("GHOST-0001")
+
+        mock_photosdb = MagicMock()
+        mock_photosdb.photos.return_value = []
+
+        deleted = sync_deleted_photos(mock_photosdb, self.db, dry_run=False)
+
+        self.assertEqual(deleted, 0)
+        self.assertIsNotNone(
+            self.db.conn.execute(
+                "SELECT id FROM photos WHERE uuid = 'GHOST-0001'"
+            ).fetchone()
+        )
+
+    def test_mass_deletion_guard_fires_above_ten_percent(self):
+        from unittest.mock import MagicMock
+        from poller.scanner import sync_deleted_photos
+
+        for i in range(10):
+            self._insert_photos_only(f"GHOST-{i:04d}")
+
+        mock_photosdb = MagicMock()
+        mock_photosdb.photos.return_value = _make_mock_photos("GHOST-0000")
+
+        deleted = sync_deleted_photos(mock_photosdb, self.db, dry_run=False)
+
+        self.assertEqual(deleted, 0)
+        count = self.db.conn.execute(
+            "SELECT COUNT(*) AS n FROM photos WHERE flickr_id IS NULL AND uuid IS NOT NULL"
+        ).fetchone()["n"]
+        self.assertEqual(count, 10)
+
+    def test_dry_run_returns_count_but_leaves_db_unchanged(self):
+        from unittest.mock import MagicMock
+        from poller.scanner import sync_deleted_photos
+
+        photo_id = self._insert_photos_only("GHOST-0001")
+
+        mock_photosdb = MagicMock()
+        mock_photosdb.photos.return_value = _make_mock_photos("OTHER-UUID")
+
+        deleted = sync_deleted_photos(mock_photosdb, self.db, dry_run=True)
+
+        self.assertEqual(deleted, 1)
+        self.assertIsNotNone(
+            self.db.conn.execute("SELECT id FROM photos WHERE id = ?", (photo_id,)).fetchone()
+        )
+
+    def test_multiple_absent_uuids_all_deleted(self):
+        from unittest.mock import MagicMock
+        from poller.scanner import sync_deleted_photos
+
+        ghost_ids = [self._insert_photos_only(f"GHOST-{i:04d}") for i in range(2)]
+        for i in range(20):
+            self._insert_photos_only(f"KEEP-{i:04d}")
+
+        mock_photosdb = MagicMock()
+        mock_photosdb.photos.return_value = _make_mock_photos(
+            *[f"KEEP-{i:04d}" for i in range(20)]
+        )
+
+        deleted = sync_deleted_photos(mock_photosdb, self.db, dry_run=False)
+
+        self.assertEqual(deleted, 2)
+        for pid in ghost_ids:
+            self.assertIsNone(
+                self.db.conn.execute("SELECT id FROM photos WHERE id = ?", (pid,)).fetchone()
+            )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
