@@ -876,8 +876,13 @@ class TestThumbnailer(unittest.TestCase):
             "display_rotation": 90,
         })
 
-        # Mock derivative_path so the thumbnailer resolves the local source
-        with mock.patch("poller.thumbnailer.derivative_path", return_value="/fake/thumb.jpeg"):
+        # Mock derivative_path so the thumbnailer resolves the local source.
+        # Also mock osxphotos so Phase 0 iCloud lookup doesn't hit the real library.
+        mock_photosdb = mock.MagicMock()
+        mock_photosdb.photos.return_value = []
+        with mock.patch("poller.thumbnailer.derivative_path", return_value="/fake/thumb.jpeg"), \
+             mock.patch("poller.thumbnailer.osxphotos") as mock_osx:
+            mock_osx.PhotosDB.return_value = mock_photosdb
             run(
                 db=db,
                 library_path="/fake/library",
@@ -899,6 +904,76 @@ class TestThumbnailer(unittest.TestCase):
 
         db.close()
         os.unlink(db_path)
+
+
+class TestThumbnailerICloud(unittest.TestCase):
+    """Tests for iCloud download path added in GH #64."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(Path(self._tmp.name) / "test.db")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _insert_photos_only(self, uuid: str) -> int:
+        return self.db.upsert_photo({
+            "uuid": uuid,
+            "flickr_id": None,
+            "privacy_state": "candidate_public",
+            "proposed_tags": [],
+            "apple_persons": [],
+            "apple_labels": [],
+        })
+
+    def _insert_linked(self, flickr_id: str, uuid: str) -> int:
+        return self.db.upsert_photo({
+            "uuid": uuid,
+            "flickr_id": flickr_id,
+            "flickr_secret": "sec",
+            "flickr_server": "999",
+            "privacy_state": "approved_public",
+            "proposed_tags": [],
+            "apple_persons": [],
+            "apple_labels": [],
+        })
+
+    def test_no_photos_only_records_osxphotos_never_opened(self):
+        from unittest.mock import MagicMock, patch
+        from poller.thumbnailer import run
+
+        # Only a Flickr-linked record — no Photos-only records needing thumbnails
+        self._insert_linked("55555555", "LINKED-UUID-0001")
+
+        with patch("poller.thumbnailer.osxphotos") as mock_osxphotos:
+            run(db=self.db, library_path="/fake/lib", thumb_root=None,
+                flickr_download=False, client=None, limit=None, dry_run=True)
+
+        mock_osxphotos.PhotosDB.assert_not_called()
+
+    def test_photos_only_records_open_photosdb_and_build_map(self):
+        from unittest.mock import MagicMock, patch
+        from poller.thumbnailer import run
+
+        self._insert_photos_only("ICLOUD-UUID-0001")
+
+        mock_photo = MagicMock()
+        mock_photo.uuid = "ICLOUD-UUID-0001"
+        mock_photo.iscloudasset = False  # not iCloud — just verify DB was opened
+        mock_photo.ismissing = False
+
+        mock_photosdb = MagicMock()
+        mock_photosdb.photos.return_value = [mock_photo]
+
+        with patch("poller.thumbnailer.osxphotos") as mock_osxphotos, \
+             patch("poller.thumbnailer.derivative_path", return_value=None):
+            mock_osxphotos.PhotosDB.return_value = mock_photosdb
+            run(db=self.db, library_path="/fake/lib", thumb_root=None,
+                flickr_download=False, client=None, limit=None, dry_run=True)
+
+        mock_osxphotos.PhotosDB.assert_called_once_with(dbfile="/fake/lib")
+        mock_photosdb.photos.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
