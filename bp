@@ -153,8 +153,10 @@ def cmd_scan(args):
 def cmd_thumbs(args):
     from poller.thumbnailer import main
     _run(main, args, [
-        ("--config",  args.config),
-        ("--verbose", args.verbose),
+        ("--config",       args.config),
+        ("--verbose",      args.verbose),
+        ("--icloud",       args.icloud),
+        ("--icloud-limit", args.icloud_limit),
     ])
 
 
@@ -751,7 +753,11 @@ def main():
     p_scan.add_argument("--dry-run", action="store_true")
 
     # thumbs
-    sub.add_parser("thumbs", help="Populate missing thumbnail paths")
+    p_thumbs = sub.add_parser("thumbs", help="Populate missing thumbnail paths")
+    p_thumbs.add_argument("--icloud",       action="store_true",
+                          help="Trigger sequential AppleScript export for iCloud-only photos")
+    p_thumbs.add_argument("--icloud-limit", type=int, default=50,
+                          help="Max iCloud exports per run (default: 50)")
 
     # pipeline
     p_pipe = sub.add_parser("pipeline", help="Sync-metadata then auto-apply non-conflict proposals")
