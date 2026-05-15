@@ -1760,7 +1760,7 @@ class TestFlickrClientRetry(unittest.TestCase):
                          f"Expected two 60s delays (attempts 6 and 7), got: {retry_sleeps}")
 
     def test_retry_after_header_honored(self):
-        """When Flickr sends Retry-After, sleep that duration instead of exponential backoff."""
+        """When Flickr sends Retry-After, sleep that duration (then exponential backoff still runs)."""
         from unittest.mock import patch
         c = self._make_client()
         rate_limited = self._mock_response(429, retry_after="30")
