@@ -507,6 +507,52 @@ class TestFetchReuploadCandidates(unittest.TestCase):
         groups, conflicts = _fetch_reupload_candidates(conn)
         self.assertEqual(len(groups), 0)
 
+    def test_include_approved_adds_approved_public(self):
+        from poller.deduplicator import _fetch_reupload_candidates
+        conn = _make_db()
+        # linked record (approved_public, has uuid)
+        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
+                original_filename="DSC_0042.JPG",
+                date_taken="2022-08-14T10:23:11+00:00",
+                privacy_state="approved_public")
+        # orphan with approved_public (orientation duplicate)
+        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
+                original_filename="DSC_0042.JPG",
+                date_taken="2022-08-14T10:23:11+00:00",
+                privacy_state="approved_public")
+        groups, conflicts = _fetch_reupload_candidates(conn, include_approved=True)
+        self.assertEqual(len(groups), 1)
+
+    def test_include_approved_off_excludes_approved_public(self):
+        from poller.deduplicator import _fetch_reupload_candidates
+        conn = _make_db()
+        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
+                original_filename="DSC_0042.JPG",
+                date_taken="2022-08-14T10:23:11+00:00",
+                privacy_state="approved_public")
+        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
+                original_filename="DSC_0042.JPG",
+                date_taken="2022-08-14T10:23:11+00:00",
+                privacy_state="approved_public")
+        # Without include_approved, the approved_public orphan is excluded
+        groups, conflicts = _fetch_reupload_candidates(conn)
+        self.assertEqual(len(groups), 0)
+
+    def test_include_approved_null_filename_classified_uncertain(self):
+        from poller.deduplicator import _fetch_reupload_candidates
+        conn = _make_db()
+        _insert(conn, id=1, flickr_id="48922000000", uuid="AAAA",
+                original_filename=None,
+                date_taken="2022-08-14T10:23:11+00:00",
+                privacy_state="approved_public")
+        _insert(conn, id=2, flickr_id="54060000000", uuid=None,
+                original_filename=None,
+                date_taken="2022-08-14T10:23:11+00:00",
+                privacy_state="approved_public")
+        groups, conflicts = _fetch_reupload_candidates(conn, include_approved=True)
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0].group_type, "reupload_uncertain")
+
 
 if __name__ == "__main__":
     unittest.main()

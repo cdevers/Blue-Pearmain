@@ -417,6 +417,7 @@ def _fetch_duplicate_candidates(conn: sqlite3.Connection) -> list[DuplicateGroup
 
 def _fetch_reupload_candidates(
     conn: sqlite3.Connection,
+    include_approved: bool = False,
 ) -> tuple[list[DuplicateGroup], list[dict]]:
     """Find Flickr-only re-upload candidates matched to linked records.
 
@@ -427,15 +428,20 @@ def _fetch_reupload_candidates(
         groups     — DuplicateGroup list (reupload or reupload_uncertain)
         conflicts  — dicts for pairs skipped because a record was already grouped
     """
-    # Load orphans: Flickr-only candidate_public records
-    orphan_rows = conn.execute("""
+    # Load orphans: Flickr-only records needing review
+    privacy_clause = (
+        "AND privacy_state IN ('candidate_public', 'approved_public')"
+        if include_approved
+        else "AND privacy_state = 'candidate_public'"
+    )
+    orphan_rows = conn.execute(f"""
         SELECT id, flickr_id, uuid, original_filename, date_taken,
                date_added_photos, date_uploaded_flickr, fingerprint,
                width, height, privacy_state, duplicate_group_id
         FROM photos
         WHERE uuid IS NULL
           AND flickr_id IS NOT NULL
-          AND privacy_state = 'candidate_public'
+          {privacy_clause}
     """).fetchall()
 
     orphans = [
@@ -770,6 +776,12 @@ def main() -> None:
                         help="Detect Flickr re-upload duplicates (orphan paired with linked record)")
     parser.add_argument("--limit", type=int, default=None,
                         help="Maximum pairs to write (recommended for first live runs)")
+    parser.add_argument("--include-approved", action="store_true",
+                        help="Include approved_public Flickr-only records in detection (catches orientation duplicates)")
+    parser.add_argument("--delete-discards", action="store_true",
+                        help="Act on already-grouped discards: call flickr.photos.delete on approved_public discards")
+    parser.add_argument("--apply", action="store_true",
+                        help="Execute deletions (default is dry-run). Requires --delete-discards.")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -780,6 +792,16 @@ def main() -> None:
 
     if args.write:
         args.dry_run = False
+
+    if args.include_approved and not args.flickr:
+        log.error("--include-approved requires --flickr")
+        sys.exit(1)
+    if args.delete_discards and not args.flickr:
+        log.error("--delete-discards requires --flickr")
+        sys.exit(1)
+    if args.apply and not args.delete_discards:
+        log.error("--apply requires --delete-discards")
+        sys.exit(1)
 
     config_path = Path(args.config)
     if not config_path.exists():
@@ -798,7 +820,9 @@ def main() -> None:
             log.error("--confirm is not supported with --flickr (use --flickr --write to group only)")
             sys.exit(1)
         log.info("Scanning for re-upload duplicates in %s …", db_path)
-        groups, conflicts = _fetch_reupload_candidates(conn)
+        groups, conflicts = _fetch_reupload_candidates(conn, include_approved=args.include_approved)
+        if args.include_approved:
+            print("Detection scope: candidate_public + approved_public (--include-approved)")
         _print_reupload_report(groups, conflicts, verbose=args.verbose)
 
         if args.dry_run:
