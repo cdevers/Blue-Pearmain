@@ -975,6 +975,154 @@ class TestThumbnailerICloud(unittest.TestCase):
         mock_osxphotos.PhotosDB.assert_called_once_with(dbfile="/fake/lib")
         mock_photosdb.photos.assert_called_once()
 
+    def test_icloud_photo_resolved_when_download_completes(self):
+        from unittest.mock import MagicMock, patch
+        from poller.thumbnailer import run
+
+        photo_id = self._insert_photos_only("ICLOUD-UUID-0001")
+
+        mock_photo = MagicMock()
+        mock_photo.uuid = "ICLOUD-UUID-0001"
+        mock_photo.iscloudasset = True
+        mock_photo.ismissing = True
+        # export() is a no-op — completes immediately in the thread pool
+
+        mock_photosdb = MagicMock()
+        mock_photosdb.photos.return_value = [mock_photo]
+
+        # derivative_path: None first (Phase 1 check), then path (Phase 2 retry)
+        mock_deriv = MagicMock(side_effect=[None, "/fake/lib/resources/derivatives/masters/i/ICLOUD-UUID-0001_4_5005_c.jpeg"])
+
+        with patch("poller.thumbnailer.osxphotos") as mock_osxphotos, \
+             patch("poller.thumbnailer.derivative_path", mock_deriv):
+            mock_osxphotos.PhotosDB.return_value = mock_photosdb
+            run(db=self.db, library_path="/fake/lib", thumb_root=None,
+                flickr_download=False, client=None, limit=None, dry_run=False)
+
+        mock_photo.export.assert_called_once()
+        row = self.db.conn.execute(
+            "SELECT thumbnail_path, display_rotation FROM photos WHERE id = ?", (photo_id,)
+        ).fetchone()
+        self.assertIsNotNone(row["thumbnail_path"])
+        self.assertEqual(row["display_rotation"], 0)
+
+    def test_icloud_photo_queued_when_derivative_not_found_after_wait(self):
+        from unittest.mock import MagicMock, patch
+        from poller.thumbnailer import run
+
+        photo_id = self._insert_photos_only("ICLOUD-UUID-0002")
+
+        mock_photo = MagicMock()
+        mock_photo.uuid = "ICLOUD-UUID-0002"
+        mock_photo.iscloudasset = True
+        mock_photo.ismissing = True
+
+        mock_photosdb = MagicMock()
+        mock_photosdb.photos.return_value = [mock_photo]
+
+        with patch("poller.thumbnailer.osxphotos") as mock_osxphotos, \
+             patch("poller.thumbnailer.derivative_path", return_value=None):
+            mock_osxphotos.PhotosDB.return_value = mock_photosdb
+            run(db=self.db, library_path="/fake/lib", thumb_root=None,
+                flickr_download=False, client=None, limit=None, dry_run=False)
+
+        # No thumbnail written — photo is queued
+        row = self.db.conn.execute(
+            "SELECT thumbnail_path FROM photos WHERE id = ?", (photo_id,)
+        ).fetchone()
+        self.assertIn(row["thumbnail_path"], (None, ""))
+
+    def test_icloud_queued_when_export_raises_no_crash(self):
+        from unittest.mock import MagicMock, patch
+        from poller.thumbnailer import run
+
+        photo_id = self._insert_photos_only("ICLOUD-UUID-0003")
+
+        mock_photo = MagicMock()
+        mock_photo.uuid = "ICLOUD-UUID-0003"
+        mock_photo.iscloudasset = True
+        mock_photo.ismissing = True
+        mock_photo.export.side_effect = Exception("Photos.app not running")
+
+        mock_photosdb = MagicMock()
+        mock_photosdb.photos.return_value = [mock_photo]
+
+        # Should complete without raising; photo ends up queued
+        with patch("poller.thumbnailer.osxphotos") as mock_osxphotos, \
+             patch("poller.thumbnailer.derivative_path", return_value=None):
+            mock_osxphotos.PhotosDB.return_value = mock_photosdb
+            run(db=self.db, library_path="/fake/lib", thumb_root=None,
+                flickr_download=False, client=None, limit=None, dry_run=False)
+
+        row = self.db.conn.execute(
+            "SELECT thumbnail_path FROM photos WHERE id = ?", (photo_id,)
+        ).fetchone()
+        self.assertIn(row["thumbnail_path"], (None, ""))
+
+    def test_dry_run_triggers_export_but_does_not_write_db(self):
+        from unittest.mock import MagicMock, patch
+        from poller.thumbnailer import run
+
+        photo_id = self._insert_photos_only("ICLOUD-UUID-0004")
+
+        mock_photo = MagicMock()
+        mock_photo.uuid = "ICLOUD-UUID-0004"
+        mock_photo.iscloudasset = True
+        mock_photo.ismissing = True
+
+        mock_photosdb = MagicMock()
+        mock_photosdb.photos.return_value = [mock_photo]
+
+        # derivative_path: None first, then a path (download "completes")
+        mock_deriv = MagicMock(side_effect=[None, "/fake/icloud.jpeg"])
+
+        with patch("poller.thumbnailer.osxphotos") as mock_osxphotos, \
+             patch("poller.thumbnailer.derivative_path", mock_deriv):
+            mock_osxphotos.PhotosDB.return_value = mock_photosdb
+            run(db=self.db, library_path="/fake/lib", thumb_root=None,
+                flickr_download=False, client=None, limit=None, dry_run=True)
+
+        # export WAS submitted (download triggered even in dry-run)
+        mock_photo.export.assert_called_once()
+        # DB was NOT written
+        row = self.db.conn.execute(
+            "SELECT thumbnail_path FROM photos WHERE id = ?", (photo_id,)
+        ).fetchone()
+        self.assertIn(row["thumbnail_path"], (None, ""))
+
+    def test_skipped_count_excludes_icloud_pending_records(self):
+        from unittest.mock import MagicMock, patch
+        from poller.thumbnailer import run, log
+        import re
+
+        # One iCloud-pending record and one genuinely unresolvable record
+        # (has a uuid but is not found in Photos library, so it gets skipped)
+        self._insert_photos_only("ICLOUD-UUID-0005")
+        self._insert_photos_only("NOT-IN-LIBRARY-0001")  # not returned by mock photosdb
+
+        mock_photo = MagicMock()
+        mock_photo.uuid = "ICLOUD-UUID-0005"
+        mock_photo.iscloudasset = True
+        mock_photo.ismissing = True
+
+        mock_photosdb = MagicMock()
+        mock_photosdb.photos.return_value = [mock_photo]
+
+        log_output = []
+
+        with patch("poller.thumbnailer.osxphotos") as mock_osxphotos, \
+             patch("poller.thumbnailer.derivative_path", return_value=None), \
+             patch.object(log, "info", side_effect=lambda msg, *a: log_output.append(msg % a if a else msg)):
+            mock_osxphotos.PhotosDB.return_value = mock_photosdb
+            run(db=self.db, library_path="/fake/lib", thumb_root=None,
+                flickr_download=False, client=None, limit=None, dry_run=True)
+
+        done_line = next((l for l in log_output if l.startswith("Done:")), "")
+        # skipped should be 1 (the no-uuid record), not 2
+        match = re.search(r"(\d+) skipped", done_line)
+        self.assertIsNotNone(match, f"Expected 'N skipped' in: {done_line!r}")
+        self.assertEqual(int(match.group(1)), 1)
+
 
 # ---------------------------------------------------------------------------
 # Poller: download_thumb URL preference

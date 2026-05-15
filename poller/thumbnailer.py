@@ -144,6 +144,12 @@ def run(
                     flickr_url_count += 1
 
         if not thumb:
+            if uuid and executor is not None:
+                photo = uuid_to_photo.get(uuid)
+                if photo and photo.iscloudasset and photo.ismissing:
+                    future = executor.submit(photo.export, tmpdir, use_photos_export=True)
+                    icloud_pending.append((row_id, uuid, future))
+                    continue  # pending — not skipped
             skipped += 1
             continue
 
@@ -153,12 +159,40 @@ def run(
                 (thumb, row_id),
             )
 
+    # Phase 2 — wait for iCloud downloads, retry, then clean up
+    icloud_resolved = icloud_queued = 0
+    if icloud_pending:
+        futures = [f for _, _, f in icloud_pending]
+        concurrent.futures.wait(futures, timeout=60)
+
+        for row_id, uuid, _ in icloud_pending:
+            thumb = derivative_path(uuid, library_path)
+            if thumb:
+                icloud_resolved += 1
+                if not dry_run:
+                    db.conn.execute(
+                        "UPDATE photos SET thumbnail_path = ?, display_rotation = 0 WHERE id = ?",
+                        (thumb, row_id),
+                    )
+            else:
+                icloud_queued += 1
+
+        if executor is not None:
+            executor.shutdown(wait=False)
+        if tmpdir is not None:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
     if not dry_run:
         db.conn.commit()
 
+    icloud_msg = ""
+    if icloud_resolved or icloud_queued:
+        icloud_msg = (
+            f", {icloud_resolved} iCloud resolved, {icloud_queued} iCloud queued (run again)"
+        )
     log.info(
         f"Done: {local_count} local derivatives, {flickr_url_count} Flickr URLs, "
-        f"{download_count} downloaded, {skipped} skipped (iCloud only)"
+        f"{download_count} downloaded{icloud_msg}, {skipped} skipped"
     )
 
 
