@@ -13,10 +13,19 @@ import logging
 log = logging.getLogger("blue-pearmain.album_pusher")
 
 
-def push_photo_to_albums(db, flickr, photo_id: int) -> int:
+def push_photo_to_albums(
+    db,
+    flickr,
+    photo_id: int,
+    known_sets: dict[str, str] | None = None,
+) -> int:
     """
     Push a photo to all Flickr photosets corresponding to its Apple Photos albums.
     Creates photosets that don't exist yet. Marks each pair pushed on success.
+
+    known_sets: optional {album_name: flickr_set_id} built from flickr.list_photosets()
+    at the start of a sync-albums run. When provided, albums with no flickr_set_id in
+    the DB adopt the existing Flickr set instead of creating a duplicate.
 
     Returns the number of photosets successfully updated.
     """
@@ -47,16 +56,27 @@ def push_photo_to_albums(db, flickr, photo_id: int) -> int:
 
         try:
             if not flickr_set_id:
-                # First photo in this album to be pushed — create the photoset
-                flickr_set_id = flickr.create_photoset(album_name, flickr_id)
-                db.set_album_flickr_set_id(album_id, flickr_set_id)
-                db.set_album_flickr_name(album_id, album_name)
-                log.info(
-                    "created photoset %r (id=%s) for album %r",
-                    album_name,
-                    flickr_set_id,
-                    album_name,
-                )
+                if known_sets and album_name in known_sets:
+                    # A Flickr photoset with this name already exists — adopt it
+                    # instead of creating a duplicate (prevents the orphan-set bug).
+                    flickr_set_id = known_sets[album_name]
+                    db.set_album_flickr_set_id(album_id, flickr_set_id)
+                    db.set_album_flickr_name(album_id, album_name)
+                    log.info(
+                        "adopted existing Flickr photoset %r (id=%s)",
+                        album_name,
+                        flickr_set_id,
+                    )
+                else:
+                    # First photo in this album to be pushed — create the photoset
+                    flickr_set_id = flickr.create_photoset(album_name, flickr_id)
+                    db.set_album_flickr_set_id(album_id, flickr_set_id)
+                    db.set_album_flickr_name(album_id, album_name)
+                    log.info(
+                        "created photoset %r (id=%s)",
+                        album_name,
+                        flickr_set_id,
+                    )
             else:
                 flickr.add_photo_to_photoset(flickr_set_id, flickr_id)
 

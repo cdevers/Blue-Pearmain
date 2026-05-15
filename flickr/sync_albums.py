@@ -3,9 +3,11 @@ flickr/sync_albums.py — batch sync Apple Photos album membership → Flickr ph
 
 Usage:
     python flickr/sync_albums.py --config config/config.yml [--dry-run] [--album NAME] [--limit N]
+    python flickr/sync_albums.py --config config/config.yml --coalesce [--dry-run]
 
 Or via bp CLI:
     bp sync-albums [--dry-run] [--album NAME] [--limit N]
+    bp sync-albums --coalesce [--dry-run]
 """
 
 from __future__ import annotations
@@ -32,6 +34,14 @@ def main() -> int:
     )
     parser.add_argument("--album", default=None, help="Sync only this album name")
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--coalesce",
+        action="store_true",
+        help=(
+            "Detect duplicate photosets (same title, overlapping photo dates) and merge "
+            "them into one. Use --dry-run to preview without making changes."
+        ),
+    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -64,6 +74,68 @@ def main() -> int:
     except Exception as e:
         log.error("Cannot initialise Flickr client: %s", e)
         return 2
+
+    # Fetch all Flickr photosets once — used for both "adopt before create" prevention
+    # and the optional coalesce step. Failure is non-fatal: prevention is skipped but
+    # the rest of the sync continues normally.
+    log.debug("fetching all Flickr photosets…")
+    try:
+        all_flickr_sets = flickr.list_photosets()
+    except Exception as e:
+        log.warning("could not fetch Flickr photoset list (adopt-before-create disabled): %s", e)
+        all_flickr_sets = []
+
+    # --coalesce: detect and merge duplicate photosets before pushing new photos
+    if args.coalesce:
+        from flickr.coalesce_sets import find_coalesce_candidates, coalesce_group
+
+        candidates = find_coalesce_candidates(db, flickr, all_flickr_sets)
+        if not candidates:
+            log.info("coalesce: no duplicate photosets found")
+        else:
+            total_photos_moved = 0
+            total_sets_deleted = 0
+            for group in candidates:
+                orphan_summary = ", ".join(
+                    f"{o['id']} ({o['photos']} photos)" for o in group["orphans"]
+                )
+                log.info(
+                    "coalesce candidate %r — canonical=%s (%s photos), orphans=[%s]%s",
+                    group["title"],
+                    group["canonical"]["id"],
+                    group["canonical"]["photos"],
+                    orphan_summary,
+                    "  [dry-run]" if args.dry_run else "",
+                )
+                result = coalesce_group(db, flickr, group, dry_run=args.dry_run)
+                total_photos_moved += result["photos_moved"]
+                total_sets_deleted += result["sets_deleted"]
+
+            if args.dry_run:
+                log.info(
+                    "coalesce: [dry-run] %d candidate group(s) found — "
+                    "re-run without --dry-run to execute",
+                    len(candidates),
+                )
+            else:
+                log.info(
+                    "coalesce: merged %d photo(s) across %d deleted orphan set(s)",
+                    total_photos_moved,
+                    total_sets_deleted,
+                )
+                # Refresh the set list after coalescing (canonical IDs may have changed)
+                all_flickr_sets = flickr.list_photosets()
+
+    # Build name→id map for "adopt before create" — picks the set with most photos
+    # when duplicates remain (e.g. after a partial coalesce run).
+    known_sets: dict[str, str] = {}
+    known_sets_photos: dict[str, int] = {}
+    for s in all_flickr_sets:
+        title = str(s["title"])
+        n = int(s["photos"])
+        if title not in known_sets or n > known_sets_photos[title]:
+            known_sets[title] = str(s["id"])
+            known_sets_photos[title] = n
 
     limit = args.limit or 500
     pending = db.get_pending_album_pushes(limit=limit)
@@ -101,7 +173,7 @@ def main() -> int:
             continue
 
         try:
-            n = push_photo_to_albums(db, flickr, photo_id)
+            n = push_photo_to_albums(db, flickr, photo_id, known_sets=known_sets)
             added += n
             if n == 0:
                 skipped += 1

@@ -426,6 +426,59 @@ class FlickrClient:
             http_method="POST",
         )
 
+    def list_photosets(self) -> list[dict[str, str | int]]:
+        """Return all photosets for the authenticated user.
+
+        Each entry: {"id": str, "title": str, "photos": int, "videos": int}.
+        """
+        result: list[dict[str, str | int]] = []
+        page = 1
+        while True:
+            data = self._call(
+                "flickr.photosets.getList",
+                {"per_page": 500, "page": page, "primary_photo_extras": ""},
+            )
+            batch = data["photosets"]["photoset"]
+            for s in batch:
+                result.append(
+                    {
+                        "id": s["id"],
+                        "title": s["title"]["_content"],
+                        "photos": int(s["photos"]),
+                        "videos": int(s.get("videos", 0)),
+                    }
+                )
+            if len(batch) < 500:
+                break
+            page += 1
+        return result
+
+    def get_photoset_photos(
+        self, photoset_id: str, extras: str = "date_taken"
+    ) -> list[dict[str, str]]:
+        """Return all photos in a photoset (paginated). Each entry has at least 'id'."""
+        result: list[dict[str, str]] = []
+        page = 1
+        while True:
+            data = self._call(
+                "flickr.photosets.getPhotos",
+                {"photoset_id": photoset_id, "extras": extras, "per_page": 500, "page": page},
+            )
+            batch = data["photoset"]["photo"]
+            result.extend(batch)
+            if len(batch) < 500:
+                break
+            page += 1
+        return result
+
+    def delete_photoset(self, photoset_id: str) -> None:
+        """Delete a Flickr photoset. The photos themselves remain on Flickr."""
+        self._call(
+            "flickr.photosets.delete",
+            {"photoset_id": photoset_id},
+            http_method="POST",
+        )
+
     # -----------------------------------------------------------------------
     # Collections (Flickr Pro only)
     # -----------------------------------------------------------------------

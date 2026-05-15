@@ -248,11 +248,12 @@ def cmd_ui(args):
 def cmd_sync_albums(args):
     from flickr.sync_albums import main
     _run(main, args, [
-        ("--config",  args.config),
-        ("--dry-run", args.dry_run),
-        ("--album",   args.album),
-        ("--limit",   str(args.limit) if args.limit is not None else None),
-        ("--verbose", args.verbose),
+        ("--config",   args.config),
+        ("--dry-run",  args.dry_run),
+        ("--album",    args.album),
+        ("--limit",    str(args.limit) if args.limit is not None else None),
+        ("--coalesce", getattr(args, "coalesce", False)),
+        ("--verbose",  args.verbose),
     ])
 
 
@@ -777,6 +778,11 @@ def main():
     p_sync.add_argument("--dry-run", action="store_true")
     p_sync.add_argument("--album",   default=None, help="Sync only this album name")
     p_sync.add_argument("--limit",   type=int, default=None)
+    p_sync.add_argument(
+        "--coalesce",
+        action="store_true",
+        help="Detect and merge duplicate Flickr photosets (same title, overlapping dates)",
+    )
     p_sync.add_argument("--verbose", action="store_true")
 
     # sync-album-collections
