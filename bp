@@ -456,7 +456,7 @@ def _inject_argv(args, pairs):
         if value is True:
             new_argv.append(flag)
         else:
-            new_argv.extend([flag, value])
+            new_argv.extend([flag, str(value)])
     sys.argv = new_argv
 
 

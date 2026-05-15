@@ -8509,5 +8509,42 @@ class TestSyncDeletedPhotos(unittest.TestCase):
         self.assertEqual(deleted, 0)
 
 
+# ---------------------------------------------------------------------------
+# bp CLI: _inject_argv
+# ---------------------------------------------------------------------------
+
+class TestInjectArgv(unittest.TestCase):
+    """_inject_argv must produce a sys.argv where every element is a string."""
+
+    def test_integer_value_is_stringified(self):
+        import sys
+        import argparse
+        import importlib.machinery
+        import importlib.util
+
+        # bp has no .py extension; load it via SourceFileLoader.
+        loader = importlib.machinery.SourceFileLoader(
+            "bp", str(Path(__file__).parent.parent / "bp")
+        )
+        spec = importlib.util.spec_from_loader("bp", loader)
+        bp_mod = importlib.util.module_from_spec(spec)
+        loader.exec_module(bp_mod)
+
+        original_argv = sys.argv[:]
+        try:
+            bp_mod._inject_argv(
+                argparse.Namespace(),
+                [("--icloud-limit", 50), ("--icloud", False)],
+            )
+            # Every element must be a string
+            for v in sys.argv:
+                self.assertIsInstance(v, str, f"sys.argv contains non-string: {v!r}")
+            self.assertIn("--icloud-limit", sys.argv)
+            self.assertIn("50", sys.argv)
+            self.assertNotIn("--icloud", sys.argv)  # False → omitted
+        finally:
+            sys.argv = original_argv
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
