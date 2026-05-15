@@ -98,7 +98,12 @@ class FlickrClient:
         Make a signed Flickr API call with exponential backoff on transient errors.
         Returns the parsed JSON response body. Raises FlickrError on persistent failure.
 
-        Retry schedule (seconds): 1, 2, 4, 8 — then give up.
+        Retry policy by error type:
+          HTTP 429: 8 retries, backoff capped at 60s (~3 min total).
+                    Honors Retry-After header when present (clamped to 0–120s).
+          Other transient errors (timeout, 5xx): max_retries attempts (default 4),
+                    backoff capped at 8s (~15s total).
+          Permanent errors (4xx, non-transient Flickr codes): raise immediately.
         """
         p = {
             "method":         method,
@@ -128,6 +133,16 @@ class FlickrClient:
 
         # Transient server errors — retry with backoff
         if resp.status_code in _TRANSIENT_HTTP_CODES:
+            if resp.status_code == 429:
+                # Honor Retry-After if present and valid; fall through to exponential on bad values
+                retry_after = resp.headers.get("Retry-After")
+                if retry_after:
+                    try:
+                        delay = float(retry_after)
+                        delay = max(0.0, min(delay, 120.0))  # clamp: negative→0, absurd→2 min cap
+                        time.sleep(delay)
+                    except ValueError:
+                        pass  # non-numeric header — exponential backoff will run via _retry
             return self._retry(method, params, http_method, max_retries, _attempt,
                                reason=f"HTTP {resp.status_code}")
 
@@ -154,16 +169,34 @@ class FlickrClient:
         attempt: int,
         reason: str,
     ) -> dict:
-        """Sleep with exponential backoff and retry, or raise if exhausted."""
+        """Sleep with exponential backoff and retry, or raise if exhausted.
+
+        Policy by error type:
+          HTTP 429 (rate limit): 8 retries, 60s backoff ceiling.
+              Outlasts Flickr's ~1-minute rate-limit window before giving up.
+          All other transient errors (timeout, 500, 502, etc.): caller's max_retries
+              (default 4), 8s backoff ceiling. Network hiccups typically recover quickly.
+        """
         photo_id = (params or {}).get("photo_id", "")
         context  = f" photo_id={photo_id}" if photo_id else ""
-        if attempt >= max_retries:
-            log.error(f"Flickr {method}{context} failed after {max_retries} retries ({reason})")
-            raise FlickrError(-1, f"Flickr call failed after {max_retries} retries ({reason})")
-        delay = 2 ** attempt + random.uniform(0, 0.5)  # 1-1.5, 2-2.5, 4-4.5, 8-8.5s
+
+        if "429" in reason:
+            effective_max_retries = 8
+            backoff_cap = 60
+        else:
+            effective_max_retries = max_retries  # caller's value, default 4
+            backoff_cap = 8
+
+        if attempt >= effective_max_retries:
+            log.error(
+                f"Flickr {method}{context} failed after {effective_max_retries} retries ({reason})"
+            )
+            raise FlickrError(-1, f"Flickr call failed after {effective_max_retries} retries ({reason})")
+
+        delay = min(2 ** attempt, backoff_cap) + random.uniform(0, 0.5)
         log.warning(
             f"Flickr {method}{context} failed ({reason}), "
-            f"retry {attempt + 1}/{max_retries} in {delay:.1f}s"
+            f"retry {attempt + 1}/{effective_max_retries} in {delay:.1f}s"
         )
         time.sleep(delay)
         return self._call(method, params, http_method, max_retries, attempt + 1)

@@ -1542,12 +1542,13 @@ class TestFlickrClientRetry(unittest.TestCase):
         c = FlickrClient("key", "secret", "token", "tsecret", rate_limit_delay=0)
         return c
 
-    def _mock_response(self, status_code=200, json_data=None):
+    def _mock_response(self, status_code=200, json_data=None, retry_after=None):
         from unittest.mock import MagicMock
         resp = MagicMock()
         resp.status_code = status_code
         resp.json.return_value = json_data or {"stat": "ok"}
         resp.raise_for_status = MagicMock()
+        resp.headers.get.return_value = retry_after  # None by default — no Retry-After header
         if status_code >= 400:
             import requests as req
             resp.raise_for_status.side_effect = req.HTTPError(response=resp)
@@ -1695,6 +1696,119 @@ class TestFlickrClientRetry(unittest.TestCase):
                 result = c._call("flickr.test.login")
         self.assertEqual(result["stat"], "ok")
         self.assertEqual(call_count, 2)  # retried once
+
+    def test_429_uses_8_retries_not_4(self):
+        """HTTP 429 must use 8 retries, not the default 4, to outlast Flickr's rate-limit window."""
+        from unittest.mock import patch
+        from flickr.flickr_client import FlickrError
+        c = self._make_client()
+        rate_limited = self._mock_response(429)
+        call_count = 0
+
+        def counting_get(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            return rate_limited
+
+        with patch.object(c._session, 'get', side_effect=counting_get):
+            with patch('time.sleep'):
+                with self.assertRaises(FlickrError):
+                    c._call("flickr.photosets.addPhoto")
+        # 1 initial attempt + 8 retries = 9 total calls
+        self.assertEqual(call_count, 9)
+
+    def test_timeout_still_uses_4_retries(self):
+        """Timeout errors must keep the existing 4-retry schedule, not the 429 extended schedule."""
+        from unittest.mock import patch
+        import requests as req
+        from flickr.flickr_client import FlickrError
+        c = self._make_client()
+        call_count = 0
+
+        def counting_get(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            raise req.Timeout()
+
+        with patch.object(c._session, 'get', side_effect=counting_get):
+            with patch('time.sleep'):
+                with self.assertRaises(FlickrError):
+                    c._call("flickr.test.login")
+        # 1 initial attempt + 4 retries = 5 total calls
+        self.assertEqual(call_count, 5)
+
+    def test_429_backoff_capped_at_60s(self):
+        """429 retry delays must be capped at 60s — attempt 6+ should not exceed 60s."""
+        from unittest.mock import patch
+        from flickr.flickr_client import FlickrError
+        c = self._make_client()
+        rate_limited = self._mock_response(429)
+        sleep_calls = []
+
+        with patch.object(c._session, 'get', return_value=rate_limited):
+            with patch('time.sleep', side_effect=lambda d: sleep_calls.append(d)):
+                with patch('flickr.flickr_client.random.uniform', return_value=0.0):
+                    with self.assertRaises(FlickrError):
+                        c._call("flickr.photosets.addPhoto")
+
+        # rate_limit_delay=0 in tests, so all non-zero sleeps are retry backoffs
+        retry_sleeps = [d for d in sleep_calls if d > 0]
+        self.assertTrue(all(d <= 60.5 for d in retry_sleeps),
+                        f"All retry delays must be <= 60.5s, got: {retry_sleeps}")
+        # Attempts 6 and 7 (2^6=64, 2^7=128) must be capped at exactly 60s (jitter=0)
+        self.assertEqual(retry_sleeps.count(60.0), 2,
+                         f"Expected two 60s delays (attempts 6 and 7), got: {retry_sleeps}")
+
+    def test_retry_after_header_honored(self):
+        """When Flickr sends Retry-After, sleep that duration instead of exponential backoff."""
+        from unittest.mock import patch
+        c = self._make_client()
+        rate_limited = self._mock_response(429, retry_after="30")
+        ok_resp = self._mock_response(200, {"stat": "ok"})
+        sleep_calls = []
+
+        with patch.object(c._session, 'get', side_effect=[rate_limited, ok_resp]):
+            with patch('time.sleep', side_effect=lambda d: sleep_calls.append(d)):
+                result = c._call("flickr.test.login")
+
+        self.assertEqual(result["stat"], "ok")
+        self.assertIn(30.0, sleep_calls, "Retry-After value of 30 must be used as sleep duration")
+
+    def test_retry_after_validation(self):
+        """Retry-After header: non-numeric ignored; negative clamped to 0; >120 capped at 120."""
+        from unittest.mock import patch
+        c = self._make_client()
+
+        # Non-numeric: should fall through to normal backoff (no sleep of "bad-value")
+        bad_header = self._mock_response(429, retry_after="bad-value")
+        ok_resp = self._mock_response(200, {"stat": "ok"})
+        sleep_calls = []
+        with patch.object(c._session, 'get', side_effect=[bad_header, ok_resp]):
+            with patch('time.sleep', side_effect=lambda d: sleep_calls.append(d)):
+                with patch('flickr.flickr_client.random.uniform', return_value=0.0):
+                    c._call("flickr.test.login")
+        # Should have slept 1.0s (2^0 + 0.0 jitter) from exponential backoff, not from the header
+        self.assertIn(1.0, sleep_calls)
+
+        # Absurd value: capped at 120
+        huge_header = self._mock_response(429, retry_after="86400")
+        ok_resp2 = self._mock_response(200, {"stat": "ok"})
+        sleep_calls2 = []
+        with patch.object(c._session, 'get', side_effect=[huge_header, ok_resp2]):
+            with patch('time.sleep', side_effect=lambda d: sleep_calls2.append(d)):
+                c._call("flickr.test.login")
+        self.assertIn(120.0, sleep_calls2, "Retry-After of 86400 must be capped at 120")
+        self.assertNotIn(86400.0, sleep_calls2)
+
+        # Negative value: clamped to 0
+        neg_header = self._mock_response(429, retry_after="-5")
+        ok_resp3 = self._mock_response(200, {"stat": "ok"})
+        sleep_calls3 = []
+        with patch.object(c._session, 'get', side_effect=[neg_header, ok_resp3]):
+            with patch('time.sleep', side_effect=lambda d: sleep_calls3.append(d)):
+                c._call("flickr.test.login")
+        self.assertIn(0.0, sleep_calls3, "Negative Retry-After must be clamped to 0")
+        self.assertNotIn(-5.0, sleep_calls3)
 
 
 # ---------------------------------------------------------------------------
