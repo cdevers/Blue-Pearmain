@@ -315,6 +315,7 @@ def cmd_install_daemons(args):
         "com.blue-pearmain.poller.plist",
         "com.blue-pearmain.pipeline.plist",
         "com.blue-pearmain.reviewer.plist",
+        "com.blue-pearmain.reconcile.plist",
     ]
     launch_agents = home / "Library" / "LaunchAgents"
     if not args.dry_run:
@@ -352,6 +353,7 @@ def cmd_uninstall_daemons(args):
         "com.blue-pearmain.poller.plist",
         "com.blue-pearmain.pipeline.plist",
         "com.blue-pearmain.reviewer.plist",
+        "com.blue-pearmain.reconcile.plist",
     ]
     launch_agents = home / "Library" / "LaunchAgents"
     any_found = False

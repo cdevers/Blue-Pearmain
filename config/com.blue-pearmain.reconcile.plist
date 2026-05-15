@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.blue-pearmain.reconcile.plist
+  launchd agent: weekly reconcile run (Sunday 2am)
+
+  Runs 'bp reconcile --fix' once a week to catch any DB/Flickr drift that
+  accumulated over the week. The pipeline plist already runs reconcile every
+  6h, so this is belt-and-suspenders for explicit weekly coverage.
+
+  Install with bp (substitutes __REPO__, __UV__, __HOME__ automatically):
+    bp install-daemons
+
+  Or install manually after substituting tokens:
+    launchctl bootstrap gui/$(id -u) \
+       ~/Library/LaunchAgents/com.blue-pearmain.reconcile.plist
+
+  Run now (without waiting for schedule):
+    launchctl start com.blue-pearmain.reconcile
+
+  Uninstall:
+    launchctl bootout gui/$(id -u) \
+       ~/Library/LaunchAgents/com.blue-pearmain.reconcile.plist
+    rm ~/Library/LaunchAgents/com.blue-pearmain.reconcile.plist
+
+  Logs:
+    tail -f __HOME__/Library/Logs/BluePearmain/reconcile.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.blue-pearmain.reconcile</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__UV__</string>
+        <string>run</string>
+        <string>python</string>
+        <string>__REPO__/bp</string>
+        <string>reconcile</string>
+        <string>--fix</string>
+        <string>--config</string>
+        <string>__REPO__/config/config.yml</string>
+    </array>
+
+    <!-- Run every Sunday at 2:00am -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>2</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- Stdout/stderr for debugging -->
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/BluePearmain/reconcile.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/BluePearmain/reconcile.log</string>
+
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+
+    <!-- Don't thrash if it keeps crashing -->
+    <key>ThrottleInterval</key>
+    <integer>300</integer>
+</dict>
+</plist>

@@ -3,7 +3,7 @@
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   com.blue-pearmain.poller.plist
-  launchd agent for Blue Pearmain Flickr poller
+  launchd agent: poll Flickr then generate thumbnails
 
   Install with bp (substitutes __REPO__, __UV__, __HOME__ automatically):
     bp install-daemons
@@ -30,13 +30,9 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>__UV__</string>
-        <string>run</string>
-        <string>python</string>
-        <string>__REPO__/bp</string>
-        <string>poll</string>
-        <string>--config</string>
-        <string>__REPO__/config/config.yml</string>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>__UV__ run python __REPO__/bp poll --config __REPO__/config/config.yml &amp;&amp; __UV__ run python __REPO__/bp thumbs --config __REPO__/config/config.yml</string>
     </array>
 
     <!-- Run every 60 minutes -->

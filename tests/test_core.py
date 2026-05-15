@@ -6069,7 +6069,7 @@ class TestInstallDaemons(unittest.TestCase):
             ):
                 bp.cmd_install_daemons(self._args())
             installed = list(fake_agents.glob("*.plist"))
-            self.assertEqual(len(installed), 3)
+            self.assertEqual(len(installed), 4)
             for f in installed:
                 text = f.read_text()
                 self.assertNotIn("__REPO__", text)
@@ -6097,6 +6097,38 @@ class TestInstallDaemons(unittest.TestCase):
         with unittest.mock.patch("shutil.which", return_value=None):
             with self.assertRaises(SystemExit):
                 bp.cmd_install_daemons(self._args())
+
+    def test_poller_plist_runs_thumbs_after_poll(self):
+        import tempfile
+        bp = self._import_bp()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_home = Path(tmpdir) / "home"
+            fake_agents = fake_home / "Library" / "LaunchAgents"
+            fake_agents.mkdir(parents=True)
+            with (
+                unittest.mock.patch("shutil.which", return_value="/fake/uv"),
+                unittest.mock.patch.object(Path, "home", return_value=fake_home),
+            ):
+                bp.cmd_install_daemons(self._args())
+            poller = fake_agents / "com.blue-pearmain.poller.plist"
+            self.assertIn("thumbs", poller.read_text())
+
+    def test_reconcile_plist_has_weekly_calendar_interval(self):
+        import tempfile
+        bp = self._import_bp()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_home = Path(tmpdir) / "home"
+            fake_agents = fake_home / "Library" / "LaunchAgents"
+            fake_agents.mkdir(parents=True)
+            with (
+                unittest.mock.patch("shutil.which", return_value="/fake/uv"),
+                unittest.mock.patch.object(Path, "home", return_value=fake_home),
+            ):
+                bp.cmd_install_daemons(self._args())
+            reconcile = fake_agents / "com.blue-pearmain.reconcile.plist"
+            text = reconcile.read_text()
+            self.assertIn("CalendarInterval", text)
+            self.assertIn("Weekday", text)
 
     def test_label_uses_new_bundle_id(self):
         """The installed plists use com.blue-pearmain.* labels, not the old com.cdevers.* form."""
