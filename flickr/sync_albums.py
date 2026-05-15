@@ -129,11 +129,14 @@ def _count_created_sets(db) -> int:
 
 def sync_album_titles(db, flickr, dry_run: bool = False) -> dict:
     """Push current album names to Flickr photoset titles for all pushed albums."""
+    from flickr.flickr_client import FlickrError, FLICKR_ERR_NOT_FOUND
+
     rows = db.conn.execute(
         "SELECT id, name, flickr_set_id FROM albums WHERE flickr_set_id IS NOT NULL"
     ).fetchall()
 
     updated = 0
+    cleared = 0
     for row in rows:
         if dry_run:
             log.info(
@@ -145,14 +148,36 @@ def sync_album_titles(db, flickr, dry_run: bool = False) -> dict:
             flickr.edit_photoset_meta(row["flickr_set_id"], row["name"])
             db.set_album_flickr_name(row["id"], row["name"])
             updated += 1
+        except FlickrError as e:
+            if e.code == FLICKR_ERR_NOT_FOUND:
+                # Photoset was deleted on Flickr — clear the stale ID and reset
+                # photo_albums so sync-albums recreates the photoset on the next run.
+                n = db.conn.execute(
+                    "UPDATE photo_albums SET flickr_pushed = 0 WHERE album_id = ?", (row["id"],)
+                ).rowcount
+                db.conn.execute(
+                    "UPDATE albums SET flickr_set_id = NULL, flickr_name = NULL WHERE id = ?",
+                    (row["id"],),
+                )
+                db.conn.commit()
+                log.warning(
+                    "photoset for album %r (id=%s) not found on Flickr — "
+                    "cleared stale ID, reset %d photo push(es); will recreate on next sync-albums",
+                    row["name"],
+                    row["flickr_set_id"],
+                    n,
+                )
+                cleared += 1
+            else:
+                log.warning("failed to update photoset title for album %r: %s", row["name"], e)
         except Exception as e:
             log.warning("failed to update photoset title for album %r: %s", row["name"], e)
 
     if dry_run:
         log.info("sync-album-titles: [dry-run] would-update=%d", updated)
     else:
-        log.info("sync-album-titles: updated=%d", updated)
-    return {"updated": updated}
+        log.info("sync-album-titles: updated=%d  cleared-stale=%d", updated, cleared)
+    return {"updated": updated, "cleared": cleared}
 
 
 if __name__ == "__main__":

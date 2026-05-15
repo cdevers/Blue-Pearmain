@@ -81,13 +81,32 @@ def push_photo_to_albums(db, flickr, photo_id: int) -> int:
                     album_name,
                 )
             elif e.code == FLICKR_ERR_NOT_FOUND:
-                # Photo deleted from Flickr — mark done to prevent retries
-                db.mark_album_pushed(photo_id, album_id)
-                log.warning(
-                    "flickr_id=%s not found on Flickr (deleted?) — skipping album push for %r",
-                    flickr_id,
-                    album_name,
-                )
+                if "photoset" in str(e).lower():
+                    # Photoset deleted on Flickr — clear stale ID and reset all photos
+                    # in the album so sync-albums recreates it on the next run.
+                    n = db.conn.execute(
+                        "UPDATE photo_albums SET flickr_pushed = 0 WHERE album_id = ?",
+                        (album_id,),
+                    ).rowcount
+                    db.conn.execute(
+                        "UPDATE albums SET flickr_set_id = NULL WHERE id = ?", (album_id,)
+                    )
+                    db.conn.commit()
+                    log.warning(
+                        "photoset %s for album %r not found — cleared stale ID, "
+                        "reset %d photo push(es); will recreate on next sync-albums",
+                        flickr_set_id,
+                        album_name,
+                        n,
+                    )
+                else:
+                    # Photo deleted from Flickr — mark done to prevent retries
+                    db.mark_album_pushed(photo_id, album_id)
+                    log.warning(
+                        "flickr_id=%s not found on Flickr (deleted?) — skipping album push for %r",
+                        flickr_id,
+                        album_name,
+                    )
             else:
                 log.error(
                     "album push failed photo_id=%s album_id=%s (%r): %s",
