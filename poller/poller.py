@@ -412,7 +412,7 @@ def poll(
     dry_run: bool = False,
     fetch_info: bool = False,
     max_thumbs_workers: int = 4,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, int]:
     """
     Poll Flickr from min_ts forward, paginating through all results.
     Returns (seen, new, updated) counts.
@@ -440,7 +440,7 @@ def poll(
 
         log.info(f"  Page {page}/{total_pages}: {len(items)} photos")
 
-        thumb_futures: list[concurrent.futures.Future] = []
+        thumb_futures: list[tuple[str, concurrent.futures.Future[str | None]]] = []
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_thumbs_workers) as executor:
             for photo in items:
@@ -566,10 +566,10 @@ def _validate_config(config: dict, config_path: str):
     errors = []
     for dotted_key, description in required.items():
         parts = dotted_key.split(".")
-        val = config
+        val: object = config
         try:
             for part in parts:
-                val = val[part]
+                val = val[part]  # type: ignore[index]
         except (KeyError, TypeError):
             val = None
         if not val:

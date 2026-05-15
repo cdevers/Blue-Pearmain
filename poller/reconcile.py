@@ -246,16 +246,16 @@ def main():
             elif result["status"] == "flickr_error":
                 error_count += 1
                 print(format_result_line(result, url, ts))
-                for e in result["errors"]:
-                    print(f"      error: {e}")
+                for msg in result["errors"]:
+                    print(f"      error: {msg}")
 
             else:
                 mismatch_count += 1
                 fix_ok_count   += len(result["fixes"])
                 fix_fail_count += len(result["errors"])
                 print(format_result_line(result, url, ts))
-                for e in result["errors"]:
-                    print(f"      error: {e}")
+                for msg in result["errors"]:
+                    print(f"      error: {msg}")
 
     except Exception as e:
         log.error(f"Reconcile interrupted: {e}")

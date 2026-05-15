@@ -288,7 +288,7 @@ def _classify_reupload_pair(
     linked_match_count  — how many linked records matched this orphan's key (>1 = Nikon collision)
     orphan_match_count  — how many orphans matched this linked record's key (>1 = Nikon collision)
     """
-    upload_session_gap = abs(int(linked.flickr_id) - int(orphan.flickr_id))
+    upload_session_gap = abs(int(linked.flickr_id or 0) - int(orphan.flickr_id or 0))
 
     # Any of these conditions forces reupload_uncertain regardless of resolution
     force_uncertain = (
@@ -359,7 +359,7 @@ def _classify_reupload_pair(
     })
 
     return DuplicateGroup(
-        match_key=_reupload_match_key(linked.flickr_id, orphan.flickr_id),
+        match_key=_reupload_match_key(linked.flickr_id or "", orphan.flickr_id or ""),
         group_type="reupload" if not force_uncertain else "reupload_uncertain",
         photos=[keeper, discard],
         keeper=keeper,
@@ -575,7 +575,7 @@ def _fetch_reupload_candidates(
         # Best candidate = largest upload_session_gap (strongest evidence of different session)
         best_linked = max(
             candidates,
-            key=lambda p: abs(int(orphan.flickr_id) - int(p.flickr_id)),
+            key=lambda p: abs(int(orphan.flickr_id or 0) - int(p.flickr_id or 0)),
         )
         if best_linked.id in used_ids:
             continue
@@ -967,7 +967,7 @@ def main() -> None:
         log.info("Loading Flickr client for deletions …")
         sys.path.insert(0, ".")
         from flickr.flickr_client import FlickrClient
-        flickr_client = FlickrClient(config)
+        flickr_client = FlickrClient.from_config(config)
         conn.execute("BEGIN")
         try:
             deleted = _delete_flickr_discards(conn, groups, flickr_client)

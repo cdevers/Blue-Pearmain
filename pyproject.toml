@@ -21,3 +21,13 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+explicit_package_bases = true
+
+[dependency-groups]
+dev = [
+    "mypy>=2.1.0",
+]

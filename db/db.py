@@ -672,6 +672,7 @@ class Database:
             (_now_iso(), source),
         )
         self.conn.commit()
+        assert cursor.lastrowid is not None
         return cursor.lastrowid
 
     def finish_sync_run(
@@ -936,6 +937,7 @@ class Database:
             (photo_id, field, flickr_value, photos_value, _now_iso()),
         )
         self.conn.commit()
+        assert cursor.lastrowid is not None
         return cursor.lastrowid
 
     def resolve_metadata_conflict(self, conflict_id: int, resolution: str) -> None:

@@ -605,7 +605,7 @@ def _read_photos_metadata(uuid: str, library_path: str, photos_db: object = None
             raise RuntimeError("osxphotos is not installed — cannot read Photos metadata")
         photos_db = osxphotos.PhotosDB(dbfile=library_path)
 
-    results = photos_db.photos(uuid=[uuid])
+    results = photos_db.photos(uuid=[uuid])  # type: ignore[attr-defined]
     if not results:
         return {"title": "", "description": "", "tags": []}
 

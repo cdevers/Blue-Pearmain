@@ -1,7 +1,7 @@
 VERSION := $(shell grep '^version' pyproject.toml | sed 's/.*= *"\(.*\)"/\1/')
 ARCHIVE := blue-pearmain-$(VERSION).tar.gz
 
-.PHONY: dist test clean install-hooks bump
+.PHONY: dist test lint clean install-hooks bump
 
 # Bump version, commit, and tag. Usage: make bump [part=minor|major]  (default: patch)
 bump:
@@ -27,6 +27,10 @@ dist:
 
 test:
 	python -m pytest tests/ -q
+
+lint:
+	uv run mypy db/ poller/ flickr/ reviewer/ bp
+	uv run ruff check .
 
 install-hooks:
 	@for hook in scripts/hooks/*; do \

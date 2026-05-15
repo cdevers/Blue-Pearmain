@@ -1157,10 +1157,10 @@ def _validate_config(config: dict, config_path: str):
     errors = []
     for dotted_key, description in required.items():
         parts = dotted_key.split(".")
-        val = config
+        val: object = config
         try:
             for part in parts:
-                val = val[part]
+                val = val[part]  # type: ignore[index]
         except (KeyError, TypeError):
             val = None
         if not val:

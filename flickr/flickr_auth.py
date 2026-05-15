@@ -46,7 +46,7 @@ def save_config(path: Path, config: dict):
     print(f"Config saved to {path}")
 
 
-def run_auth_flow(api_key: str, api_secret: str) -> tuple[str, str, str]:
+def run_auth_flow(api_key: str, api_secret: str) -> tuple[str, str, str, str]:
     """
     Run the full OAuth 1.0a three-legged flow.
     Returns (oauth_token, oauth_token_secret, user_nsid).
