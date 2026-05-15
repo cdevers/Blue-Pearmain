@@ -212,7 +212,7 @@ For ongoing use, all three services run as launchd agents — no terminal window
 | `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at, indexes on push state and tags, schema_migrations table |
 | `db/migrate_003_dimensions_and_dedup.py` | DB migration: adds width/height columns and duplicate_groups table |
 | `bp` | Unified command-line entry point |
-| `tests/` | Unit tests (666 tests) |
+| `tests/` | Unit tests (677 tests) |
 
 ## Review UI
 
@@ -490,12 +490,17 @@ python poller/deduplicator.py --config config/config.yml --write --confirm  # al
 Run the Flickr re-upload detector:
 
 ```bash
-bp deduplicator --flickr --dry-run           # preview — no changes written
-bp deduplicator --flickr --write             # write reupload groups to DB
-bp deduplicator --flickr --write --limit 10  # write only first 10 pairs (safe first run)
+bp deduplicator --flickr --dry-run                        # preview — no changes written
+bp deduplicator --flickr --write                          # write reupload groups to DB
+bp deduplicator --flickr --write --limit 10               # write only first 10 pairs (safe first run)
+bp dedup --flickr --include-approved                      # also detect duplicates among approved_public photos (catches orientation duplicates after manual review)
+bp dedup --flickr --include-approved --delete-discards    # print confirmed discards from approved_public groups (dry-run)
+bp dedup --flickr --include-approved --delete-discards --apply  # delete confirmed discards from Flickr and mark resolved in DB
 ```
 
 The `--confirm` flag is required to actually delete anything from Flickr for Snapbridge/device-upload groups. Without it, discard candidates are only marked in the local DB. `--confirm` is not supported with `--flickr` (Flickr deletion of reupload orphans is handled by a separate phase).
+
+`--include-approved` extends duplicate detection to `approved_public` records, which is useful when orientation duplicates (same shot, landscape vs. portrait crop) slip through after manual review. `--delete-discards` queries already-grouped discards and prints them (dry-run by default). Adding `--apply` deletes the confirmed discards from Flickr, marks `flickr_deleted=1`, and sets `resolved=1` in the DB. If Flickr returns error 1 (photo not found), the record is treated as already gone.
 
 **Review UI (`/duplicates`):** After running `--write`, open the Duplicates page in the review UI to inspect each group before taking any action. Groups are shown in three sections — Snapbridge, Device Upload, Uncertain — with side-by-side thumbnails, dimensions, capture date, and Flickr links for each photo.
 
@@ -528,7 +533,7 @@ The Flickr client uses exponential backoff with jitter; write operations update 
 python -m pytest tests/ -q
 ```
 
-666 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, and reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration). See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
+677 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, and reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration). See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
 
 ## License
 
