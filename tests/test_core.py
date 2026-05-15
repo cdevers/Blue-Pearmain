@@ -6172,6 +6172,7 @@ class TestUninstallDaemons(unittest.TestCase):
             "com.blue-pearmain.poller.plist",
             "com.blue-pearmain.pipeline.plist",
             "com.blue-pearmain.reviewer.plist",
+            "com.blue-pearmain.reconcile.plist",
         ]
         for name in plists:
             (fake_agents / name).write_text("<plist/>")
