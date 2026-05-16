@@ -372,7 +372,8 @@ def _push_to_flickr(client, flickr_id: str, db_record: dict, db, dry_run: bool) 
         try:
             client.add_tags(flickr_id, tags)
             db.conn.execute(
-                "UPDATE photos SET tags_pushed_flickr = 1 WHERE flickr_id = ?", (flickr_id,)
+                "UPDATE photos SET tags_pushed_flickr = 1, pushed_tags = ? WHERE flickr_id = ?",
+                (json.dumps(sorted(tags)), flickr_id),
             )
             log.info(f"  add_tags OK for {flickr_id} ({len(tags)} tags)")
         except FlickrError as e:

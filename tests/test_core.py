@@ -10108,5 +10108,74 @@ class TestMigrate016PushedTags(unittest.TestCase):
         run(self.db_path)  # must not raise
 
 
+# ---------------------------------------------------------------------------
+# GH #99 — Task 2: pushed_tags written on initial push (poller)
+# ---------------------------------------------------------------------------
+
+
+class TestPushedTagsOnInitialPush(unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import MagicMock
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-push-001",
+                "original_filename": "IMG_push.JPG",
+                "flickr_id": "flickr-push-001",
+                "proposed_tags": ["cat", "indoor"],
+                "privacy_state": "approved_public",
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+        self.mock_client = MagicMock()
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _row(self):
+        return dict(
+            self.db.conn.execute("SELECT * FROM photos WHERE id = ?", (self.photo_id,)).fetchone()
+        )
+
+    def _db_record(self):
+        import json
+
+        row = self._row()
+        row["proposed_tags"] = json.loads(row["proposed_tags"] or "[]")
+        return row
+
+    def test_pushed_tags_written_on_success(self):
+        import json
+        from poller.poller import _push_to_flickr
+
+        _push_to_flickr(
+            self.mock_client, "flickr-push-001", self._db_record(), self.db, dry_run=False
+        )
+        pushed = json.loads(self._row()["pushed_tags"])
+        self.assertEqual(pushed, ["cat", "indoor"])
+
+    def test_pushed_tags_null_when_add_tags_fails(self):
+        from flickr.flickr_client import FlickrError
+        from poller.poller import _push_to_flickr
+
+        self.mock_client.add_tags.side_effect = FlickrError(0, "api error")
+        _push_to_flickr(
+            self.mock_client, "flickr-push-001", self._db_record(), self.db, dry_run=False
+        )
+        self.assertIsNone(self._row()["pushed_tags"])
+
+    def test_pushed_tags_null_when_no_proposed_tags(self):
+        from poller.poller import _push_to_flickr
+
+        record = self._db_record()
+        record["proposed_tags"] = []
+        _push_to_flickr(self.mock_client, "flickr-push-001", record, self.db, dry_run=False)
+        self.assertIsNone(self._row()["pushed_tags"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
