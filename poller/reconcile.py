@@ -240,7 +240,7 @@ def main():
 
     # Fetch photos where we believe we've pushed something to Flickr
     rows = db.conn.execute(
-        """SELECT id, flickr_id, privacy_state, proposed_tags, pushed_tags,
+        """SELECT id, flickr_id, privacy_state, pushed_tags,
                   perms_pushed_flickr, tags_pushed_flickr
            FROM photos
            WHERE flickr_id IS NOT NULL
