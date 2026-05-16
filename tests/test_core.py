@@ -5060,7 +5060,9 @@ class TestReconcileLifecycle(unittest.TestCase):
         self.assertEqual(result["status"], "perm_mismatch")
         self.assertIn("perm", result["fixes"])
         self.assertEqual(result["errors"], [])
-        self.mock_client.set_permissions.assert_called_once_with("flickr-e2e-001", is_public=1)
+        self.mock_client.set_permissions.assert_called_once_with(
+            "flickr-e2e-001", is_public=1, is_friend=0, is_family=0
+        )
 
     def test_3_idempotent_second_run_is_clean(self):
         """After Flickr is consistent, a second reconcile pass returns ok."""
@@ -9743,6 +9745,309 @@ class TestInjectArgv(unittest.TestCase):
             self.assertNotIn("--icloud", sys.argv)  # False → omitted
         finally:
             sys.argv = original_argv
+
+
+# ---------------------------------------------------------------------------
+# GH #19 — Task 3: state_to_perms helper
+# ---------------------------------------------------------------------------
+
+
+class TestStateToPerms(unittest.TestCase):
+    """state_to_perms maps privacy_state to (is_public, is_friend, is_family) tuples."""
+
+    def _fn(self):
+        from flickr.flickr_client import state_to_perms
+
+        return state_to_perms
+
+    def test_approved_public_is_public(self):
+        self.assertEqual(self._fn()("approved_public"), (1, 0, 0))
+
+    def test_already_public_is_public(self):
+        self.assertEqual(self._fn()("already_public"), (1, 0, 0))
+
+    def test_approved_friends(self):
+        self.assertEqual(self._fn()("approved_friends"), (0, 1, 0))
+
+    def test_approved_family(self):
+        self.assertEqual(self._fn()("approved_family"), (0, 0, 1))
+
+    def test_approved_friends_family(self):
+        self.assertEqual(self._fn()("approved_friends_family"), (0, 1, 1))
+
+    def test_keep_private_is_all_zeros(self):
+        self.assertEqual(self._fn()("keep_private"), (0, 0, 0))
+
+    def test_unknown_state_is_all_zeros(self):
+        self.assertEqual(self._fn()("needs_review"), (0, 0, 0))
+        self.assertEqual(self._fn()(""), (0, 0, 0))
+
+
+# ---------------------------------------------------------------------------
+# GH #19 — Task 1: Migration 015 (widen privacy_state CHECK)
+# ---------------------------------------------------------------------------
+
+
+class TestMigrate015FriendsFamily(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db_path = str(Path(self._tmp.name) / "test.db")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _old_schema_db(self):
+        """Create a minimal DB with the old CHECK constraint (8 states, no friends/family)."""
+        import sqlite3
+
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("""
+            CREATE TABLE schema_migrations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                applied_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE photos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uuid TEXT UNIQUE,
+                privacy_state TEXT NOT NULL DEFAULT 'needs_review'
+                    CHECK(privacy_state IN (
+                        'auto_private', 'needs_review', 'candidate_public',
+                        'approved_public', 'keep_private', 'already_public',
+                        'skipped', 'duplicate_flickr'
+                    ))
+            )
+        """)
+        conn.commit()
+        return conn
+
+    def test_migration_allows_approved_friends_after_run(self):
+        from db.migrations.migrate_015_friends_family import run
+
+        conn = self._old_schema_db()
+        # Before migration: inserting approved_friends must fail
+        with self.assertRaises(Exception):
+            conn.execute(
+                "INSERT INTO photos (uuid, privacy_state) VALUES ('x', 'approved_friends')"
+            )
+        conn.close()
+        run(self.db_path)
+        import sqlite3 as _sqlite3
+
+        conn2 = _sqlite3.connect(self.db_path)
+        conn2.execute("INSERT INTO photos (uuid, privacy_state) VALUES ('y', 'approved_friends')")
+        conn2.commit()
+        row = conn2.execute("SELECT privacy_state FROM photos WHERE uuid='y'").fetchone()
+        self.assertEqual(row[0], "approved_friends")
+        conn2.close()
+
+    def test_migration_is_idempotent(self):
+        from db.db import Database
+        from db.migrations.migrate_015_friends_family import run
+
+        db = Database(Path(self.db_path))
+        db.close()
+        run(self.db_path)
+        run(self.db_path)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# GH #19 — Task 2: record_review new decisions
+# ---------------------------------------------------------------------------
+
+
+class TestRecordReviewFriendsFamily(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-frn-test",
+                "original_filename": "IMG_frn.JPG",
+                "privacy_state": "needs_review",
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _state(self) -> str:
+        return self.db.conn.execute(
+            "SELECT privacy_state FROM photos WHERE id = ?", (self.photo_id,)
+        ).fetchone()[0]
+
+    def test_make_friends_maps_to_approved_friends(self):
+        self.db.record_review(self.photo_id, "make_friends")
+        self.assertEqual(self._state(), "approved_friends")
+
+    def test_make_family_maps_to_approved_family(self):
+        self.db.record_review(self.photo_id, "make_family")
+        self.assertEqual(self._state(), "approved_family")
+
+    def test_make_friends_family_maps_to_approved_friends_family(self):
+        self.db.record_review(self.photo_id, "make_friends_family")
+        self.assertEqual(self._state(), "approved_friends_family")
+
+
+# ---------------------------------------------------------------------------
+# GH #19 — Task 5: reconcile friends/family perm check
+# ---------------------------------------------------------------------------
+
+
+class TestReconcileFriendsFamily(unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import MagicMock
+
+        self._tmp = tempfile.mkdtemp()
+        self.db = Database(Path(self._tmp) / "test.db")
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-frn-rec",
+                "original_filename": "IMG_frn_rec.JPG",
+                "privacy_state": "approved_friends",
+                "flickr_id": "flickr-frn-rec",
+                "perms_pushed_flickr": 1,
+                "tags_pushed_flickr": 0,
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+        self.mock_client = MagicMock()
+
+    def tearDown(self):
+        self.db.close()
+        import shutil
+
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _photo_row(self):
+        return dict(
+            self.db.conn.execute("SELECT * FROM photos WHERE id = ?", (self.photo_id,)).fetchone()
+        )
+
+    def _flickr_info(self, ispublic=0, isfriend=0, isfamily=0):
+        return {
+            "photo": {
+                "visibility": {
+                    "ispublic": ispublic,
+                    "isfriend": isfriend,
+                    "isfamily": isfamily,
+                },
+                "tags": {"tag": []},
+            }
+        }
+
+    def test_friends_mismatch_detected_when_flickr_is_private(self):
+        from poller.reconcile import check_photo
+
+        self.mock_client.get_photo_info.return_value = self._flickr_info(
+            ispublic=0, isfriend=0, isfamily=0
+        )
+        result = check_photo(self.mock_client, self._photo_row(), fix=False, verbose=False)
+        self.assertEqual(result["status"], "perm_mismatch")
+        self.assertEqual(result["perm_expected"], "friends")
+        self.assertEqual(result["perm_actual"], "private")
+
+    def test_friends_fix_calls_set_permissions_with_friend_flag(self):
+        from poller.reconcile import check_photo
+
+        self.mock_client.get_photo_info.return_value = self._flickr_info(
+            ispublic=0, isfriend=0, isfamily=0
+        )
+        result = check_photo(self.mock_client, self._photo_row(), fix=True, verbose=False)
+        self.assertEqual(result["status"], "perm_mismatch")
+        self.assertIn("perm", result["fixes"])
+        self.mock_client.set_permissions.assert_called_once_with(
+            "flickr-frn-rec", is_public=0, is_friend=1, is_family=0
+        )
+
+    def test_friends_ok_when_flickr_matches(self):
+        from poller.reconcile import check_photo
+
+        self.mock_client.get_photo_info.return_value = self._flickr_info(
+            ispublic=0, isfriend=1, isfamily=0
+        )
+        result = check_photo(self.mock_client, self._photo_row(), fix=False, verbose=False)
+        self.assertEqual(result["status"], "ok")
+        self.mock_client.set_permissions.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# GH #19 — Task 6: scanner preserves approved_friends/family states
+# ---------------------------------------------------------------------------
+
+
+class TestScannerFriendsStates(unittest.TestCase):
+    """build_enriched_row must not reclassify photos in approved_friends/family states."""
+
+    _PHOTO_ROW = {
+        "uuid": "uuid-scan-frn",
+        "original_filename": "IMG_scan_frn.JPG",
+        "date_taken": "2026-01-01T12:00:00",
+        "apple_labels": [],
+        "apple_persons": ["Alice"],
+        "apple_named_faces": 1,
+        "apple_unknown_faces": 0,
+        "apple_human_count": 1,
+        "_is_screenshot": False,
+        "_is_selfie": False,
+        "_is_live": False,
+    }
+
+    def _existing(self, state: str) -> dict:
+        return {
+            "id": 1,
+            "flickr_id": "flickr-scan-001",
+            "uuid": None,
+            "privacy_state": state,
+            "privacy_reason": "human reviewed",
+            "proposed_tags": [],
+            "latitude": None,
+            "longitude": None,
+            "place_ishome": 0,
+        }
+
+    def test_approved_friends_is_protected_from_overwrite(self):
+        from poller.scanner import build_enriched_row
+
+        enriched = build_enriched_row(
+            self._PHOTO_ROW, self._existing("approved_friends"), [], "Alice"
+        )
+        self.assertEqual(
+            enriched["privacy_state"],
+            "approved_friends",
+            "approved_friends must not be overwritten by scanner",
+        )
+
+    def test_approved_family_is_protected_from_overwrite(self):
+        from poller.scanner import build_enriched_row
+
+        enriched = build_enriched_row(
+            self._PHOTO_ROW, self._existing("approved_family"), [], "Alice"
+        )
+        self.assertEqual(
+            enriched["privacy_state"],
+            "approved_family",
+            "approved_family must not be overwritten by scanner",
+        )
+
+    def test_approved_friends_family_is_protected_from_overwrite(self):
+        from poller.scanner import build_enriched_row
+
+        enriched = build_enriched_row(
+            self._PHOTO_ROW, self._existing("approved_friends_family"), [], "Alice"
+        )
+        self.assertEqual(
+            enriched["privacy_state"],
+            "approved_friends_family",
+            "approved_friends_family must not be overwritten by scanner",
+        )
 
 
 if __name__ == "__main__":

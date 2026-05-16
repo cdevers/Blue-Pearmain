@@ -144,6 +144,13 @@
 .btn-pub  { background: var(--green); color: #fff; }
 .btn-prv  { background: var(--red);   color: #fff; }
 .btn-skp  { background: #2a2a2a;      color: var(--muted); }
+.btn-more { background: #1e1e2e;      color: var(--muted); font-size: 11px; padding: 2px 6px; }
+.photo-card .actions-restricted { display: none; gap: 4px; margin-top: 4px; }
+.photo-card.restricted-open .actions-restricted { display: flex; }
+.photo-card.restricted-open .btn-more { opacity: 0.5; }
+.btn-frn  { background: #3b3b5c; color: #c0c0ff; }
+.btn-fam  { background: #3b4a3b; color: #a0d0a0; }
+.btn-faf  { background: #4a3b5c; color: #d0a0ff; }
 
 .pagination {
   display: flex;
@@ -182,6 +189,15 @@
     </option>
     <option value="keep_private" data-label="Kept private" {% if state_filter=='keep_private' %}selected{% endif %}>
       Kept private ({{ stats.by_state.get('keep_private',0) }})
+    </option>
+    <option value="approved_friends" data-label="Friends only" {% if state_filter=='approved_friends' %}selected{% endif %}>
+      Friends only ({{ stats.by_state.get('approved_friends',0) }})
+    </option>
+    <option value="approved_family" data-label="Family only" {% if state_filter=='approved_family' %}selected{% endif %}>
+      Family only ({{ stats.by_state.get('approved_family',0) }})
+    </option>
+    <option value="approved_friends_family" data-label="Friends &amp; Family" {% if state_filter=='approved_friends_family' %}selected{% endif %}>
+      Friends &amp; Family ({{ stats.by_state.get('approved_friends_family',0) }})
     </option>
     <option value="auto_private" data-label="Auto private" {% if state_filter=='auto_private' %}selected{% endif %}>
       Auto private ({{ stats.by_state.get('auto_private',0) }})
@@ -290,6 +306,24 @@
                 onclick="event.stopPropagation(); quickDecide({{ photo.id }}, 'skip', this.closest('.photo-card'))">
           →
         </button>
+        <button class="btn-more"
+                onclick="event.stopPropagation(); this.closest('.photo-card').classList.toggle('restricted-open')">
+          ▸ More
+        </button>
+      </div>
+      <div class="actions-restricted">
+        <button class="btn-frn"
+                onclick="event.stopPropagation(); quickDecide({{ photo.id }}, 'make_friends', this.closest('.photo-card'))">
+          👥 Friends
+        </button>
+        <button class="btn-fam"
+                onclick="event.stopPropagation(); quickDecide({{ photo.id }}, 'make_family', this.closest('.photo-card'))">
+          👨‍👩‍👧 Family
+        </button>
+        <button class="btn-faf"
+                onclick="event.stopPropagation(); quickDecide({{ photo.id }}, 'make_friends_family', this.closest('.photo-card'))">
+          F+F
+        </button>
       </div>
     </div>
   </div>
@@ -329,10 +363,13 @@ let   _reviewTotal = {{ total }};
 const _stateMap = {{ stats.by_state | tojson }};
 Object.assign(_stateMap, {{ stats.screenshot_counts | tojson }});
 const _decisionToState = {
-  make_public:    'approved_public',
-  confirm_public: 'already_public',
-  keep_private:   'keep_private',
-  skip:           'skipped',
+  make_public:          'approved_public',
+  confirm_public:       'already_public',
+  keep_private:         'keep_private',
+  skip:                 'skipped',
+  make_friends:         'approved_friends',
+  make_family:          'approved_family',
+  make_friends_family:  'approved_friends_family',
 };
 
 function _updateReviewCounts(decision) {
@@ -372,12 +409,15 @@ function openDetail(id) {
 }
 
 async function quickDecide(id, decision, card) {
-  // Push tags for both make_public and keep_private; skip gets nothing
+  // Push tags for make_public/keep_private/friends/family; skip gets nothing
   const ok = await decide(id, decision, decision !== 'skip');
   if (!ok) return;
   if (decision === 'make_public') card.classList.add('decided-pub');
   else if (decision === 'keep_private') card.classList.add('decided-prv');
+  else if (['make_friends','make_family','make_friends_family'].includes(decision))
+    card.classList.add('decided-pub');
   else card.classList.add('decided-skp');
+  card.classList.remove('restricted-open');
 
   // Update live counts in toolbar
   _updateReviewCounts(decision);

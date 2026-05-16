@@ -1,4 +1,4 @@
-# Plan: GH #19 — Friends / Family / Friends & Family visibility
+# Plan: GH #19 — Friends / Family / Friends & Family visibility ✓ done 2026-05-16
 
 ## Context
 

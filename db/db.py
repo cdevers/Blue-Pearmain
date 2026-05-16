@@ -518,6 +518,9 @@ class Database:
             "confirm_public": "already_public",
             "keep_private": "keep_private",
             "skip": "skipped",
+            "make_friends": "approved_friends",
+            "make_family": "approved_family",
+            "make_friends_family": "approved_friends_family",
         }
         new_state = state_map.get(decision, "skipped")
         self.conn.execute(

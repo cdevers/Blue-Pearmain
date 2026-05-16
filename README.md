@@ -212,7 +212,7 @@ For ongoing use, all three services run as launchd agents — no terminal window
 | `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at, indexes on push state and tags, schema_migrations table |
 | `db/migrate_003_dimensions_and_dedup.py` | DB migration: adds width/height columns and duplicate_groups table |
 | `bp` | Unified command-line entry point |
-| `tests/` | Unit tests (711 tests) |
+| `tests/` | Unit tests (743 tests) |
 
 ## Review UI
 
@@ -250,6 +250,7 @@ The grid view shows photos with proposed tags and action buttons. Keyboard short
 | `P` | Make public + push to Flickr (+ photosets if in any album) |
 | `A` | Approve (don't push yet) |
 | `X` | Keep private + push tags (+ photosets if in any album) |
+| `F` | Friends only + push to Flickr |
 | `Space` | Skip |
 | `D` | Focus title/description editor |
 | `T` | Focus tag editor |
@@ -299,7 +300,9 @@ For photos matched to Apple Photos (uuid present), a **Photos ↗** overlay appe
 
 **Mobile (iPhone/iPad):** The review grid works on iOS Safari. After reviewing a batch, tap **Reload ↺** at the bottom to refresh the queue in place — this avoids a pagination issue where "Next" would skip photos that had just been decided. The single-photo detail view is currently desktop-optimised; the sidebar overlaps the image on narrow screens, so the grid view is recommended on mobile.
 
-Both public and private decisions push tags to Flickr — tags are useful for search even on private photos. Both decisions also push album membership to Flickr photosets — if a photo belongs to an Apple Photos album, it is added to the corresponding Flickr photoset regardless of its privacy setting. Flickr pushes happen in a background thread, so the UI response is immediate; push errors are logged but do not block the review flow.
+All review decisions push tags to Flickr — tags are useful for search even on private photos. All decisions also push album membership to Flickr photosets — if a photo belongs to an Apple Photos album, it is added to the corresponding Flickr photoset regardless of its privacy setting. Flickr pushes happen in a background thread, so the UI response is immediate; push errors are logged but do not block the review flow.
+
+**Friends / Family visibility:** The review grid has a "▸ More" toggle on each card that reveals three additional buttons — Friends only, Family only, and Friends & Family — for photos that should be shared with a restricted audience rather than made fully public or kept fully private. The detail view has the same three buttons plus the `F` keyboard shortcut for Friends only. These decisions push the appropriate Flickr permission flags (`is_friend`/`is_family`) via the same background push path used for public photos. `bp reconcile` also checks and repairs friend/family permission drift.
 
 **Album membership** is displayed on the single-photo detail page, under an "Albums → Photosets" section that shows each album name and whether it has been synced to Flickr. The review grid shows a small album badge (e.g. "📁 2 albums") on any photo that belongs to at least one album. Action button labels on the detail page include "+ photosets" to make this push explicit.
 
@@ -533,7 +536,7 @@ The Flickr client uses exponential backoff with jitter; write operations update 
 python -m pytest tests/ -q
 ```
 
-711 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, and reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration). See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
+743 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, Friends/Family visibility, and reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration). See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
 
 ## License
 

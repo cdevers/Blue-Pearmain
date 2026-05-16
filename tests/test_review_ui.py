@@ -1108,3 +1108,76 @@ class TestMDnsRegistration:
 
         with patch.dict("sys.modules", {"zeroconf": None}):
             app_module._start_mdns("0.0.0.0", 5173, "192.168.1.100")
+
+
+# ---------------------------------------------------------------------------
+# TestFriendsVisibilityUI — GH #19 (Tasks 3 & 7)
+# ---------------------------------------------------------------------------
+
+
+class TestFriendsVisibilityUI:
+    """review.html, photo.html, and base.html must contain Friends/Family UI elements."""
+
+    @pytest.fixture(scope="class")
+    def review_src(self):
+        return (Path(__file__).parent.parent / "reviewer" / "templates" / "review.html").read_text()
+
+    @pytest.fixture(scope="class")
+    def photo_src(self):
+        return (Path(__file__).parent.parent / "reviewer" / "templates" / "photo.html").read_text()
+
+    @pytest.fixture(scope="class")
+    def base_src(self):
+        return (Path(__file__).parent.parent / "reviewer" / "templates" / "base.html").read_text()
+
+    # --- review.html: state filter dropdown ---
+
+    def test_review_filter_has_approved_friends(self, review_src):
+        assert 'value="approved_friends"' in review_src
+
+    def test_review_filter_has_approved_family(self, review_src):
+        assert 'value="approved_family"' in review_src
+
+    def test_review_filter_has_approved_friends_family(self, review_src):
+        assert 'value="approved_friends_family"' in review_src
+
+    # --- review.html: JS _decisionToState map ---
+
+    def test_review_js_map_has_make_friends(self, review_src):
+        assert "make_friends" in review_src
+
+    def test_review_js_map_has_make_family(self, review_src):
+        assert "make_family" in review_src
+
+    def test_review_js_map_has_make_friends_family(self, review_src):
+        assert "make_friends_family" in review_src
+
+    # --- review.html: More toggle and restricted buttons ---
+
+    def test_review_card_has_more_toggle(self, review_src):
+        assert "btn-more" in review_src
+
+    def test_review_card_has_friends_button(self, review_src):
+        assert "'make_friends'" in review_src
+
+    def test_review_card_has_family_button(self, review_src):
+        assert "'make_family'" in review_src
+
+    def test_review_card_has_friends_family_button(self, review_src):
+        assert "'make_friends_family'" in review_src
+
+    # --- photo.html: decision buttons ---
+
+    def test_photo_detail_has_make_friends(self, photo_src):
+        assert "make_friends" in photo_src
+
+    def test_photo_detail_has_make_family(self, photo_src):
+        assert "make_family" in photo_src
+
+    def test_photo_detail_has_make_friends_family(self, photo_src):
+        assert "make_friends_family" in photo_src
+
+    # --- base.html: toast messages ---
+
+    def test_base_toast_handles_make_friends(self, base_src):
+        assert "make_friends" in base_src

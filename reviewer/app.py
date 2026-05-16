@@ -27,6 +27,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from typing import Any
 
 import yaml
 from flask import (
@@ -651,7 +652,15 @@ def api_decide():
     push = data.get("push", False)
     tags = data.get("tags")  # optional updated tag list
 
-    if not photo_id or decision not in ("make_public", "confirm_public", "keep_private", "skip"):
+    if not photo_id or decision not in (
+        "make_public",
+        "confirm_public",
+        "keep_private",
+        "skip",
+        "make_friends",
+        "make_family",
+        "make_friends_family",
+    ):
         return jsonify({"ok": False, "error": "invalid params"}), 400
 
     photo = db().get_photo(photo_id)
@@ -695,9 +704,22 @@ def api_decide():
                     perms_ok = False
                     tags_ok = False
 
-                    if _decision == "make_public":
+                    from flickr.flickr_client import state_to_perms
+
+                    _target_state = (
+                        db()
+                        .conn.execute("SELECT privacy_state FROM photos WHERE id = ?", (_photo_id,))
+                        .fetchone()["privacy_state"]
+                    )
+                    _is_pub, _is_frn, _is_fam = state_to_perms(_target_state)
+                    if _is_pub or _is_frn or _is_fam:
                         try:
-                            c.set_permissions(_flickr_id, is_public=1)
+                            c.set_permissions(
+                                _flickr_id,
+                                is_public=_is_pub,
+                                is_friend=_is_frn,
+                                is_family=_is_fam,
+                            )
                             perms_ok = True
                         except FlickrError as e:
                             log.error(
@@ -737,11 +759,9 @@ def api_decide():
                     if perms_ok or tags_ok:
                         db().conn.commit()
 
-                    # Album push: for make_public, wait until perms are confirmed;
+                    # Album push: wait until perms are confirmed for any visibility push;
                     # for keep_private, push immediately (private photos still belong in photosets).
-                    do_album_push = (
-                        perms_ok and _decision == "make_public"
-                    ) or _decision == "keep_private"
+                    do_album_push = perms_ok or _decision == "keep_private"
                     if do_album_push:
                         try:
                             from flickr.album_pusher import push_photo_to_albums
@@ -1030,9 +1050,12 @@ def api_push_approved():
     rows = (
         db()
         .conn.execute(
-            """SELECT id, flickr_id, proposed_tags
+            """SELECT id, flickr_id, proposed_tags, privacy_state
            FROM photos
-           WHERE privacy_state = 'approved_public'
+           WHERE privacy_state IN (
+               'approved_public', 'approved_friends',
+               'approved_family', 'approved_friends_family'
+           )
              AND flickr_id IS NOT NULL
              AND perms_pushed_flickr = 0"""
         )
@@ -1042,6 +1065,8 @@ def api_push_approved():
     if not rows:
         return jsonify({"ok": True, "pushed": 0, "failed": 0, "message": "Nothing to push"})
 
+    from flickr.flickr_client import state_to_perms
+
     pushed = failed = skipped = 0
     for row in rows:
         photo_id = row["id"]
@@ -1050,8 +1075,9 @@ def api_push_approved():
         errors = []
         not_found = False
 
+        is_pub, is_frn, is_fam = state_to_perms(row["privacy_state"])
         try:
-            c.set_permissions(flickr_id, is_public=1)
+            c.set_permissions(flickr_id, is_public=is_pub, is_friend=is_frn, is_family=is_fam)
             db().conn.execute("UPDATE photos SET perms_pushed_flickr = 1 WHERE id = ?", (photo_id,))
         except FlickrError as e:
             if e.code == FLICKR_ERR_NOT_FOUND:
@@ -1276,7 +1302,7 @@ def _validate_config(config: dict, config_path: str):
     errors = []
     for dotted_key, description in required.items():
         parts = dotted_key.split(".")
-        val: object = config
+        val: Any = config
         try:
             for part in parts:
                 val = val[part]  # type: ignore[index]

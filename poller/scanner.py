@@ -428,6 +428,9 @@ def build_enriched_row(
         "approved_public",
         "keep_private",
         "already_public",
+        "approved_friends",
+        "approved_family",
+        "approved_friends_family",
     ):
         merged["privacy_state"] = "auto_private"
         merged["privacy_reason"] = "screenshot"
@@ -441,6 +444,9 @@ def build_enriched_row(
         "keep_private",
         "already_public",
         "skipped",
+        "approved_friends",
+        "approved_family",
+        "approved_friends_family",
     ):
         state, reason = classify(merged, zones, self_name=self_name)
         merged["privacy_state"] = state
