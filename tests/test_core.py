@@ -10324,5 +10324,131 @@ class TestReconcilePushedTags(unittest.TestCase):
         self.assertEqual(pushed, ["cat"])
 
 
+# ---------------------------------------------------------------------------
+# GH #99 — Task 5: bp tag-writeback subcommand
+# ---------------------------------------------------------------------------
+
+
+class TestTagWriteback(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        import json
+
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-wb-001",
+                "original_filename": "IMG_wb.JPG",
+                "flickr_id": "flickr-wb-001",
+                "tags_pushed_flickr": 1,
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+        self.db.conn.execute(
+            "UPDATE photos SET pushed_tags = ? WHERE id = ?",
+            (json.dumps(["cat", "indoor"]), self.photo_id),
+        )
+        self.db.conn.commit()
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _run(self, **kwargs):
+        from poller.tag_writeback import writeback
+
+        return writeback(self.db, **kwargs)
+
+    def test_keywords_merged_additively(self):
+        from unittest.mock import MagicMock, patch
+
+        mock_photo = MagicMock()
+        mock_photo.keywords = ["existing"]
+
+        mock_lib = MagicMock()
+        mock_lib.photos.return_value = iter([mock_photo])
+
+        with patch("poller.tag_writeback.photoscript") as mock_ps:
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            result = self._run(dry_run=False, limit=500)
+
+        self.assertEqual(result["updated"], 1)
+        self.assertEqual(result["ok"], 0)
+        self.assertEqual(sorted(mock_photo.keywords), ["cat", "existing", "indoor"])
+
+    def test_already_has_all_keywords_is_ok(self):
+        from unittest.mock import MagicMock, patch
+
+        mock_photo = MagicMock()
+        mock_photo.keywords = ["cat", "indoor"]
+
+        mock_lib = MagicMock()
+        mock_lib.photos.return_value = iter([mock_photo])
+
+        with patch("poller.tag_writeback.photoscript") as mock_ps:
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            result = self._run(dry_run=False, limit=500)
+
+        self.assertEqual(result["ok"], 1)
+        self.assertEqual(result["updated"], 0)
+
+    def test_dry_run_does_not_write_keywords(self):
+        from unittest.mock import MagicMock, patch
+
+        mock_photo = MagicMock()
+        mock_photo.keywords = ["existing"]
+
+        mock_lib = MagicMock()
+        mock_lib.photos.return_value = iter([mock_photo])
+
+        with patch("poller.tag_writeback.photoscript") as mock_ps:
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            result = self._run(dry_run=True, limit=500)
+
+        # In dry_run mode, updated count is reported but keywords setter NOT called
+        self.assertEqual(result["updated"], 1)
+        # keywords must still be the original list (not written)
+        self.assertEqual(mock_photo.keywords, ["existing"])
+
+    def test_not_found_uuid_counted(self):
+        from unittest.mock import MagicMock, patch
+
+        mock_lib = MagicMock()
+        mock_lib.photos.return_value = iter([])  # empty — photo not in Photos.app
+
+        with patch("poller.tag_writeback.photoscript") as mock_ps:
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            result = self._run(dry_run=False, limit=500)
+
+        self.assertEqual(result["not_found"], 1)
+
+    def test_photos_without_uuid_skipped(self):
+        """Flickr-only records (uuid=NULL) must not appear in writeback query."""
+        from unittest.mock import MagicMock, patch
+
+        # Insert a Flickr-only record (no uuid)
+        self.db.conn.execute("""
+            INSERT INTO photos (uuid, original_filename, flickr_id, privacy_state,
+                                tags_pushed_flickr, pushed_tags, apple_persons, apple_labels)
+            VALUES (NULL, 'flickr_only.JPG', 'flickr-only-001', 'already_public',
+                    1, '["cat"]', '[]', '[]')
+        """)
+        self.db.conn.commit()
+
+        mock_photo = MagicMock()
+        mock_photo.keywords = []
+
+        mock_lib = MagicMock()
+        mock_lib.photos.return_value = iter([mock_photo])
+
+        with patch("poller.tag_writeback.photoscript") as mock_ps:
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            result = self._run(dry_run=False, limit=500)
+
+        # Only 1 photo processed (the one with uuid), not the Flickr-only record
+        self.assertEqual(result["updated"] + result["ok"], 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
