@@ -414,7 +414,8 @@ def build_enriched_row(
     is_screenshot = photo_row.get("_is_screenshot", False)
     merged["is_screenshot"] = 1 if is_screenshot else 0
     if is_screenshot and existing.get("privacy_state") not in (
-        "approved_public", "keep_private", "already_public"
+        "approved_public", "keep_private", "already_public",
+        "approved_friends", "approved_family", "approved_friends_family",
     ):
         merged["privacy_state"]  = "auto_private"
         merged["privacy_reason"] = "screenshot"
@@ -424,7 +425,8 @@ def build_enriched_row(
     # Re-run privacy classifier with enriched data
     # Only update state if not already human-reviewed
     if existing.get("privacy_state") not in (
-        "approved_public", "keep_private", "already_public", "skipped"
+        "approved_public", "keep_private", "already_public", "skipped",
+        "approved_friends", "approved_family", "approved_friends_family",
     ):
         state, reason = classify(merged, zones, self_name=self_name)
         merged["privacy_state"]  = state
@@ -446,7 +448,7 @@ def scan(
     since: datetime | None,
     dry_run: bool,
     self_name: str,
-) -> tuple[int, int, int, int]:
+) -> tuple[int, int, int, int, int]:
     """
     Scan the Photos library and sync to DB.
     Returns (scanned, matched, enriched, inserted) counts.

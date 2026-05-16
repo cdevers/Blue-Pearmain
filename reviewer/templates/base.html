@@ -227,7 +227,14 @@ async function decide(photoId, decision, push=false, tags=null) {
   });
   const data = await r.json();
   if (data.ok) {
-    toast(decision === 'make_public' ? '✓ Approved' : decision === 'keep_private' ? '✗ Kept private' : '→ Skipped');
+    toast(
+      decision === 'make_public'          ? '✓ Approved' :
+      decision === 'keep_private'         ? '✗ Kept private' :
+      decision === 'make_friends'         ? '👥 Friends only' :
+      decision === 'make_family'          ? '👨‍👩‍👧 Family only' :
+      decision === 'make_friends_family'  ? '👥 Friends & Family' :
+                                            '→ Skipped'
+    );
   } else {
     toast('Error: ' + (data.error || JSON.stringify(data.errors)), 'err');
   }

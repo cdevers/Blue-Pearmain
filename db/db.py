@@ -462,10 +462,13 @@ class Database:
     def record_review(self, photo_id: int, decision: str, notes: str = ""):
         """Record a human review decision and update privacy state accordingly."""
         state_map = {
-            "make_public":    "approved_public",
-            "confirm_public": "already_public",
-            "keep_private":   "keep_private",
-            "skip":           "skipped",
+            "make_public":         "approved_public",
+            "confirm_public":      "already_public",
+            "keep_private":        "keep_private",
+            "skip":                "skipped",
+            "make_friends":        "approved_friends",
+            "make_family":         "approved_family",
+            "make_friends_family": "approved_friends_family",
         }
         new_state = state_map.get(decision, "skipped")
         self.conn.execute(
@@ -672,6 +675,7 @@ class Database:
             (_now_iso(), source),
         )
         self.conn.commit()
+        assert cursor.lastrowid is not None
         return cursor.lastrowid
 
     def finish_sync_run(
@@ -932,6 +936,7 @@ class Database:
             (photo_id, field, flickr_value, photos_value, _now_iso()),
         )
         self.conn.commit()
+        assert cursor.lastrowid is not None
         return cursor.lastrowid
 
     def resolve_metadata_conflict(self, conflict_id: int, resolution: str) -> None:

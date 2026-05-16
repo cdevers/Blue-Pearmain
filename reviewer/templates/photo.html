@@ -89,6 +89,9 @@
   gap: 8px;
 }
 .action-row .btn { justify-content: center; font-size: 13px; }
+.btn-friends        { background: #3b3b5c; color: #c0c0ff; }
+.btn-family         { background: #3b4a3b; color: #a0d0a0; }
+.btn-friends-family { background: #4a3b5c; color: #d0a0ff; }
 
 .caption-text {
   font-size: 12px;
@@ -251,6 +254,15 @@
       </button>
       <button class="btn btn-skip" onclick="doDecide('skip', false)">
         <span class="key-hint">Space</span> Skip for now
+      </button>
+      <button class="btn btn-friends" onclick="doDecide('make_friends', true)">
+        <span class="key-hint">F</span> Friends only + push
+      </button>
+      <button class="btn btn-family" onclick="doDecide('make_family', true)">
+        Family only + push
+      </button>
+      <button class="btn btn-friends-family" onclick="doDecide('make_friends_family', true)">
+        Friends &amp; Family + push
       </button>
       <button id="undoBtn" class="btn" onclick="doUndo()" title="Undo last decision (Z)"
               style="display:none; color:#f5a623; border-color:#7a5c00">
@@ -581,6 +593,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'p' || e.key === 'P') doDecide('make_public', true);
   else if (e.key === 'a' || e.key === 'A') doDecide('make_public', false);
   else if (e.key === 'x' || e.key === 'X') doDecide('keep_private', true);
+  else if (e.key === 'f' || e.key === 'F') doDecide('make_friends', true);
   else if (e.key === ' ') { e.preventDefault(); doDecide('skip', false); }
   else if (e.key === 'd' || e.key === 'D') {
     e.preventDefault();

@@ -60,18 +60,22 @@ CREATE TABLE IF NOT EXISTS photos (
 
     -- Privacy state machine
     -- Possible values:
-    --   'auto_private'     : geofence or home flag triggered, skip review queue
-    --   'needs_review'     : has people signals, awaiting human decision
-    --   'candidate_public' : no people signals, tags proposed, awaiting confirmation
-    --   'approved_public'  : human said yes, push to Flickr
-    --   'keep_private'     : human said no
-    --   'already_public'   : was already public on Flickr before this tool existed
-    --   'skipped'          : human deferred decision
+    --   'auto_private'              : geofence or home flag triggered, skip review queue
+    --   'needs_review'              : has people signals, awaiting human decision
+    --   'candidate_public'          : no people signals, tags proposed, awaiting confirmation
+    --   'approved_public'           : human said yes, push to Flickr as public
+    --   'keep_private'              : human said no
+    --   'already_public'            : was already public on Flickr before this tool existed
+    --   'skipped'                   : human deferred decision
+    --   'approved_friends'          : push to Flickr as Friends-only
+    --   'approved_family'           : push to Flickr as Family-only
+    --   'approved_friends_family'   : push to Flickr as Friends & Family
     privacy_state           TEXT NOT NULL DEFAULT 'needs_review'
                                 CHECK(privacy_state IN (
                                     'auto_private', 'needs_review', 'candidate_public',
                                     'approved_public', 'keep_private', 'already_public',
-                                    'skipped', 'duplicate_flickr'
+                                    'skipped', 'duplicate_flickr',
+                                    'approved_friends', 'approved_family', 'approved_friends_family'
                                 )),
     privacy_reason          TEXT,                   -- human-readable explanation of how state was set
 

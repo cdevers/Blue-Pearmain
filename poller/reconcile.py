@@ -90,18 +90,34 @@ def check_photo(
 
     # --- Permission check ---
     if db_perms_pushed:
-        visibility   = photo.get("visibility", {})
-        flickr_pub   = int(visibility.get("ispublic", 0))
-        expected_pub = 1 if db_state in ("approved_public", "already_public") else 0
+        from flickr.flickr_client import state_to_perms
+        visibility = photo.get("visibility", {})
+        actual = (
+            int(visibility.get("ispublic", 0)),
+            int(visibility.get("isfriend", 0)),
+            int(visibility.get("isfamily", 0)),
+        )
+        expected = state_to_perms(db_state)
 
-        result["perm_expected"] = "public" if expected_pub else "private"
-        result["perm_actual"]   = "public" if flickr_pub  else "private"
+        _PERM_LABEL: dict[tuple[int, int, int], str] = {
+            (1, 0, 0): "public",
+            (0, 1, 0): "friends",
+            (0, 0, 1): "family",
+            (0, 1, 1): "friends+family",
+        }
+        result["perm_expected"] = _PERM_LABEL.get(expected, "private")
+        result["perm_actual"]   = _PERM_LABEL.get(actual, "private")
 
-        if flickr_pub != expected_pub:
+        if actual != expected:
             result["status"] = "perm_mismatch"
             if fix:
                 try:
-                    client.set_permissions(flickr_id, is_public=expected_pub)
+                    client.set_permissions(
+                        flickr_id,
+                        is_public=expected[0],
+                        is_friend=expected[1],
+                        is_family=expected[2],
+                    )
                     result["fixes"].append("perm")
                 except FlickrError as e:
                     result["errors"].append(f"perm fix failed: {e}")
@@ -246,16 +262,16 @@ def main():
             elif result["status"] == "flickr_error":
                 error_count += 1
                 print(format_result_line(result, url, ts))
-                for e in result["errors"]:
-                    print(f"      error: {e}")
+                for err in result["errors"]:
+                    print(f"      error: {err}")
 
             else:
                 mismatch_count += 1
                 fix_ok_count   += len(result["fixes"])
                 fix_fail_count += len(result["errors"])
                 print(format_result_line(result, url, ts))
-                for e in result["errors"]:
-                    print(f"      error: {e}")
+                for err in result["errors"]:
+                    print(f"      error: {err}")
 
     except Exception as e:
         log.error(f"Reconcile interrupted: {e}")
