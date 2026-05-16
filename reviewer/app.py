@@ -1094,7 +1094,8 @@ def api_push_approved():
             try:
                 c.add_tags(flickr_id, tags)
                 db().conn.execute(
-                    "UPDATE photos SET tags_pushed_flickr = 1 WHERE id = ?", (photo_id,)
+                    "UPDATE photos SET tags_pushed_flickr = 1, pushed_tags = ? WHERE id = ?",
+                    (json.dumps(sorted(tags)), photo_id),
                 )
             except FlickrError as e:
                 errors.append(str(e))
