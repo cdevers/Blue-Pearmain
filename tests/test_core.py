@@ -10050,5 +10050,63 @@ class TestScannerFriendsStates(unittest.TestCase):
         )
 
 
+# ---------------------------------------------------------------------------
+# GH #99 — Task 1: Migration 016 (add pushed_tags column)
+# ---------------------------------------------------------------------------
+
+
+class TestMigrate016PushedTags(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db_path = str(Path(self._tmp.name) / "test.db")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _cols(self):
+        import sqlite3
+
+        conn = sqlite3.connect(self.db_path)
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(photos)").fetchall()]
+        conn.close()
+        return cols
+
+    def test_column_exists_after_run(self):
+        from db.migrations.migrate_016_pushed_tags import run
+
+        db = Database(Path(self.db_path))
+        db.close()
+        run(self.db_path)
+        self.assertIn("pushed_tags", self._cols())
+
+    def test_existing_rows_get_null(self):
+        import sqlite3
+        from db.migrations.migrate_016_pushed_tags import run
+
+        db = Database(Path(self.db_path))
+        photo_id = db.upsert_photo(
+            {
+                "uuid": "uuid-mig016",
+                "original_filename": "IMG_mig016.JPG",
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+        db.close()
+        run(self.db_path)
+        conn = sqlite3.connect(self.db_path)
+        row = conn.execute("SELECT pushed_tags FROM photos WHERE id = ?", (photo_id,)).fetchone()
+        conn.close()
+        self.assertIsNone(row[0])
+
+    def test_migration_is_idempotent(self):
+        from db.migrations.migrate_016_pushed_tags import run
+
+        db = Database(Path(self.db_path))
+        db.close()
+        run(self.db_path)
+        run(self.db_path)  # must not raise
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
