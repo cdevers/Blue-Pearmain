@@ -13,8 +13,6 @@ Usage:
     python db/migrations/migrate_016_pushed_tags.py --config config/config.yml
 """
 
-from __future__ import annotations
-
 import argparse
 import sqlite3
 from datetime import datetime, timezone
@@ -50,7 +48,7 @@ def run(db_path: str, dry_run: bool = False) -> None:
     if not dry_run:
         conn.execute("ALTER TABLE photos ADD COLUMN pushed_tags TEXT")
         conn.execute(
-            "INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)",
+            "INSERT OR IGNORE INTO schema_migrations (name, applied_at) VALUES (?, ?)",
             (MIGRATION_NAME, datetime.now(timezone.utc).isoformat()),
         )
         conn.commit()
@@ -61,7 +59,7 @@ def run(db_path: str, dry_run: bool = False) -> None:
     conn.close()
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description="Migration 016 — add pushed_tags column")
     parser.add_argument("--config", default="config/config.yml")
     parser.add_argument("--dry-run", action="store_true")
@@ -72,7 +70,10 @@ def main() -> None:
 
     db_path = str(Path(config["database"]["path"]).expanduser())
     run(db_path, dry_run=args.dry_run)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    sys.exit(main())
