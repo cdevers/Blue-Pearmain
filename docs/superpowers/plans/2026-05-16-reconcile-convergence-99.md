@@ -6,6 +6,11 @@
 
 **Architecture:** A new `pushed_tags TEXT` column records the cumulative set of tags ever successfully pushed to Flickr. Reconcile checks `pushed_tags ⊆ actual_flickr_tags` instead of `proposed_tags ⊆ actual_flickr_tags`. Since `pushed_tags` only grows on confirmed push success (never on scan), the living-document drift that caused non-convergence is eliminated. A new `bp tag-writeback` subcommand reads `pushed_tags` from the DB and writes them back to Photos.app via `photoscript`.
 
+**Critical invariants:**
+1. **Flickr API call first, DB ledger update second — never the reverse.** A crash between the two is safe: reconcile will detect the gap and re-push. Updating the DB first would falsely mark tags as pushed on API failure.
+2. **`pushed_tags` only grows on confirmed Flickr success.** It is never written on scan, never written on API failure, and never contains an empty JSON array `'[]'` — use NULL for "nothing pushed yet."
+3. **`pushed_tags` represents desired state.** Reconcile will re-add any tag in `pushed_tags` that disappears from Flickr (including manual user deletions). This is intentional, not a bug.
+
 **Tech Stack:** Python, SQLite (ALTER TABLE ADD COLUMN), `photoscript` (AppleScript bridge for Photos.app keyword write), `unittest.mock` for testing.
 
 ---
@@ -100,6 +105,8 @@ python -m pytest tests/test_core.py::TestMigrate016PushedTags -q
 Expected: `ERROR` — `ModuleNotFoundError: No module named 'db.migrations.migrate_016_pushed_tags'`
 
 - [ ] **Step 3: Create the migration**
+
+**NULL vs `'[]'` note:** NULL means "BP has never confirmed pushing any tags." An empty JSON array `'[]'` must never be written to `pushed_tags` — the write sites all guard against empty tag lists. This keeps `WHERE pushed_tags IS NOT NULL` unambiguous as the predicate for "has a ledger entry."
 
 Create `db/migrations/migrate_016_pushed_tags.py`:
 
@@ -298,6 +305,8 @@ python -m pytest tests/test_core.py::TestPushedTagsOnInitialPush -q
 Expected: `FAILED` — `AssertionError: None != ['cat', 'indoor']` (pushed_tags not written yet)
 
 - [ ] **Step 3: Update `_push_to_flickr` in `poller/poller.py`**
+
+**Transactional ordering:** the `add_tags()` API call must succeed before the DB write. The existing code already does this correctly — do not reorder.
 
 Find the `add_tags` success block (around line 373) and replace:
 
@@ -507,6 +516,8 @@ python -m pytest tests/test_core.py::TestReconcilePushedTags -q
 Expected: `FAILED` — `TypeError: check_photo() takes 4 positional arguments but 5 were given` (db param not yet added)
 
 - [ ] **Step 3: Update `check_photo` in `poller/reconcile.py`**
+
+**Transactional ordering:** `client.add_tags()` must succeed before `db.conn.execute()` updates `pushed_tags`. The DB write is inside the `try` block after the API call — keep it that way.
 
 Replace the entire `check_photo` function signature and tag-check block:
 
@@ -747,6 +758,8 @@ python -m pytest tests/test_review_ui.py::TestApiPushApprovedWritesPushedTags -q
 Expected: `FAILED` — `AssertionError` (pushed_tags is NULL)
 
 - [ ] **Step 3: Update `api_push_approved` in `reviewer/app.py`**
+
+**Transactional ordering:** `c.add_tags()` must succeed before the DB write. The existing code already follows this — do not reorder.
 
 Find the `add_tags` success block (around line 1093) and replace:
 
@@ -1004,16 +1017,20 @@ def writeback(
     dry_run: bool = False,
     limit: int = 500,
     verbose: bool = False,
+    source: str = "pushed-tags",
 ) -> dict:
     """
-    Merge pushed_tags into Photos.app keywords for all Photos-linked records.
+    Merge tag candidates into Photos.app keywords for all Photos-linked records.
 
+    source: "pushed-tags" (default) reads from pushed_tags column;
+            "proposed-tags" reads from proposed_tags column.
     Returns a dict: {ok, updated, not_found, errors}
     """
+    tag_col = "pushed_tags" if source == "pushed-tags" else "proposed_tags"
     rows = db.conn.execute(
-        """SELECT id, uuid, pushed_tags
+        f"""SELECT id, uuid, {tag_col} AS tag_source
            FROM photos
-           WHERE pushed_tags IS NOT NULL
+           WHERE {tag_col} IS NOT NULL
              AND uuid IS NOT NULL
            LIMIT ?""",
         (limit,),
@@ -1028,7 +1045,7 @@ def writeback(
 
     for row in rows:
         uuid = row["uuid"]
-        pushed = json.loads(row["pushed_tags"] or "[]")
+        pushed = json.loads(row["tag_source"] or "[]")
         if not pushed:
             continue
 
@@ -1078,6 +1095,12 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Report without writing")
     parser.add_argument("--limit", type=int, default=500)
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument(
+        "--source",
+        choices=["pushed-tags", "proposed-tags"],
+        default="pushed-tags",
+        help="Which DB field to read tag candidates from (default: pushed-tags)",
+    )
     args = parser.parse_args()
 
     setup_logging(args.verbose)
@@ -1093,7 +1116,7 @@ def main() -> int:
     db = Database(db_path)
 
     log.info("Blue Pearmain tag write-back starting")
-    totals = writeback(db, dry_run=args.dry_run, limit=args.limit, verbose=args.verbose)
+    totals = writeback(db, dry_run=args.dry_run, limit=args.limit, verbose=args.verbose, source=args.source)
 
     print()
     print(
@@ -1166,6 +1189,7 @@ def cmd_tag_writeback(args):
         ("--dry-run",  args.dry_run),
         ("--limit",    str(args.limit) if args.limit is not None else None),
         ("--verbose",  args.verbose),
+        ("--source",   args.source),
     ])
 ```
 
@@ -1182,6 +1206,11 @@ After the `# reconcile` subparser block (around line 730), add:
     p_twb.add_argument("--dry-run",  action="store_true")
     p_twb.add_argument("--limit",    type=int, default=None)
     p_twb.add_argument("--verbose",  action="store_true")
+    p_twb.add_argument(
+        "--source",
+        choices=["pushed-tags", "proposed-tags"],
+        default="pushed-tags",
+    )
 ```
 
 - [ ] **Step 3: Add to dispatch dict in `bp`**
