@@ -48,6 +48,7 @@ def setup_logging(verbose: bool) -> None:
 def check_photo(
     client: FlickrClient,
     row: dict,
+    db: Database,
     fix: bool,
     verbose: bool,
 ) -> dict:
@@ -60,12 +61,6 @@ def check_photo(
     db_state = row["privacy_state"]
     db_perms_pushed = row["perms_pushed_flickr"]
     db_tags_pushed = row["tags_pushed_flickr"]
-    db_tags = row["proposed_tags"] or []
-    if isinstance(db_tags, str):
-        try:
-            db_tags = json.loads(db_tags)
-        except (json.JSONDecodeError, TypeError, ValueError):
-            db_tags = []
 
     result = {
         "flickr_id": flickr_id,
@@ -123,15 +118,22 @@ def check_photo(
                 except FlickrError as e:
                     result["errors"].append(f"perm fix failed: {e}")
 
-    # --- Tag check ---
-    if db_tags_pushed and db_tags:
+    # --- Tag check: only verify what was confirmed pushed (pushed_tags ledger) ---
+    db_pushed: list[str] = row.get("pushed_tags") or []
+    if isinstance(db_pushed, str):
+        try:
+            db_pushed = json.loads(db_pushed)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            db_pushed = []
+
+    if db_tags_pushed and db_pushed:
         tags_container = photo.get("tags", {})
-        flickr_tags = set()
+        flickr_tags: set[str] = set()
         if isinstance(tags_container, dict):
             for t in tags_container.get("tag", []):
                 flickr_tags.add(t.get("raw", "").lower().strip())
 
-        expected_tags = set(t.lower().strip() for t in db_tags if t.strip())
+        expected_tags = set(t.lower().strip() for t in db_pushed if t.strip())
         missing = sorted(expected_tags - flickr_tags)
 
         result["tags_expected"] = sorted(expected_tags)
@@ -145,6 +147,12 @@ def check_photo(
                 try:
                     client.add_tags(flickr_id, missing)
                     result["fixes"].append("tags")
+                    new_pushed = sorted(set(db_pushed) | set(missing))
+                    db.conn.execute(
+                        "UPDATE photos SET pushed_tags = ? WHERE id = ?",
+                        (json.dumps(new_pushed), result["row_id"]),
+                    )
+                    db.conn.commit()
                 except FlickrError as e:
                     result["errors"].append(f"tag fix failed: {e}")
 
@@ -232,7 +240,7 @@ def main():
 
     # Fetch photos where we believe we've pushed something to Flickr
     rows = db.conn.execute(
-        """SELECT id, flickr_id, privacy_state, proposed_tags,
+        """SELECT id, flickr_id, privacy_state, proposed_tags, pushed_tags,
                   perms_pushed_flickr, tags_pushed_flickr
            FROM photos
            WHERE flickr_id IS NOT NULL
@@ -257,7 +265,7 @@ def main():
 
     try:
         for row in rows:
-            result = check_photo(client, dict(row), fix=args.fix, verbose=args.verbose)
+            result = check_photo(client, dict(row), db, fix=args.fix, verbose=args.verbose)
             ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
             fid = result["flickr_id"]
             url = f"https://www.flickr.com/photos/{flickr_username}/{fid}"
