@@ -235,6 +235,17 @@ def cmd_reconcile(args):
     ])
 
 
+def cmd_tag_writeback(args):
+    from poller.tag_writeback import main
+    _run(main, args, [
+        ("--config",  args.config),
+        ("--dry-run", args.dry_run),
+        ("--limit",   str(args.limit) if args.limit is not None else None),
+        ("--verbose", args.verbose),
+        ("--source",  args.source),
+    ])
+
+
 def cmd_ui(args):
     from reviewer.app import main
     _run(main, args, [
@@ -729,6 +740,20 @@ def main():
     p_rec.add_argument("--apply-proposals",  action="store_true", help="Apply pending non-conflict metadata proposals")
     p_rec.add_argument("--limit",            type=int, default=None)
 
+    # tag-writeback
+    p_twb = sub.add_parser(
+        "tag-writeback",
+        help="Write pushed Flickr tags back to Photos.app as explicit keywords",
+    )
+    p_twb.add_argument("--dry-run",  action="store_true")
+    p_twb.add_argument("--limit",    type=int, default=None)
+    p_twb.add_argument("--verbose",  action="store_true")
+    p_twb.add_argument(
+        "--source",
+        choices=["pushed-tags", "proposed-tags"],
+        default="pushed-tags",
+    )
+
     # ui
     p_ui = sub.add_parser("ui", help="Start the review UI")
     p_ui.add_argument("--port",  type=int, default=5173)
@@ -885,6 +910,7 @@ def main():
         "scan":          cmd_scan,
         "thumbs":        cmd_thumbs,
         "reconcile":     cmd_reconcile,
+        "tag-writeback": cmd_tag_writeback,
         "ui":            cmd_ui,
         "sync-albums":             cmd_sync_albums,
         "sync-album-collections":  cmd_sync_album_collections,

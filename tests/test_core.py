@@ -5038,7 +5038,7 @@ class TestReconcileLifecycle(unittest.TestCase):
             is_public=0, tags=["nature", "landscape"]
         )
 
-        result = check_photo(self.mock_client, self._photo_row(), fix=False, verbose=False)
+        result = check_photo(self.mock_client, self._photo_row(), self.db, fix=False, verbose=False)
 
         self.assertEqual(result["status"], "perm_mismatch")
         self.assertEqual(result["perm_expected"], "public")
@@ -5055,7 +5055,7 @@ class TestReconcileLifecycle(unittest.TestCase):
             is_public=0, tags=["nature", "landscape"]
         )
 
-        result = check_photo(self.mock_client, self._photo_row(), fix=True, verbose=False)
+        result = check_photo(self.mock_client, self._photo_row(), self.db, fix=True, verbose=False)
 
         self.assertEqual(result["status"], "perm_mismatch")
         self.assertIn("perm", result["fixes"])
@@ -5072,7 +5072,7 @@ class TestReconcileLifecycle(unittest.TestCase):
             is_public=1, tags=["nature", "landscape"]
         )
 
-        result = check_photo(self.mock_client, self._photo_row(), fix=True, verbose=False)
+        result = check_photo(self.mock_client, self._photo_row(), self.db, fix=True, verbose=False)
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["fixes"], [])
@@ -5081,14 +5081,22 @@ class TestReconcileLifecycle(unittest.TestCase):
 
     def test_4_tag_mismatch_detected_and_fixed(self):
         """Tags on Flickr are missing some expected tags → tag_mismatch, then fixed."""
+        import json
         from poller.reconcile import check_photo
+
+        # Seed pushed_tags so the tag check is active
+        self.db.conn.execute(
+            "UPDATE photos SET pushed_tags = ? WHERE id = ?",
+            (json.dumps(["nature", "landscape"]), self.photo_id),
+        )
+        self.db.conn.commit()
 
         # Flickr has only "nature"; "landscape" is missing
         self.mock_client.get_photo_info.return_value = self._flickr_info_response(
             is_public=1, tags=["nature"]
         )
 
-        result = check_photo(self.mock_client, self._photo_row(), fix=True, verbose=False)
+        result = check_photo(self.mock_client, self._photo_row(), self.db, fix=True, verbose=False)
 
         self.assertEqual(result["status"], "tag_mismatch")
         self.assertIn("tags", result["fixes"])
@@ -5101,7 +5109,7 @@ class TestReconcileLifecycle(unittest.TestCase):
 
         self.mock_client.get_photo_info.side_effect = FlickrError(500, "Server Error")
 
-        result = check_photo(self.mock_client, self._photo_row(), fix=False, verbose=False)
+        result = check_photo(self.mock_client, self._photo_row(), self.db, fix=False, verbose=False)
 
         self.assertEqual(result["status"], "flickr_error")
         self.assertTrue(len(result["errors"]) > 0)
@@ -9949,7 +9957,7 @@ class TestReconcileFriendsFamily(unittest.TestCase):
         self.mock_client.get_photo_info.return_value = self._flickr_info(
             ispublic=0, isfriend=0, isfamily=0
         )
-        result = check_photo(self.mock_client, self._photo_row(), fix=False, verbose=False)
+        result = check_photo(self.mock_client, self._photo_row(), self.db, fix=False, verbose=False)
         self.assertEqual(result["status"], "perm_mismatch")
         self.assertEqual(result["perm_expected"], "friends")
         self.assertEqual(result["perm_actual"], "private")
@@ -9960,7 +9968,7 @@ class TestReconcileFriendsFamily(unittest.TestCase):
         self.mock_client.get_photo_info.return_value = self._flickr_info(
             ispublic=0, isfriend=0, isfamily=0
         )
-        result = check_photo(self.mock_client, self._photo_row(), fix=True, verbose=False)
+        result = check_photo(self.mock_client, self._photo_row(), self.db, fix=True, verbose=False)
         self.assertEqual(result["status"], "perm_mismatch")
         self.assertIn("perm", result["fixes"])
         self.mock_client.set_permissions.assert_called_once_with(
@@ -9973,7 +9981,7 @@ class TestReconcileFriendsFamily(unittest.TestCase):
         self.mock_client.get_photo_info.return_value = self._flickr_info(
             ispublic=0, isfriend=1, isfamily=0
         )
-        result = check_photo(self.mock_client, self._photo_row(), fix=False, verbose=False)
+        result = check_photo(self.mock_client, self._photo_row(), self.db, fix=False, verbose=False)
         self.assertEqual(result["status"], "ok")
         self.mock_client.set_permissions.assert_not_called()
 
@@ -10048,6 +10056,398 @@ class TestScannerFriendsStates(unittest.TestCase):
             "approved_friends_family",
             "approved_friends_family must not be overwritten by scanner",
         )
+
+
+# ---------------------------------------------------------------------------
+# GH #99 — Task 1: Migration 016 (add pushed_tags column)
+# ---------------------------------------------------------------------------
+
+
+class TestMigrate016PushedTags(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db_path = str(Path(self._tmp.name) / "test.db")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _cols(self):
+        import sqlite3
+
+        conn = sqlite3.connect(self.db_path)
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(photos)").fetchall()]
+        conn.close()
+        return cols
+
+    def test_column_exists_after_run(self):
+        from db.migrations.migrate_016_pushed_tags import run
+
+        db = Database(Path(self.db_path))
+        db.close()
+        run(self.db_path)
+        self.assertIn("pushed_tags", self._cols())
+
+    def test_existing_rows_get_null(self):
+        import sqlite3
+        from db.migrations.migrate_016_pushed_tags import run
+
+        db = Database(Path(self.db_path))
+        photo_id = db.upsert_photo(
+            {
+                "uuid": "uuid-mig016",
+                "original_filename": "IMG_mig016.JPG",
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+        db.close()
+        run(self.db_path)
+        conn = sqlite3.connect(self.db_path)
+        row = conn.execute("SELECT pushed_tags FROM photos WHERE id = ?", (photo_id,)).fetchone()
+        conn.close()
+        self.assertIsNone(row[0])
+
+    def test_migration_is_idempotent(self):
+        from db.migrations.migrate_016_pushed_tags import run
+
+        db = Database(Path(self.db_path))
+        db.close()
+        run(self.db_path)
+        run(self.db_path)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# GH #99 — Task 2: pushed_tags written on initial push (poller)
+# ---------------------------------------------------------------------------
+
+
+class TestPushedTagsOnInitialPush(unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import MagicMock
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-push-001",
+                "original_filename": "IMG_push.JPG",
+                "flickr_id": "flickr-push-001",
+                "proposed_tags": ["cat", "indoor"],
+                "privacy_state": "approved_public",
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+        self.mock_client = MagicMock()
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _row(self):
+        return dict(
+            self.db.conn.execute("SELECT * FROM photos WHERE id = ?", (self.photo_id,)).fetchone()
+        )
+
+    def _db_record(self):
+        import json
+
+        row = self._row()
+        row["proposed_tags"] = json.loads(row["proposed_tags"] or "[]")
+        return row
+
+    def test_pushed_tags_written_on_success(self):
+        import json
+        from poller.poller import _push_to_flickr
+
+        _push_to_flickr(
+            self.mock_client, "flickr-push-001", self._db_record(), self.db, dry_run=False
+        )
+        pushed = json.loads(self._row()["pushed_tags"])
+        self.assertEqual(pushed, ["cat", "indoor"])
+
+    def test_pushed_tags_null_when_add_tags_fails(self):
+        from flickr.flickr_client import FlickrError
+        from poller.poller import _push_to_flickr
+
+        self.mock_client.add_tags.side_effect = FlickrError(0, "api error")
+        _push_to_flickr(
+            self.mock_client, "flickr-push-001", self._db_record(), self.db, dry_run=False
+        )
+        self.assertIsNone(self._row()["pushed_tags"])
+
+    def test_pushed_tags_null_when_no_proposed_tags(self):
+        from poller.poller import _push_to_flickr
+
+        record = self._db_record()
+        record["proposed_tags"] = []
+        _push_to_flickr(self.mock_client, "flickr-push-001", record, self.db, dry_run=False)
+        self.assertIsNone(self._row()["pushed_tags"])
+
+
+# ---------------------------------------------------------------------------
+# GH #99 — Task 3: reconcile uses pushed_tags; updates it after fix
+# ---------------------------------------------------------------------------
+
+
+class TestReconcilePushedTags(unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import MagicMock
+
+        self._tmp = tempfile.mkdtemp()
+        self.db = Database(Path(self._tmp) / "test.db")
+        self.mock_client = MagicMock()
+
+    def tearDown(self):
+        self.db.close()
+        import shutil
+
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _make_photo(self, pushed_tags=None, proposed_tags=None, flickr_id="flickr-pt-001"):
+        import json
+
+        photo_id = self.db.upsert_photo(
+            {
+                "uuid": f"uuid-pt-{flickr_id}",
+                "original_filename": "IMG_pt.JPG",
+                "flickr_id": flickr_id,
+                "privacy_state": "approved_public",
+                "perms_pushed_flickr": 1,
+                "tags_pushed_flickr": 1,
+                "proposed_tags": proposed_tags or [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+        if pushed_tags is not None:
+            self.db.conn.execute(
+                "UPDATE photos SET pushed_tags = ? WHERE id = ?",
+                (json.dumps(pushed_tags), photo_id),
+            )
+            self.db.conn.commit()
+        return photo_id
+
+    def _row(self, photo_id):
+        return dict(
+            self.db.conn.execute("SELECT * FROM photos WHERE id = ?", (photo_id,)).fetchone()
+        )
+
+    def _flickr_info(self, tags):
+        return {
+            "photo": {
+                "visibility": {"ispublic": 1, "isfriend": 0, "isfamily": 0},
+                "tags": {"tag": [{"raw": t} for t in tags]},
+            }
+        }
+
+    # --- reads pushed_tags, not proposed_tags ---
+
+    def test_null_pushed_tags_skips_tag_check(self):
+        """pushed_tags=NULL -> skip tag check even if proposed_tags is non-empty."""
+        from poller.reconcile import check_photo
+
+        photo_id = self._make_photo(pushed_tags=None, proposed_tags=["cat", "dog"])
+        self.mock_client.get_photo_info.return_value = self._flickr_info([])
+        result = check_photo(
+            self.mock_client, self._row(photo_id), self.db, fix=False, verbose=False
+        )
+        self.assertEqual(result["status"], "ok")
+
+    def test_pushed_tags_subset_of_flickr_is_ok(self):
+        """pushed_tags <= flickr_tags -> ok, even if Flickr has extra tags."""
+        from poller.reconcile import check_photo
+
+        photo_id = self._make_photo(pushed_tags=["cat"], proposed_tags=["cat", "new-ml"])
+        self.mock_client.get_photo_info.return_value = self._flickr_info(["cat", "extra"])
+        result = check_photo(
+            self.mock_client, self._row(photo_id), self.db, fix=False, verbose=False
+        )
+        self.assertEqual(result["status"], "ok")
+
+    def test_pushed_tag_missing_from_flickr_is_mismatch(self):
+        from poller.reconcile import check_photo
+
+        photo_id = self._make_photo(pushed_tags=["cat", "dog"], proposed_tags=["cat", "dog"])
+        self.mock_client.get_photo_info.return_value = self._flickr_info(["cat"])
+        result = check_photo(
+            self.mock_client, self._row(photo_id), self.db, fix=False, verbose=False
+        )
+        self.assertEqual(result["status"], "tag_mismatch")
+        self.assertIn("dog", result["tags_missing"])
+
+    def test_proposed_tag_not_in_pushed_tags_not_checked(self):
+        """New ML label in proposed_tags but not in pushed_tags -> not a mismatch."""
+        from poller.reconcile import check_photo
+
+        photo_id = self._make_photo(pushed_tags=["cat"], proposed_tags=["cat", "new-ml-label"])
+        self.mock_client.get_photo_info.return_value = self._flickr_info(["cat"])
+        result = check_photo(
+            self.mock_client, self._row(photo_id), self.db, fix=False, verbose=False
+        )
+        self.assertEqual(result["status"], "ok")
+
+    # --- fix writes pushed_tags back to DB ---
+
+    def test_fix_appends_newly_pushed_tags(self):
+        import json
+        from poller.reconcile import check_photo
+
+        photo_id = self._make_photo(pushed_tags=["cat"], proposed_tags=["cat"])
+        self.mock_client.get_photo_info.return_value = self._flickr_info([])  # cat missing
+        check_photo(self.mock_client, self._row(photo_id), self.db, fix=True, verbose=False)
+        pushed = json.loads(self._row(photo_id)["pushed_tags"])
+        self.assertIn("cat", pushed)
+
+    def test_fix_preserves_existing_pushed_tags(self):
+        import json
+        from poller.reconcile import check_photo
+
+        photo_id = self._make_photo(pushed_tags=["cat", "dog"], proposed_tags=["cat", "dog"])
+        self.mock_client.get_photo_info.return_value = self._flickr_info(["cat"])  # dog missing
+        check_photo(self.mock_client, self._row(photo_id), self.db, fix=True, verbose=False)
+        pushed = json.loads(self._row(photo_id)["pushed_tags"])
+        self.assertIn("cat", pushed)  # preserved
+        self.assertIn("dog", pushed)  # re-confirmed
+
+    def test_fix_does_not_update_pushed_tags_on_api_failure(self):
+        import json
+        from flickr.flickr_client import FlickrError
+        from poller.reconcile import check_photo
+
+        photo_id = self._make_photo(pushed_tags=["cat"], proposed_tags=["cat"])
+        self.mock_client.get_photo_info.return_value = self._flickr_info([])
+        self.mock_client.add_tags.side_effect = FlickrError(0, "fail")
+        check_photo(self.mock_client, self._row(photo_id), self.db, fix=True, verbose=False)
+        # pushed_tags should be unchanged (still just ["cat"])
+        pushed = json.loads(self._row(photo_id)["pushed_tags"])
+        self.assertEqual(pushed, ["cat"])
+
+
+# ---------------------------------------------------------------------------
+# GH #99 — Task 5: bp tag-writeback subcommand
+# ---------------------------------------------------------------------------
+
+
+class TestTagWriteback(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        import json
+
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "uuid-wb-001",
+                "original_filename": "IMG_wb.JPG",
+                "flickr_id": "flickr-wb-001",
+                "tags_pushed_flickr": 1,
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+        self.db.conn.execute(
+            "UPDATE photos SET pushed_tags = ? WHERE id = ?",
+            (json.dumps(["cat", "indoor"]), self.photo_id),
+        )
+        self.db.conn.commit()
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _run(self, **kwargs):
+        from poller.tag_writeback import writeback
+
+        return writeback(self.db, **kwargs)
+
+    def test_keywords_merged_additively(self):
+        from unittest.mock import MagicMock, patch
+
+        mock_photo = MagicMock()
+        mock_photo.keywords = ["existing"]
+
+        mock_lib = MagicMock()
+        mock_lib.photos.return_value = iter([mock_photo])
+
+        with patch("poller.tag_writeback.photoscript") as mock_ps:
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            result = self._run(dry_run=False, limit=500)
+
+        self.assertEqual(result["updated"], 1)
+        self.assertEqual(result["ok"], 0)
+        self.assertEqual(sorted(mock_photo.keywords), ["cat", "existing", "indoor"])
+
+    def test_already_has_all_keywords_is_ok(self):
+        from unittest.mock import MagicMock, patch
+
+        mock_photo = MagicMock()
+        mock_photo.keywords = ["cat", "indoor"]
+
+        mock_lib = MagicMock()
+        mock_lib.photos.return_value = iter([mock_photo])
+
+        with patch("poller.tag_writeback.photoscript") as mock_ps:
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            result = self._run(dry_run=False, limit=500)
+
+        self.assertEqual(result["ok"], 1)
+        self.assertEqual(result["updated"], 0)
+
+    def test_dry_run_does_not_write_keywords(self):
+        from unittest.mock import MagicMock, patch
+
+        mock_photo = MagicMock()
+        mock_photo.keywords = ["existing"]
+
+        mock_lib = MagicMock()
+        mock_lib.photos.return_value = iter([mock_photo])
+
+        with patch("poller.tag_writeback.photoscript") as mock_ps:
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            result = self._run(dry_run=True, limit=500)
+
+        # In dry_run mode, updated count is reported but keywords setter NOT called
+        self.assertEqual(result["updated"], 1)
+        # keywords must still be the original list (not written)
+        self.assertEqual(mock_photo.keywords, ["existing"])
+
+    def test_not_found_uuid_counted(self):
+        from unittest.mock import MagicMock, patch
+
+        mock_lib = MagicMock()
+        mock_lib.photos.return_value = iter([])  # empty — photo not in Photos.app
+
+        with patch("poller.tag_writeback.photoscript") as mock_ps:
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            result = self._run(dry_run=False, limit=500)
+
+        self.assertEqual(result["not_found"], 1)
+
+    def test_photos_without_uuid_skipped(self):
+        """Flickr-only records (uuid=NULL) must not appear in writeback query."""
+        from unittest.mock import MagicMock, patch
+
+        # Insert a Flickr-only record (no uuid)
+        self.db.conn.execute("""
+            INSERT INTO photos (uuid, original_filename, flickr_id, privacy_state,
+                                tags_pushed_flickr, pushed_tags, apple_persons, apple_labels)
+            VALUES (NULL, 'flickr_only.JPG', 'flickr-only-001', 'already_public',
+                    1, '["cat"]', '[]', '[]')
+        """)
+        self.db.conn.commit()
+
+        mock_photo = MagicMock()
+        mock_photo.keywords = []
+
+        mock_lib = MagicMock()
+        mock_lib.photos.return_value = iter([mock_photo])
+
+        with patch("poller.tag_writeback.photoscript") as mock_ps:
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            result = self._run(dry_run=False, limit=500)
+
+        # Only 1 photo processed (the one with uuid), not the Flickr-only record
+        self.assertEqual(result["updated"] + result["ok"], 1)
 
 
 if __name__ == "__main__":

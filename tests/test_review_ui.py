@@ -1181,3 +1181,79 @@ class TestFriendsVisibilityUI:
 
     def test_base_toast_handles_make_friends(self, base_src):
         assert "make_friends" in base_src
+
+
+# ---------------------------------------------------------------------------
+# TestApiPushApprovedWritesPushedTags — GH #99
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def client_with_push_approved_photo():
+    """Flask test client with a single approved_public photo ready for push."""
+    with tempfile.TemporaryDirectory() as tmp:
+        test_db = Database(Path(tmp) / "test.db")
+
+        pid = test_db.upsert_photo(
+            {
+                "uuid": "uuid-pa-tags-001",
+                "original_filename": "IMG_pa_tags.JPG",
+                "privacy_state": "approved_public",
+                "flickr_id": "8880000001",
+                "proposed_tags": ["alpha", "beta"],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+        test_db.conn.execute("UPDATE photos SET perms_pushed_flickr = 0 WHERE id = ?", (pid,))
+        test_db.conn.commit()
+
+        mock_flickr = MagicMock()
+        app_module._db = test_db
+        app_module._client = mock_flickr
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+
+        with app_module.app.test_client() as c:
+            yield c, test_db, mock_flickr
+
+        app_module._db = None
+        app_module._client = None
+
+
+class TestApiPushApprovedWritesPushedTags:
+    """api/push_approved must record pushed_tags in the DB after a successful add_tags call."""
+
+    def test_pushed_tags_written_after_add_tags_succeeds(self, client_with_push_approved_photo):
+        """pushed_tags must be set to proposed_tags JSON after a successful add_tags call."""
+        c, test_db, _ = client_with_push_approved_photo
+
+        resp = c.post("/api/push_approved")
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
+
+        row = test_db.conn.execute(
+            "SELECT pushed_tags FROM photos WHERE flickr_id = '8880000001'"
+        ).fetchone()
+        assert row is not None
+        assert row["pushed_tags"] is not None
+        import json as _json
+
+        pushed = _json.loads(row["pushed_tags"])
+        assert sorted(pushed) == ["alpha", "beta"]
+
+    def test_pushed_tags_null_when_add_tags_fails(self, client_with_push_approved_photo):
+        """pushed_tags must remain NULL when add_tags raises a FlickrError."""
+        c, test_db, mock_flickr = client_with_push_approved_photo
+        mock_flickr.add_tags.side_effect = FlickrError(100, "Invalid API Key")
+        # Reset mock state from any prior test in this fixture
+        mock_flickr.set_permissions.side_effect = None
+
+        resp = c.post("/api/push_approved")
+        assert resp.status_code == 200
+
+        row = test_db.conn.execute(
+            "SELECT pushed_tags FROM photos WHERE flickr_id = '8880000001'"
+        ).fetchone()
+        assert row is not None
+        assert row["pushed_tags"] is None
