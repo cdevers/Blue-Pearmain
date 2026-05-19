@@ -793,6 +793,57 @@ def _delete_discards(
     return deleted, already_gone, errors
 
 
+def _mark_reupload_discards(
+    conn: sqlite3.Connection,
+    dry_run: bool = True,
+    verbose: bool = False,
+) -> int:
+    """Mark confirmed reupload discards as duplicate_flickr in the DB.
+
+    Only acts on group_type='reupload' groups (not reupload_uncertain).
+    Does not set resolved=1 — that is reserved for after Flickr deletion.
+
+    Returns count of records marked (or eligible in dry-run).
+    """
+    rows = conn.execute("""
+        SELECT p.id, p.flickr_id, p.privacy_state,
+               dg.id AS group_id
+        FROM photos p
+        JOIN duplicate_groups dg ON p.duplicate_group_id = dg.id
+        WHERE p.duplicate_role = 'discard'
+          AND dg.group_type = 'reupload'
+          AND p.privacy_state != 'duplicate_flickr'
+          AND p.flickr_deleted = 0
+          AND dg.resolved = 0
+    """).fetchall()
+
+    if not rows:
+        print("No reupload discards eligible to mark.")
+        return 0
+
+    label = "to mark" if not dry_run else "eligible for marking"
+    print(f"\nReupload discards {label}: {len(rows)}")
+
+    show = rows if verbose else rows[:10]
+    for r in show:
+        print(f"  flickr_id={r['flickr_id']}  {r['privacy_state']} → duplicate_flickr")
+    if not verbose and len(rows) > 10:
+        print(f"  ... and {len(rows) - 10} more (use --verbose to see all)")
+
+    if dry_run:
+        print("\nDry run — no changes written. Use --apply to persist.")
+        return len(rows)
+
+    for r in rows:
+        conn.execute(
+            "UPDATE photos SET privacy_state = 'duplicate_flickr' WHERE id = ?",
+            (r["id"],),
+        )
+    conn.commit()
+    print(f"\nMarked {len(rows)} reupload discards as duplicate_flickr.")
+    return len(rows)
+
+
 # ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------

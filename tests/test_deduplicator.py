@@ -478,6 +478,39 @@ def _insert(conn, **kwargs):
     conn.execute(f"INSERT INTO photos ({cols}) VALUES ({placeholders})", list(kwargs.values()))
 
 
+def _make_db_with_groups() -> _sqlite3.Connection:
+    """In-memory DB with photos + duplicate_groups for Phase 2 tests."""
+    conn = _sqlite3.connect(":memory:")
+    conn.row_factory = _sqlite3.Row
+    conn.execute("""
+        CREATE TABLE duplicate_groups (
+            id INTEGER PRIMARY KEY,
+            match_key TEXT NOT NULL UNIQUE,
+            group_type TEXT NOT NULL,
+            resolved INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE photos (
+            id INTEGER PRIMARY KEY,
+            flickr_id TEXT,
+            uuid TEXT,
+            original_filename TEXT,
+            date_taken TEXT,
+            date_added_photos TEXT,
+            date_uploaded_flickr TEXT,
+            fingerprint TEXT,
+            width INTEGER,
+            height INTEGER,
+            privacy_state TEXT DEFAULT 'candidate_public',
+            duplicate_group_id INTEGER,
+            duplicate_role TEXT,
+            flickr_deleted INTEGER DEFAULT 0
+        )
+    """)
+    return conn
+
+
 class TestFetchReuploadCandidates(unittest.TestCase):
     def test_matched_pair_produces_one_group(self):
         from poller.deduplicator import _fetch_reupload_candidates
@@ -903,6 +936,83 @@ class TestDeleteDiscards(unittest.TestCase):
         deleted, already_gone, errors = _delete_discards(conn, client, dry_run=False)
         self.assertEqual(deleted + already_gone + errors, 0)
         client.delete_photo.assert_not_called()
+
+
+class TestMarkReuploaDiscards(unittest.TestCase):
+    """Tests for _mark_reupload_discards().
+
+    Uses _make_db_with_groups() which creates both photos and duplicate_groups.
+    """
+
+    def _setup(
+        self,
+        group_type: str = "reupload",
+        privacy_state: str = "candidate_public",
+        flickr_deleted: int = 0,
+        resolved: int = 0,
+    ) -> _sqlite3.Connection:
+        conn = _make_db_with_groups()
+        conn.execute(
+            "INSERT INTO duplicate_groups (id, match_key, group_type, resolved)"
+            " VALUES (1, 'reupload:48000:54000', ?, ?)",
+            (group_type, resolved),
+        )
+        conn.execute(
+            "INSERT INTO photos"
+            " (id, flickr_id, privacy_state, duplicate_group_id, duplicate_role, flickr_deleted)"
+            " VALUES (1, '48922000000', ?, 1, 'discard', ?)",
+            (privacy_state, flickr_deleted),
+        )
+        conn.commit()
+        return conn
+
+    def test_marks_reupload_discards(self):
+        from poller.deduplicator import _mark_reupload_discards
+
+        conn = self._setup()
+        count = _mark_reupload_discards(conn, dry_run=False)
+        self.assertEqual(count, 1)
+        row = conn.execute("SELECT privacy_state FROM photos WHERE id = 1").fetchone()
+        self.assertEqual(row["privacy_state"], "duplicate_flickr")
+
+    def test_skips_uncertain_groups(self):
+        from poller.deduplicator import _mark_reupload_discards
+
+        conn = self._setup(group_type="reupload_uncertain")
+        count = _mark_reupload_discards(conn, dry_run=False)
+        self.assertEqual(count, 0)
+        row = conn.execute("SELECT privacy_state FROM photos WHERE id = 1").fetchone()
+        self.assertEqual(row["privacy_state"], "candidate_public")
+
+    def test_skips_already_marked(self):
+        from poller.deduplicator import _mark_reupload_discards
+
+        conn = self._setup(privacy_state="duplicate_flickr")
+        count = _mark_reupload_discards(conn, dry_run=False)
+        self.assertEqual(count, 0)
+
+    def test_skips_flickr_deleted(self):
+        from poller.deduplicator import _mark_reupload_discards
+
+        conn = self._setup(flickr_deleted=1)
+        count = _mark_reupload_discards(conn, dry_run=False)
+        self.assertEqual(count, 0)
+
+    def test_dry_run_no_changes(self):
+        from poller.deduplicator import _mark_reupload_discards
+
+        conn = self._setup()
+        count = _mark_reupload_discards(conn, dry_run=True)
+        self.assertEqual(count, 1)  # eligible count returned even in dry-run
+        row = conn.execute("SELECT privacy_state FROM photos WHERE id = 1").fetchone()
+        self.assertEqual(row["privacy_state"], "candidate_public")  # unchanged
+
+    def test_skips_resolved_groups(self):
+        from poller.deduplicator import _mark_reupload_discards
+
+        conn = self._setup(resolved=1)
+        count = _mark_reupload_discards(conn, dry_run=False)
+        self.assertEqual(count, 0)
 
 
 if __name__ == "__main__":
