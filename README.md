@@ -216,7 +216,7 @@ For ongoing use, all three services run as launchd agents — no terminal window
 | `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at, indexes on push state and tags, schema_migrations table |
 | `db/migrate_003_dimensions_and_dedup.py` | DB migration: adds width/height columns and duplicate_groups table |
 | `bp` | Unified command-line entry point |
-| `tests/` | Unit tests (763 tests) |
+| `tests/` | Unit tests (775 tests) |
 
 ## Review UI
 
@@ -540,7 +540,7 @@ The Flickr client uses exponential backoff with jitter; write operations update 
 python -m pytest tests/ -q
 ```
 
-763 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, Friends/Family visibility, reconcile convergence (pushed_tags ledger), tag write-back to Photos.app, and reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration). See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
+775 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, Friends/Family visibility, reconcile convergence (pushed_tags ledger), tag write-back to Photos.app, reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration), and Flickr re-upload duplicate enforcement (mark/delete discards). See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
 
 ## License
 
