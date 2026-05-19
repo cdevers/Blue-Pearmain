@@ -439,15 +439,27 @@ def duplicates():
         gid = r["group_id"]
         if gid not in groups:
             key = r["match_key"] or ""
-            filename, _, date_key = key.partition("|")
+            gtype = r["group_type"]
+            if gtype in ("reupload", "reupload_uncertain"):
+                parts = key.split(":")
+                filename = f"{parts[1]} → {parts[2]}" if len(parts) == 3 else key
+                date_key = ""
+                try:
+                    notes_parsed = json.loads(r["notes"] or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    notes_parsed = {}
+            else:
+                filename, _, date_key = key.partition("|")
+                notes_parsed = {}
             groups[gid] = {
                 "id": gid,
                 "match_key": key,
-                "group_type": r["group_type"],
+                "group_type": gtype,
                 "photo_count": r["photo_count"],
                 "keeper_id": r["keeper_id"],
                 "resolved": r["resolved"],
                 "notes": r["notes"],
+                "notes_parsed": notes_parsed,
                 "filename": filename,
                 "date_key": date_key,
                 "photos": [],
@@ -513,6 +525,16 @@ def duplicates():
             "Same filename and timestamp but pattern unclear. "
             "May be intentional edits, camera firmware quirks, or burst-mode stills. "
             "Review carefully — “Not a duplicate” is safe to use if you want to keep both.",
+        ),
+        (
+            "reupload",
+            "Re-upload duplicate",
+            "Higher-res Flickr copy of a local photo — discard has been marked duplicate_flickr.",
+        ),
+        (
+            "reupload_uncertain",
+            "Possible re-upload",
+            "Probable re-upload — needs human review before marking or deleting.",
         ),
     ):
         type_groups = [g for g in groups.values() if g["group_type"] == gtype]

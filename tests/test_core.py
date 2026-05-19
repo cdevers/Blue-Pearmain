@@ -3425,6 +3425,7 @@ class TestAlbumRemovalDB(unittest.TestCase):
         )
         self.db.upsert_photo_album(self.photo_id, self.album_id)
         self.db.mark_album_pushed(self.photo_id, self.album_id)
+        self.db.set_album_flickr_set_id(self.album_id, "set-999")
 
     def tearDown(self):
         self.db.close()
@@ -3498,7 +3499,7 @@ class TestAlbumRemovalDB(unittest.TestCase):
     def test_get_deleted_albums_excludes_no_flickr_set(self):
         # Album has no flickr_set_id — nothing to delete on Flickr side
         self.db.conn.execute(
-            "UPDATE albums SET deleted_at = ? WHERE id = ?",
+            "UPDATE albums SET flickr_set_id = NULL, deleted_at = ? WHERE id = ?",
             ("2026-05-13T00:00:00+00:00", self.album_id),
         )
         self.db.conn.commit()

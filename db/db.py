@@ -892,12 +892,7 @@ class Database:
         self.conn.commit()
 
     def get_pending_album_removals(self, limit: int = 500) -> list[dict]:
-        """Return photo→album pairs tombstoned and confirmed pushed, ready for Flickr removePhoto.
-
-        Only returns rows where the photo has a flickr_id (needed to call
-        flickr.photosets.removePhoto). Rows where the album has no flickr_set_id
-        are included so callers can decide whether to skip or create the set first.
-        """
+        """Return photo→album pairs tombstoned and confirmed pushed, ready for Flickr removePhoto."""
         rows = self.conn.execute(
             """SELECT pa.photo_id, pa.album_id,
                       p.flickr_id,
@@ -907,6 +902,7 @@ class Database:
                JOIN albums  a ON a.id = pa.album_id
                WHERE pa.removed_at IS NOT NULL
                  AND pa.flickr_pushed = 1
+                 AND a.flickr_set_id IS NOT NULL
                  AND p.flickr_id IS NOT NULL
                LIMIT ?""",
             (limit,),
