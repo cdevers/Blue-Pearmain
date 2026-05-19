@@ -8214,6 +8214,45 @@ class TestMigrate012FlickrName(unittest.TestCase):
         db.close()
 
 
+class TestMigration015(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db_path = str(Path(self._tmp.name) / "test.db")
+        from db.db import Database
+
+        db = Database(Path(self.db_path))
+        db.close()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_adds_removed_at_to_photo_albums(self):
+        import sqlite3
+        from db.migrations.migrate_015_album_removal import run
+
+        run(self.db_path)
+        conn = sqlite3.connect(self.db_path)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(photo_albums)").fetchall()}
+        conn.close()
+        self.assertIn("removed_at", cols)
+
+    def test_adds_deleted_at_to_albums(self):
+        import sqlite3
+        from db.migrations.migrate_015_album_removal import run
+
+        run(self.db_path)
+        conn = sqlite3.connect(self.db_path)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(albums)").fetchall()}
+        conn.close()
+        self.assertIn("deleted_at", cols)
+
+    def test_idempotent(self):
+        from db.migrations.migrate_015_album_removal import run
+
+        run(self.db_path)
+        run(self.db_path)  # must not raise
+
+
 class TestSyncCollections(unittest.TestCase):
     """sync_collections: creates/updates Flickr Collections from DB folder tree."""
 
