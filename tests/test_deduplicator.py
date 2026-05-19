@@ -505,7 +505,8 @@ def _make_db_with_groups() -> _sqlite3.Connection:
             privacy_state TEXT DEFAULT 'candidate_public',
             duplicate_group_id INTEGER,
             duplicate_role TEXT,
-            flickr_deleted INTEGER DEFAULT 0
+            flickr_deleted INTEGER DEFAULT 0,
+            updated_at TEXT
         )
     """)
     return conn

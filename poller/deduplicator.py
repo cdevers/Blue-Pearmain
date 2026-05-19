@@ -836,7 +836,8 @@ def _mark_reupload_discards(
 
     for r in rows:
         conn.execute(
-            "UPDATE photos SET privacy_state = 'duplicate_flickr' WHERE id = ?",
+            "UPDATE photos SET privacy_state = 'duplicate_flickr',"
+            " updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
             (r["id"],),
         )
     conn.commit()
