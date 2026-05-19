@@ -261,6 +261,7 @@ def main():
     error_count = 0
     fix_ok_count = 0
     fix_fail_count = 0
+    flickr_deleted_count = 0
 
     log.info(f"Checking {total} photos against Flickr...")
 
@@ -269,7 +270,7 @@ def main():
     )
 
     try:
-        for row in rows:
+        for i, row in enumerate(rows, 1):
             result = check_photo(client, dict(row), db, fix=args.fix, verbose=args.verbose)
             ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
             fid = result["flickr_id"]
@@ -279,6 +280,10 @@ def main():
                 ok_count += 1
                 if args.verbose:
                     print(format_result_line(result, url, ts))
+
+            elif result["status"] == "flickr_deleted":
+                flickr_deleted_count += 1
+                log.warning("%s [deleted] %s — marked flickr_deleted in DB", ts, url)
 
             elif result["status"] == "flickr_error":
                 error_count += 1
@@ -294,6 +299,17 @@ def main():
                 for msg in result["errors"]:
                     print(f"      error: {msg}")
 
+            if i % 500 == 0:
+                log.info(
+                    "progress: %d/%d checked  ok=%d  mismatch=%d  deleted=%d  errors=%d",
+                    i,
+                    total,
+                    ok_count,
+                    mismatch_count,
+                    flickr_deleted_count,
+                    error_count,
+                )
+
     except Exception as e:
         log.error(f"Reconcile interrupted: {e}")
         error_count += 1
@@ -304,6 +320,7 @@ def main():
         f"  checked={total}"
         f"  ok={ok_count}"
         f"  mismatched={mismatch_count}"
+        f"  flickr-deleted={flickr_deleted_count}"
         + (f"  fixed={fix_ok_count}  fix-failed={fix_fail_count}" if args.fix else "")
         + f"  api-errors={error_count}"
     )

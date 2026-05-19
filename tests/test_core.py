@@ -2886,6 +2886,17 @@ class TestCheckPhoto(unittest.TestCase):
 
         mock_client.get_photo_info.assert_not_called()
 
+    def test_reconcile_deleted_photo_exits_zero_and_reports_in_summary(self):
+        """A run where the only outcome is a deleted photo exits 0, not 1 (mismatch).
+        The summary line must include 'flickr-deleted=1'."""
+        # The mock client in _run_main raises FlickrError(404) for every photo.
+        # Our DB has exactly one pushed photo, so we expect 1 deleted, 0 mismatches.
+        code, output, _client = self._run_main()
+
+        self.assertEqual(code, 0, f"Expected exit 0 (clean). Output:\n{output}")
+        self.assertIn("flickr-deleted=1", output)
+        self.assertIn("mismatched=0", output)
+
 
 # ---------------------------------------------------------------------------
 # Poller push_errors propagation
