@@ -1935,9 +1935,9 @@ class TestFlickrClientRetry(unittest.TestCase):
         self.assertEqual(result["stat"], "ok")
 
     def test_404_raises_immediately_without_retry(self):
-        """HTTP 404 is a permanent error — should raise, not retry."""
+        """HTTP 404 is a permanent error — raises FlickrError(404), no retry."""
         from unittest.mock import patch
-        import requests as req
+        from flickr.flickr_client import FlickrError
 
         c = self._make_client()
         not_found = self._mock_response(404)
@@ -1950,14 +1950,15 @@ class TestFlickrClientRetry(unittest.TestCase):
 
         with patch.object(c._session, "get", side_effect=counting_get):
             with patch("time.sleep"):
-                with self.assertRaises(req.HTTPError):
+                with self.assertRaises(FlickrError) as ctx:
                     c._call("flickr.photos.getInfo")
         self.assertEqual(call_count, 1)  # no retries
+        self.assertEqual(ctx.exception.code, 404)
 
     def test_403_raises_immediately_without_retry(self):
-        """HTTP 403 is a permanent error — should raise, not retry."""
+        """HTTP 403 is a permanent error — raises FlickrError(403), no retry."""
         from unittest.mock import patch
-        import requests as req
+        from flickr.flickr_client import FlickrError
 
         c = self._make_client()
         forbidden = self._mock_response(403)
@@ -1970,9 +1971,10 @@ class TestFlickrClientRetry(unittest.TestCase):
 
         with patch.object(c._session, "get", side_effect=counting_get):
             with patch("time.sleep"):
-                with self.assertRaises(req.HTTPError):
+                with self.assertRaises(FlickrError) as ctx:
                     c._call("flickr.photos.getInfo")
         self.assertEqual(call_count, 1)
+        self.assertEqual(ctx.exception.code, 403)
 
     def test_retry_delay_includes_jitter(self):
         """Retry delay should include jitter (2^n + random), not bare 2^n."""

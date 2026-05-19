@@ -127,9 +127,13 @@ class FlickrClient:
                 method, params, http_method, max_retries, _attempt, reason="connection error"
             )
 
-        # Permanent client errors — raise immediately, no retry
+        # Permanent client errors — raise immediately, no retry.
+        # Wrap in FlickrError so callers only ever see one exception type.
         if resp.status_code in _PERMANENT_HTTP_CODES:
-            resp.raise_for_status()  # raises requests.HTTPError
+            raise FlickrError(
+                resp.status_code,
+                getattr(resp, "reason", None) or f"HTTP {resp.status_code}",
+            )
 
         # Transient server errors — retry with backoff
         if resp.status_code in _TRANSIENT_HTTP_CODES:
