@@ -813,7 +813,7 @@ def _mark_reupload_discards(
         WHERE p.duplicate_role = 'discard'
           AND dg.group_type = 'reupload'
           AND p.privacy_state != 'duplicate_flickr'
-          AND p.flickr_deleted = 0
+          AND (p.flickr_deleted IS NULL OR p.flickr_deleted = 0)
           AND dg.resolved = 0
     """).fetchall()
 

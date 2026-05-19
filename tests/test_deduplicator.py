@@ -482,6 +482,7 @@ def _make_db_with_groups() -> _sqlite3.Connection:
     """In-memory DB with photos + duplicate_groups for Phase 2 tests."""
     conn = _sqlite3.connect(":memory:")
     conn.row_factory = _sqlite3.Row
+    # Intentionally slim — only columns needed by _mark_reupload_discards / _delete_discards tests
     conn.execute("""
         CREATE TABLE duplicate_groups (
             id INTEGER PRIMARY KEY,
@@ -939,7 +940,7 @@ class TestDeleteDiscards(unittest.TestCase):
         client.delete_photo.assert_not_called()
 
 
-class TestMarkReuploaDiscards(unittest.TestCase):
+class TestMarkReuploadDiscards(unittest.TestCase):
     """Tests for _mark_reupload_discards().
 
     Uses _make_db_with_groups() which creates both photos and duplicate_groups.
@@ -975,6 +976,8 @@ class TestMarkReuploaDiscards(unittest.TestCase):
         self.assertEqual(count, 1)
         row = conn.execute("SELECT privacy_state FROM photos WHERE id = 1").fetchone()
         self.assertEqual(row["privacy_state"], "duplicate_flickr")
+        group_row = conn.execute("SELECT resolved FROM duplicate_groups WHERE id = 1").fetchone()
+        self.assertEqual(group_row["resolved"], 0)
 
     def test_skips_uncertain_groups(self):
         from poller.deduplicator import _mark_reupload_discards
