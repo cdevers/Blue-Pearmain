@@ -283,7 +283,7 @@ def main():
 
             elif result["status"] == "flickr_deleted":
                 flickr_deleted_count += 1
-                log.warning("%s [deleted] %s — marked flickr_deleted in DB", ts, url)
+                log.warning("[deleted] %s — marked flickr_deleted in DB", url)
 
             elif result["status"] == "flickr_error":
                 error_count += 1
