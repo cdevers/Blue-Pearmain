@@ -3483,14 +3483,30 @@ class TestAlbumRemovalDB(unittest.TestCase):
         self.assertIn(self.photo_id, photo_ids)
         self.assertNotIn(photo2, photo_ids)
 
+    def test_get_pending_album_removals_excludes_no_flickr_set(self):
+        """Albums without flickr_set_id are excluded — nothing to call on Flickr."""
+        # Create a second album with no flickr_set_id
+        album2 = self.db.upsert_album("uuid-no-set", "No Set Album")
+        photo2 = self.db.upsert_photo(
+            {
+                "uuid": "photo-uuid-003",
+                "original_filename": "IMG_003.jpg",
+                "privacy_state": "candidate_public",
+                "flickr_id": "flickr-333",
+            }
+        )
+        self.db.upsert_photo_album(photo2, album2)
+        self.db.mark_album_pushed(photo2, album2)
+        self.db.mark_photo_album_removed(photo2, album2)
+
+        rows = self.db.get_pending_album_removals(limit=10)
+        photo_ids = [r["photo_id"] for r in rows]
+        self.assertNotIn(photo2, photo_ids, "album with no flickr_set_id must be excluded")
+
     def test_get_deleted_albums(self):
         # Give the album a flickr_set_id and mark it deleted
         self.db.set_album_flickr_set_id(self.album_id, "set-999")
-        self.db.conn.execute(
-            "UPDATE albums SET deleted_at = ? WHERE id = ?",
-            ("2026-05-13T00:00:00+00:00", self.album_id),
-        )
-        self.db.conn.commit()
+        self.db.mark_album_deleted(self.album_id)
         rows = self.db.get_deleted_albums()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["id"], self.album_id)
@@ -3499,10 +3515,11 @@ class TestAlbumRemovalDB(unittest.TestCase):
     def test_get_deleted_albums_excludes_no_flickr_set(self):
         # Album has no flickr_set_id — nothing to delete on Flickr side
         self.db.conn.execute(
-            "UPDATE albums SET flickr_set_id = NULL, deleted_at = ? WHERE id = ?",
-            ("2026-05-13T00:00:00+00:00", self.album_id),
+            "UPDATE albums SET flickr_set_id = NULL WHERE id = ?",
+            (self.album_id,),
         )
         self.db.conn.commit()
+        self.db.mark_album_deleted(self.album_id)
         rows = self.db.get_deleted_albums()
         self.assertEqual(len(rows), 0)
 

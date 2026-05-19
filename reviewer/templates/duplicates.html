@@ -138,6 +138,8 @@
 .badge-snapbridge    { background: #0d3a5c; color: #6ab4f5; }
 .badge-device_upload { background: #1e1e1e; color: #aaa; }
 .badge-uncertain     { background: #4a2800; color: #f5a623; }
+.badge-reupload           { background: #6f42c1; color: #fff; }
+.badge-reupload_uncertain { background: #fd7e14; color: #fff; }
 
 .empty-state {
   text-align: center;
@@ -236,7 +238,18 @@
         <span class="dup-date">{{ group.date_key[:19] if group.date_key else '' }}</span>
         <span class="badge badge-{{ group.group_type }}">{{ group.group_type.replace('_', ' ') }}</span>
       </div>
-      {% if group.notes %}
+      {% if section.type in ('reupload', 'reupload_uncertain') and group.notes_parsed %}
+      <div class="dup-notes">
+        <span>Gap: {{ group.notes_parsed.upload_session_gap or '—' }}</span>
+        &nbsp;·&nbsp;
+        <span>Filename match: {{ 'Yes' if group.notes_parsed.filename_match else 'No' }}</span>
+        &nbsp;·&nbsp;
+        <span>Dimension ratio: {{ group.notes_parsed.dimension_ratio or '—' }}</span>
+        {% if group.notes_parsed.summary %}
+        <div style="margin-top:4px">{{ group.notes_parsed.summary }}</div>
+        {% endif %}
+      </div>
+      {% elif group.notes %}
       <div class="dup-notes">{{ group.notes }}</div>
       {% endif %}
 
@@ -291,10 +304,15 @@
       </div>
 
       <div class="dup-actions">
-        {% if section.type in ('snapbridge', 'device_upload') %}
+        {% if section.type in ('snapbridge', 'device_upload', 'reupload') %}
         <button class="btn btn-primary"
                 onclick="resolveGroup({{ group.id }}, this)">
           ✓ Confirm resolution
+        </button>
+        {% elif section.type == 'reupload_uncertain' %}
+        <button class="btn btn-primary"
+                onclick="resolveGroup({{ group.id }}, this)">
+          ✓ Mark reviewed
         </button>
         {% endif %}
         <button class="btn"
