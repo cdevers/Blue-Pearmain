@@ -77,8 +77,12 @@ def check_photo(
     try:
         info = client.get_photo_info(flickr_id)
     except FlickrError as e:
-        result["status"] = "flickr_error"
-        result["errors"] = [str(e)]
+        if e.code in (1, 404):
+            db.mark_flickr_deleted(row["id"])
+            result["status"] = "flickr_deleted"
+        else:
+            result["status"] = "flickr_error"
+            result["errors"] = [str(e)]
         return result
 
     photo = info.get("photo", {})

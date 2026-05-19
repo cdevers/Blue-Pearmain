@@ -2744,6 +2744,140 @@ class TestReconcileExitCodes(unittest.TestCase):
         self.assertEqual(self._exit_code(5, 0, 0, True), 0)
 
 
+class TestCheckPhoto(unittest.TestCase):
+    """check_photo and reconcile main(): deleted-photo handling."""
+
+    def setUp(self):
+        import tempfile
+        import os
+        from db.db import Database
+
+        fd, self.tmp_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.db = Database(self.tmp_path)
+        self.photo_id = self.db.upsert_photo(
+            {
+                "flickr_id": "99999",
+                "privacy_state": "approved_public",
+                "perms_pushed_flickr": 1,
+            }
+        )
+
+    def tearDown(self):
+        import os
+
+        self.db.close()
+        os.unlink(self.tmp_path)
+
+    def _make_row(self):
+        return {
+            "id": self.photo_id,
+            "flickr_id": "99999",
+            "privacy_state": "approved_public",
+            "perms_pushed_flickr": 1,
+            "tags_pushed_flickr": 0,
+            "pushed_tags": None,
+        }
+
+    def _make_client(self, error):
+        from unittest.mock import MagicMock
+
+        client = MagicMock()
+        client.get_photo_info.side_effect = error
+        return client
+
+    def _run_main(self, extra_argv=None):
+        """Run reconcile.main() against self.tmp_path with a mocked FlickrClient.
+
+        Returns (exit_code, stdout_text, mock_client).
+        The mock client's get_photo_info raises FlickrError(404).
+        """
+        import sys
+        import tempfile
+        import os
+        import io
+        import yaml
+        from contextlib import redirect_stdout
+        from unittest.mock import patch, MagicMock
+        from flickr.flickr_client import FlickrError
+
+        config = {
+            "database": {"path": self.tmp_path},
+            "flickr": {
+                "username": "tester",
+                "api_key": "k",
+                "api_secret": "s",
+                "oauth_token": "t",
+                "oauth_token_secret": "ts",
+            },
+        }
+        with tempfile.NamedTemporaryFile("w", suffix=".yml", delete=False) as f:
+            yaml.dump(config, f)
+            cfg_path = f.name
+
+        mock_client = MagicMock()
+        mock_client.test_login.return_value = {}
+        mock_client.get_photo_info.side_effect = FlickrError(404, "HTTP 404")
+
+        old_argv = sys.argv[:]
+        sys.argv = ["bp", "--config", cfg_path, "--limit", "100"] + (extra_argv or [])
+        buf = io.StringIO()
+        try:
+            with patch("poller.reconcile.FlickrClient") as MockFC:
+                MockFC.from_config.return_value = mock_client
+                with redirect_stdout(buf):
+                    from poller.reconcile import main
+
+                    code = main()
+        finally:
+            sys.argv = old_argv
+            os.unlink(cfg_path)
+
+        return code, buf.getvalue(), mock_client
+
+    def test_flickr_error_code_1_returns_deleted_status(self):
+        """FlickrError(1) → status flickr_deleted, mark_flickr_deleted called."""
+        from flickr.flickr_client import FlickrError
+        from poller.reconcile import check_photo
+
+        client = self._make_client(FlickrError(1, "Photo not found"))
+        result = check_photo(client, self._make_row(), self.db, fix=False, verbose=False)
+
+        self.assertEqual(result["status"], "flickr_deleted")
+        row = self.db.conn.execute(
+            "SELECT flickr_deleted FROM photos WHERE id = ?", (self.photo_id,)
+        ).fetchone()
+        self.assertEqual(row["flickr_deleted"], 1)
+
+    def test_flickr_error_code_404_returns_deleted_status(self):
+        """FlickrError(404) (from HTTP 404) → status flickr_deleted, mark_flickr_deleted called."""
+        from flickr.flickr_client import FlickrError
+        from poller.reconcile import check_photo
+
+        client = self._make_client(FlickrError(404, "HTTP 404"))
+        result = check_photo(client, self._make_row(), self.db, fix=False, verbose=False)
+
+        self.assertEqual(result["status"], "flickr_deleted")
+        row = self.db.conn.execute(
+            "SELECT flickr_deleted FROM photos WHERE id = ?", (self.photo_id,)
+        ).fetchone()
+        self.assertEqual(row["flickr_deleted"], 1)
+
+    def test_other_flickr_error_returns_flickr_error_status(self):
+        """A non-404/non-1 FlickrError stays flickr_error and does not mark deleted."""
+        from flickr.flickr_client import FlickrError
+        from poller.reconcile import check_photo
+
+        client = self._make_client(FlickrError(500, "Server error"))
+        result = check_photo(client, self._make_row(), self.db, fix=False, verbose=False)
+
+        self.assertEqual(result["status"], "flickr_error")
+        row = self.db.conn.execute(
+            "SELECT flickr_deleted FROM photos WHERE id = ?", (self.photo_id,)
+        ).fetchone()
+        self.assertNotEqual(row["flickr_deleted"], 1)
+
+
 # ---------------------------------------------------------------------------
 # Poller push_errors propagation
 # ---------------------------------------------------------------------------
