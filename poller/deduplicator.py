@@ -715,11 +715,12 @@ def _delete_discards(
     client: Any,
     dry_run: bool,
 ) -> tuple[int, int, int]:
-    """Delete approved_public discard records from Flickr.
+    """Delete reupload discard records from Flickr.
 
-    Queries duplicate_groups for unresolved groups whose discard is
-    approved_public and not yet flickr_deleted. Calls client.delete_photo()
-    for each. Treats FlickrError(1) (photo not found) as success.
+    Queries reupload duplicate_groups for unresolved groups whose discard has
+    been marked duplicate_flickr and not yet flickr_deleted. Calls
+    client.delete_photo() for each. Treats FlickrError(1) (photo not found)
+    as success.
 
     Returns (deleted, already_gone, errors).
     """
@@ -731,7 +732,8 @@ def _delete_discards(
         FROM photos p
         JOIN duplicate_groups dg ON p.duplicate_group_id = dg.id
         WHERE p.duplicate_role = 'discard'
-          AND p.privacy_state = 'approved_public'
+          AND dg.group_type = 'reupload'
+          AND p.privacy_state = 'duplicate_flickr'
           AND (p.flickr_deleted IS NULL OR p.flickr_deleted = 0)
           AND dg.resolved = 0
     """).fetchall()

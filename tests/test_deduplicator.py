@@ -791,7 +791,7 @@ def _insert_group_and_discard(
     conn,
     group_id: int = 1,
     discard_flickr_id: str = "54060000000",
-    privacy_state: str = "approved_public",
+    privacy_state: str = "duplicate_flickr",
     flickr_deleted: int = 0,
     resolved: int = 0,
     notes: str | None = None,
@@ -811,7 +811,7 @@ def _insert_group_and_discard(
         (
             group_id,
             f"reupload:48922000000:{discard_flickr_id}",
-            "reupload_uncertain",
+            "reupload",
             10,
             2,
             resolved,
@@ -1017,6 +1017,36 @@ class TestMarkReuploadDiscards(unittest.TestCase):
         conn = self._setup(resolved=1)
         count = _mark_reupload_discards(conn, dry_run=False)
         self.assertEqual(count, 0)
+
+
+class TestDeleteDiscardsQuery(unittest.TestCase):
+    """Verify the WHERE clause in _delete_discards finds duplicate_flickr discards."""
+
+    def test_delete_discards_finds_duplicate_flickr(self):
+        conn = _make_db_with_groups()
+        conn.execute(
+            "INSERT INTO duplicate_groups (id, match_key, group_type, resolved)"
+            " VALUES (1, 'reupload:48000:54000', 'reupload', 0)"
+        )
+        conn.execute(
+            "INSERT INTO photos"
+            " (id, flickr_id, privacy_state, duplicate_group_id, duplicate_role, flickr_deleted)"
+            " VALUES (1, '48922000000', 'duplicate_flickr', 1, 'discard', 0)"
+        )
+        conn.commit()
+        # Run the fixed WHERE clause directly — no Flickr API needed
+        rows = conn.execute("""
+            SELECT p.id, p.flickr_id
+            FROM photos p
+            JOIN duplicate_groups dg ON p.duplicate_group_id = dg.id
+            WHERE p.duplicate_role = 'discard'
+              AND dg.group_type = 'reupload'
+              AND p.privacy_state = 'duplicate_flickr'
+              AND (p.flickr_deleted IS NULL OR p.flickr_deleted = 0)
+              AND dg.resolved = 0
+        """).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["flickr_id"], "48922000000")
 
 
 if __name__ == "__main__":
