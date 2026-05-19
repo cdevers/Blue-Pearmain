@@ -414,6 +414,14 @@ class Database:
                 "ALTER TABLE photos ADD COLUMN display_rotation INTEGER NOT NULL DEFAULT 0"
             )
             self.conn.commit()
+        pa_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(photo_albums)").fetchall()}
+        if "removed_at" not in pa_cols:
+            self.conn.execute("ALTER TABLE photo_albums ADD COLUMN removed_at TEXT")
+            self.conn.commit()
+        al_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(albums)").fetchall()}
+        if "deleted_at" not in al_cols:
+            self.conn.execute("ALTER TABLE albums ADD COLUMN deleted_at TEXT")
+            self.conn.commit()
 
     # -----------------------------------------------------------------------
     # Photo upsert — the main ingestion path
@@ -822,9 +830,17 @@ class Database:
         return row["id"]
 
     def upsert_photo_album(self, photo_id: int, album_id: int) -> None:
-        """Record that a photo belongs to an album. No-op if already exists."""
+        """Record that a photo belongs to an album.
+        If the row already exists with a removed_at tombstone (photo was removed
+        then re-added before sync ran), clears the tombstone — no Flickr removal needed.
+        """
         self.conn.execute(
             "INSERT OR IGNORE INTO photo_albums (photo_id, album_id) VALUES (?, ?)",
+            (photo_id, album_id),
+        )
+        # Clear any tombstone — photo is back in the album
+        self.conn.execute(
+            "UPDATE photo_albums SET removed_at = NULL WHERE photo_id = ? AND album_id = ? AND removed_at IS NOT NULL",
             (photo_id, album_id),
         )
         self.conn.commit()
@@ -857,6 +873,75 @@ class Database:
             "UPDATE photo_albums SET flickr_pushed = 1, pushed_at = ? WHERE photo_id = ? AND album_id = ?",
             (_now_iso(), photo_id, album_id),
         )
+        self.conn.commit()
+
+    def mark_photo_album_removed(self, photo_id: int, album_id: int) -> None:
+        """Tombstone a photo→album row: scanner detected the photo is no longer in this album."""
+        self.conn.execute(
+            "UPDATE photo_albums SET removed_at = ? WHERE photo_id = ? AND album_id = ?",
+            (_now_iso(), photo_id, album_id),
+        )
+        self.conn.commit()
+
+    def clear_photo_album_removed(self, photo_id: int, album_id: int) -> None:
+        """Clear a removal tombstone when a photo is re-observed in an album."""
+        self.conn.execute(
+            "UPDATE photo_albums SET removed_at = NULL WHERE photo_id = ? AND album_id = ?",
+            (photo_id, album_id),
+        )
+        self.conn.commit()
+
+    def get_pending_album_removals(self, limit: int = 500) -> list[dict]:
+        """Return photo→album pairs tombstoned and confirmed pushed, ready for Flickr removePhoto.
+
+        Only returns rows where the photo has a flickr_id (needed to call
+        flickr.photosets.removePhoto). Rows where the album has no flickr_set_id
+        are included so callers can decide whether to skip or create the set first.
+        """
+        rows = self.conn.execute(
+            """SELECT pa.photo_id, pa.album_id,
+                      p.flickr_id,
+                      a.name AS album_name, a.flickr_set_id
+               FROM photo_albums pa
+               JOIN photos p ON p.id = pa.photo_id
+               JOIN albums  a ON a.id = pa.album_id
+               WHERE pa.removed_at IS NOT NULL
+                 AND pa.flickr_pushed = 1
+                 AND p.flickr_id IS NOT NULL
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_deleted_albums(self) -> list[dict]:
+        """Return albums marked deleted that have a Flickr photoset to clean up."""
+        rows = self.conn.execute(
+            """SELECT id, name, flickr_set_id
+               FROM albums
+               WHERE deleted_at IS NOT NULL
+                 AND flickr_set_id IS NOT NULL"""
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_album_deleted(self, album_id: int) -> None:
+        """Mark an album as deleted in Apple Photos (pending Flickr photoset deletion)."""
+        self.conn.execute(
+            "UPDATE albums SET deleted_at = ? WHERE id = ?",
+            (_now_iso(), album_id),
+        )
+        self.conn.commit()
+
+    def delete_photo_album_row(self, photo_id: int, album_id: int) -> None:
+        """Hard-delete one photo→album membership row after Flickr removal is confirmed."""
+        self.conn.execute(
+            "DELETE FROM photo_albums WHERE photo_id = ? AND album_id = ?",
+            (photo_id, album_id),
+        )
+        self.conn.commit()
+
+    def delete_album(self, album_id: int) -> None:
+        """Hard-delete an album row. ON DELETE CASCADE removes its photo_albums rows."""
+        self.conn.execute("DELETE FROM albums WHERE id = ?", (album_id,))
         self.conn.commit()
 
     def set_album_flickr_set_id(

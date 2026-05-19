@@ -3403,6 +3403,129 @@ class TestAlbumDB(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Album removal DB methods
+# ---------------------------------------------------------------------------
+
+
+class TestAlbumRemovalDB(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        # One album, one photo, one photo_albums row (flickr_pushed=1)
+        self.album_id = self.db.upsert_album("uuid-a1", "Paris")
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "photo-uuid-001",
+                "original_filename": "IMG_001.jpg",
+                "privacy_state": "candidate_public",
+                "flickr_id": "flickr-111",
+            }
+        )
+        self.db.upsert_photo_album(self.photo_id, self.album_id)
+        self.db.mark_album_pushed(self.photo_id, self.album_id)
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def test_mark_photo_album_removed(self):
+        self.db.mark_photo_album_removed(self.photo_id, self.album_id)
+        row = self.db.conn.execute(
+            "SELECT removed_at FROM photo_albums WHERE photo_id=? AND album_id=?",
+            (self.photo_id, self.album_id),
+        ).fetchone()
+        self.assertIsNotNone(row["removed_at"])
+
+    def test_clear_photo_album_removed(self):
+        self.db.mark_photo_album_removed(self.photo_id, self.album_id)
+        self.db.clear_photo_album_removed(self.photo_id, self.album_id)
+        row = self.db.conn.execute(
+            "SELECT removed_at FROM photo_albums WHERE photo_id=? AND album_id=?",
+            (self.photo_id, self.album_id),
+        ).fetchone()
+        self.assertIsNone(row["removed_at"])
+
+    def test_upsert_photo_album_clears_tombstone_on_reobservation(self):
+        self.db.mark_photo_album_removed(self.photo_id, self.album_id)
+        self.db.upsert_photo_album(self.photo_id, self.album_id)
+        row = self.db.conn.execute(
+            "SELECT removed_at FROM photo_albums WHERE photo_id=? AND album_id=?",
+            (self.photo_id, self.album_id),
+        ).fetchone()
+        self.assertIsNone(row["removed_at"], "re-observation must clear removed_at tombstone")
+
+    def test_get_pending_album_removals(self):
+        self.db.mark_photo_album_removed(self.photo_id, self.album_id)
+        rows = self.db.get_pending_album_removals(limit=10)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["photo_id"], self.photo_id)
+        self.assertEqual(rows[0]["flickr_id"], "flickr-111")
+
+    def test_get_pending_album_removals_excludes_unpushed(self):
+        # Second photo, never pushed
+        photo2 = self.db.upsert_photo(
+            {
+                "uuid": "photo-uuid-002",
+                "original_filename": "IMG_002.jpg",
+                "privacy_state": "candidate_public",
+                "flickr_id": "flickr-222",
+            }
+        )
+        self.db.upsert_photo_album(photo2, self.album_id)
+        # Do NOT mark_album_pushed for photo2 — flickr_pushed stays 0
+        self.db.mark_photo_album_removed(self.photo_id, self.album_id)
+        self.db.mark_photo_album_removed(photo2, self.album_id)
+        rows = self.db.get_pending_album_removals(limit=10)
+        photo_ids = [r["photo_id"] for r in rows]
+        self.assertIn(self.photo_id, photo_ids)
+        self.assertNotIn(photo2, photo_ids)
+
+    def test_get_deleted_albums(self):
+        # Give the album a flickr_set_id and mark it deleted
+        self.db.set_album_flickr_set_id(self.album_id, "set-999")
+        self.db.conn.execute(
+            "UPDATE albums SET deleted_at = ? WHERE id = ?",
+            ("2026-05-13T00:00:00+00:00", self.album_id),
+        )
+        self.db.conn.commit()
+        rows = self.db.get_deleted_albums()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], self.album_id)
+        self.assertEqual(rows[0]["flickr_set_id"], "set-999")
+
+    def test_get_deleted_albums_excludes_no_flickr_set(self):
+        # Album has no flickr_set_id — nothing to delete on Flickr side
+        self.db.conn.execute(
+            "UPDATE albums SET deleted_at = ? WHERE id = ?",
+            ("2026-05-13T00:00:00+00:00", self.album_id),
+        )
+        self.db.conn.commit()
+        rows = self.db.get_deleted_albums()
+        self.assertEqual(len(rows), 0)
+
+    def test_delete_photo_album_row(self):
+        self.db.delete_photo_album_row(self.photo_id, self.album_id)
+        row = self.db.conn.execute(
+            "SELECT 1 FROM photo_albums WHERE photo_id=? AND album_id=?",
+            (self.photo_id, self.album_id),
+        ).fetchone()
+        self.assertIsNone(row)
+
+    def test_delete_album_cascades(self):
+        self.db.delete_album(self.album_id)
+        album_row = self.db.conn.execute(
+            "SELECT 1 FROM albums WHERE id=?", (self.album_id,)
+        ).fetchone()
+        self.assertIsNone(album_row, "album row must be deleted")
+        pa_row = self.db.conn.execute(
+            "SELECT 1 FROM photo_albums WHERE album_id=?", (self.album_id,)
+        ).fetchone()
+        self.assertIsNone(pa_row, "photo_albums rows must be cascade-deleted")
+
+
+# ---------------------------------------------------------------------------
 # Folder DB
 # ---------------------------------------------------------------------------
 
