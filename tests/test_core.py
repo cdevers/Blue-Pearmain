@@ -2877,6 +2877,15 @@ class TestCheckPhoto(unittest.TestCase):
         ).fetchone()
         self.assertNotEqual(row["flickr_deleted"], 1)
 
+    def test_reconcile_skips_flickr_deleted_photos(self):
+        """main() must not call get_photo_info for photos already marked flickr_deleted."""
+        # Pre-mark the photo as deleted (as if a previous run already handled it)
+        self.db.mark_flickr_deleted(self.photo_id)
+
+        _code, _out, mock_client = self._run_main()
+
+        mock_client.get_photo_info.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Poller push_errors propagation

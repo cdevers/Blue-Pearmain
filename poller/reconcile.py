@@ -249,6 +249,7 @@ def main():
            FROM photos
            WHERE flickr_id IS NOT NULL
              AND (perms_pushed_flickr = 1 OR tags_pushed_flickr = 1)
+             AND (flickr_deleted IS NULL OR flickr_deleted = 0)
            ORDER BY reviewed_at DESC
            LIMIT ?""",
         (args.limit,),
