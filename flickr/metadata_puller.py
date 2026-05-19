@@ -416,7 +416,7 @@ def pull_photo_metadata(
         try:
             flickr_meta = _fetch_flickr_metadata(flickr, flickr_id)
         except FlickrError as e:
-            if e.code == 1:
+            if e.code in (1, 404):
                 # Photo was deleted from Flickr; record it so future runs skip it
                 result["status"] = "flickr_deleted"
                 if not dry_run:

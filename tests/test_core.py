@@ -4096,6 +4096,20 @@ class TestMetadataPuller(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row["flickr_deleted"], 0)  # not written in dry-run
 
+    def test_http_404_returns_flickr_deleted_status(self):
+        """FlickrError(404) from HTTP 404 is treated identically to code 1."""
+        from flickr.flickr_client import FlickrError
+
+        self.mock_flickr.get_photo_info.side_effect = FlickrError(404, "HTTP 404")
+        from flickr.metadata_puller import pull_photo_metadata
+
+        result = pull_photo_metadata(self.db, self.mock_flickr, self.photo_id, self.library)
+        self.assertEqual(result["status"], "flickr_deleted")
+        row = self.db.conn.execute(
+            "SELECT flickr_deleted FROM photos WHERE id = ?", (self.photo_id,)
+        ).fetchone()
+        self.assertEqual(row["flickr_deleted"], 1)
+
     def test_write_error_counted_as_write_error_status(self):
         from unittest.mock import patch
 
