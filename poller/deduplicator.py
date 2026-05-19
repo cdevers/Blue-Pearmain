@@ -988,6 +988,14 @@ def main() -> None:
         action="store_true",
         help="Execute deletions (default is dry-run). Requires --delete-discards.",
     )
+    parser.add_argument(
+        "--mark-discards",
+        action="store_true",
+        help=(
+            "Mark confirmed reupload discards as duplicate_flickr in the DB "
+            "(requires --flickr; use --apply to execute, default is dry-run)"
+        ),
+    )
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -1004,8 +1012,14 @@ def main() -> None:
     if args.delete_discards and not args.flickr:
         log.error("--delete-discards requires --flickr")
         sys.exit(1)
-    if args.apply and not args.delete_discards:
-        log.error("--apply requires --delete-discards")
+    if args.mark_discards and not args.flickr:
+        log.error("--mark-discards requires --flickr")
+        sys.exit(1)
+    if args.mark_discards and args.delete_discards:
+        log.error("--mark-discards and --delete-discards cannot be used together")
+        sys.exit(1)
+    if args.apply and not args.delete_discards and not args.mark_discards:
+        log.error("--apply requires --delete-discards or --mark-discards")
         sys.exit(1)
 
     config_path = Path(args.config)
@@ -1026,6 +1040,11 @@ def main() -> None:
                 "--confirm is not supported with --flickr (use --flickr --write to group only)"
             )
             sys.exit(1)
+        if args.mark_discards:
+            log.info("Marking reupload discards in %s …", db_path)
+            _mark_reupload_discards(conn, dry_run=not args.apply, verbose=args.verbose)
+            conn.close()
+            return
         if args.delete_discards:
             log.info("Loading Flickr client for delete-discards …")
             from flickr.flickr_client import FlickrClient
