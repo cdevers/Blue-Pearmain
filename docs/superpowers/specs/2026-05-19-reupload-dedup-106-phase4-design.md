@@ -1,6 +1,7 @@
 # Re-upload Dedup Phase 4: UI Cross-Linking — Design (#106)
 
 **GitHub issue:** #106
+**Status:** ✓ done
 **Depends on:** #17 (Phase 1 — detection + DB grouping), #104 (Phase 2 — mark/delete discards)
 
 ---
