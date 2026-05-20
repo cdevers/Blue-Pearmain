@@ -38,7 +38,9 @@ _TRANSIENT_FLICKR_CODES = {
     106,  # service unavailable
 }
 
-# Specific Flickr error codes with special handling
+# Flickr error codes are method-scoped: the same integer can appear in multiple
+# constants below if different API methods use that code for different meanings.
+# Always use the named constant, not the bare integer, so the context is clear.
 FLICKR_ERR_NOT_FOUND = 1  # Photo not found (e.g. manually deleted on Flickr)
 FLICKR_ERR_MAX_TAGS = 2  # Maximum number of tags reached (75 tag limit)
 FLICKR_ERR_ALREADY_IN_SET = 3  # Photo already in photoset — idempotent success
