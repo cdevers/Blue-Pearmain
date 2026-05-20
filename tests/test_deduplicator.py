@@ -1156,9 +1156,13 @@ class TestSyncKeeperMetadata(unittest.TestCase):
         self.assertEqual(linked["height"], 3000)
         self.assertEqual(linked["thumbnail_path"], "/thumb/54000.jpg")
         self.assertEqual(linked["flickr_deleted"], 0)
+        self.assertIsNotNone(linked["updated_at"])
 
-        orphan = conn.execute("SELECT merged_into_id FROM photos WHERE id = 1").fetchone()
+        orphan = conn.execute(
+            "SELECT merged_into_id, updated_at FROM photos WHERE id = 1"
+        ).fetchone()
         self.assertEqual(orphan["merged_into_id"], 2)
+        self.assertIsNotNone(orphan["updated_at"])
 
         group = conn.execute("SELECT resolved FROM duplicate_groups WHERE id = 1").fetchone()
         self.assertEqual(group["resolved"], 1)
@@ -1204,11 +1208,15 @@ class TestSyncKeeperMetadata(unittest.TestCase):
         count = _sync_keeper_metadata(conn, dry_run=True)
         self.assertEqual(count, 1)  # eligible count returned in dry-run
 
-        linked = conn.execute("SELECT flickr_id FROM photos WHERE id = 2").fetchone()
+        linked = conn.execute("SELECT flickr_id, updated_at FROM photos WHERE id = 2").fetchone()
         self.assertEqual(linked["flickr_id"], "48000")  # DB unchanged
+        self.assertIsNone(linked["updated_at"])  # not written in dry-run
 
-        orphan = conn.execute("SELECT merged_into_id FROM photos WHERE id = 1").fetchone()
+        orphan = conn.execute(
+            "SELECT merged_into_id, updated_at FROM photos WHERE id = 1"
+        ).fetchone()
         self.assertIsNone(orphan["merged_into_id"])  # not soft-deleted
+        self.assertIsNone(orphan["updated_at"])  # not written in dry-run
 
         group = conn.execute("SELECT resolved FROM duplicate_groups WHERE id = 1").fetchone()
         self.assertEqual(group["resolved"], 0)  # not resolved

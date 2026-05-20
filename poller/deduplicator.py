@@ -904,7 +904,7 @@ def _sync_keeper_metadata(
             f"→ linked id={r['linked_id']} ({r['linked_filename']})"
         )
     if not verbose and len(rows) > 10:
-        print(f"  ... ({len(rows) - 10} shown, use --verbose to see all)")
+        print(f"  ... and {len(rows) - 10} more (use --verbose to see all)")
 
     if dry_run:
         print("\nDry run — no changes written. Use --apply to persist.")
