@@ -11147,6 +11147,11 @@ class TestSyncAlbumsRemoval(unittest.TestCase):
 
         self.assertEqual(result["already_gone"], 1)
         self.assertEqual(result["photos_removed"], 0)
+        row = self.db.conn.execute(
+            "SELECT 1 FROM photo_albums WHERE photo_id=? AND album_id=?",
+            (self.photo_id, self.album_id),
+        ).fetchone()
+        self.assertIsNone(row, "DB row must be cleaned up even when photoset was already gone")
 
     def test_apply_remove_failure_leaves_row_for_retry(self):
         """An unexpected Flickr error must leave the tombstone in place for retry."""

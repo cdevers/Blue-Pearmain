@@ -210,8 +210,7 @@ def main() -> int:
             f"already-reconciled={removal_result['already_gone']}  "
             f"removal failed={removal_result['failed']}"
         )
-        if failed == 0:
-            failed = removal_result["failed"]
+        failed += removal_result["failed"]
 
     db.close()
     return 1 if failed else 0

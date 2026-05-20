@@ -1049,5 +1049,170 @@ class TestDeleteDiscardsQuery(unittest.TestCase):
         self.assertEqual(rows[0]["flickr_id"], "48922000000")
 
 
+def _make_db_for_sync() -> _sqlite3.Connection:
+    """In-memory DB with all columns needed by _sync_keeper_metadata() tests."""
+    conn = _sqlite3.connect(":memory:")
+    conn.row_factory = _sqlite3.Row
+    conn.execute("""
+        CREATE TABLE duplicate_groups (
+            id INTEGER PRIMARY KEY,
+            match_key TEXT NOT NULL UNIQUE,
+            group_type TEXT NOT NULL,
+            resolved INTEGER NOT NULL DEFAULT 0,
+            resolved_at TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE photos (
+            id INTEGER PRIMARY KEY,
+            flickr_id TEXT,
+            uuid TEXT,
+            original_filename TEXT,
+            duplicate_group_id INTEGER,
+            duplicate_role TEXT,
+            flickr_deleted INTEGER DEFAULT 0,
+            flickr_secret TEXT,
+            flickr_server TEXT,
+            flickr_farm INTEGER,
+            flickr_title TEXT,
+            flickr_description TEXT,
+            flickr_tags TEXT,
+            flickr_tags_hash TEXT,
+            flickr_last_updated TEXT,
+            width INTEGER,
+            height INTEGER,
+            thumbnail_path TEXT,
+            merged_into_id INTEGER,
+            updated_at TEXT
+        )
+    """)
+    return conn
+
+
+class TestSyncKeeperMetadata(unittest.TestCase):
+    """Tests for _sync_keeper_metadata() — Phase 3 metadata transfer."""
+
+    def _setup(
+        self,
+        group_type: str = "reupload",
+        resolved: int = 0,
+        discard_flickr_deleted: int = 1,
+        keeper_has_uuid: bool = False,
+    ) -> _sqlite3.Connection:
+        """Seed one reupload group with orphan keeper + linked discard."""
+        conn = _make_db_for_sync()
+        conn.execute(
+            "INSERT INTO duplicate_groups (id, match_key, group_type, resolved)"
+            " VALUES (1, 'reupload:48000:54000', ?, ?)",
+            (group_type, resolved),
+        )
+        # Orphan (keeper): Flickr-only unless keeper_has_uuid=True
+        conn.execute(
+            """INSERT INTO photos
+               (id, flickr_id, uuid, original_filename,
+                duplicate_group_id, duplicate_role, flickr_deleted,
+                flickr_secret, flickr_server, flickr_farm,
+                flickr_title, flickr_description, flickr_tags, flickr_tags_hash,
+                flickr_last_updated, width, height, thumbnail_path)
+               VALUES (1, '54000', ?, 'IMG_001.JPG',
+                       1, 'keeper', 0,
+                       'sec1', '65535', 1,
+                       'My Title', 'My Desc', '["a","b"]', 'hash1',
+                       '2024-01-01T00:00:00Z', 4000, 3000, '/thumb/54000.jpg')""",
+            ("keeper-uuid" if keeper_has_uuid else None,),
+        )
+        # Linked (discard): has uuid, Flickr photo deleted
+        conn.execute(
+            """INSERT INTO photos
+               (id, flickr_id, uuid, original_filename,
+                duplicate_group_id, duplicate_role, flickr_deleted,
+                width, height)
+               VALUES (2, '48000', 'photos-uuid-001', 'IMG_001.JPG',
+                       1, 'discard', ?,
+                       2000, 1500)""",
+            (discard_flickr_deleted,),
+        )
+        conn.commit()
+        return conn
+
+    def test_syncs_all_fields_to_linked(self):
+        from poller.deduplicator import _sync_keeper_metadata
+
+        conn = self._setup()
+        count = _sync_keeper_metadata(conn, dry_run=False)
+        self.assertEqual(count, 1)
+
+        linked = conn.execute("SELECT * FROM photos WHERE id = 2").fetchone()
+        self.assertEqual(linked["flickr_id"], "54000")
+        self.assertEqual(linked["flickr_secret"], "sec1")
+        self.assertEqual(linked["flickr_server"], "65535")
+        self.assertEqual(linked["flickr_farm"], 1)
+        self.assertEqual(linked["flickr_title"], "My Title")
+        self.assertEqual(linked["flickr_description"], "My Desc")
+        self.assertEqual(linked["flickr_tags"], '["a","b"]')
+        self.assertEqual(linked["flickr_tags_hash"], "hash1")
+        self.assertEqual(linked["flickr_last_updated"], "2024-01-01T00:00:00Z")
+        self.assertEqual(linked["width"], 4000)
+        self.assertEqual(linked["height"], 3000)
+        self.assertEqual(linked["thumbnail_path"], "/thumb/54000.jpg")
+        self.assertEqual(linked["flickr_deleted"], 0)
+
+        orphan = conn.execute("SELECT merged_into_id FROM photos WHERE id = 1").fetchone()
+        self.assertEqual(orphan["merged_into_id"], 2)
+
+        group = conn.execute("SELECT resolved FROM duplicate_groups WHERE id = 1").fetchone()
+        self.assertEqual(group["resolved"], 1)
+
+    def test_skips_when_keeper_is_linked(self):
+        from poller.deduplicator import _sync_keeper_metadata
+
+        conn = self._setup(keeper_has_uuid=True)
+        count = _sync_keeper_metadata(conn, dry_run=False)
+        self.assertEqual(count, 0)
+
+        linked = conn.execute("SELECT flickr_id FROM photos WHERE id = 2").fetchone()
+        self.assertEqual(linked["flickr_id"], "48000")  # unchanged
+
+    def test_skips_when_discard_not_deleted(self):
+        from poller.deduplicator import _sync_keeper_metadata
+
+        conn = self._setup(discard_flickr_deleted=0)
+        count = _sync_keeper_metadata(conn, dry_run=False)
+        self.assertEqual(count, 0)
+
+        linked = conn.execute("SELECT flickr_id FROM photos WHERE id = 2").fetchone()
+        self.assertEqual(linked["flickr_id"], "48000")  # unchanged
+
+    def test_skips_uncertain_groups(self):
+        from poller.deduplicator import _sync_keeper_metadata
+
+        conn = self._setup(group_type="reupload_uncertain")
+        count = _sync_keeper_metadata(conn, dry_run=False)
+        self.assertEqual(count, 0)
+
+    def test_skips_resolved_groups(self):
+        from poller.deduplicator import _sync_keeper_metadata
+
+        conn = self._setup(resolved=1)
+        count = _sync_keeper_metadata(conn, dry_run=False)
+        self.assertEqual(count, 0)
+
+    def test_dry_run_no_changes(self):
+        from poller.deduplicator import _sync_keeper_metadata
+
+        conn = self._setup()
+        count = _sync_keeper_metadata(conn, dry_run=True)
+        self.assertEqual(count, 1)  # eligible count returned in dry-run
+
+        linked = conn.execute("SELECT flickr_id FROM photos WHERE id = 2").fetchone()
+        self.assertEqual(linked["flickr_id"], "48000")  # DB unchanged
+
+        orphan = conn.execute("SELECT merged_into_id FROM photos WHERE id = 1").fetchone()
+        self.assertIsNone(orphan["merged_into_id"])  # not soft-deleted
+
+        group = conn.execute("SELECT resolved FROM duplicate_groups WHERE id = 1").fetchone()
+        self.assertEqual(group["resolved"], 0)  # not resolved
+
+
 if __name__ == "__main__":
     unittest.main()
