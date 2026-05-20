@@ -244,7 +244,7 @@
         &nbsp;·&nbsp;
         <span>Filename match: {{ 'Yes' if group.notes_parsed.filename_match else 'No' }}</span>
         &nbsp;·&nbsp;
-        <span>Dimension ratio: {{ group.notes_parsed.dimension_ratio or '—' }}</span>
+        <span>Dimension ratio: {{ group.notes_parsed.dimension_ratio if group.notes_parsed.dimension_ratio is not none else '—' }}</span>
         {% if group.notes_parsed.summary %}
         <div style="margin-top:4px">{{ group.notes_parsed.summary }}</div>
         {% endif %}
