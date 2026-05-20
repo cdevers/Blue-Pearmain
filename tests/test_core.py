@@ -11038,5 +11038,180 @@ class TestTagWriteback(unittest.TestCase):
         self.assertEqual(result["updated"] + result["ok"], 1)
 
 
+class TestSyncAlbumsRemoval(unittest.TestCase):
+    """Tests for the sync-albums removal phase (run_removal_phase)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        # Album with a Flickr set
+        self.album_id = self.db.upsert_album("uuid-a1", "Paris")
+        self.db.set_album_flickr_set_id(self.album_id, "set-123")
+        # Photo pushed to that album
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "photo-001",
+                "original_filename": "IMG_001.jpg",
+                "privacy_state": "candidate_public",
+                "flickr_id": "flickr-111",
+            }
+        )
+        self.db.upsert_photo_album(self.photo_id, self.album_id)
+        self.db.mark_album_pushed(self.photo_id, self.album_id)
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _make_flickr(self, remove_side_effect=None, delete_side_effect=None):
+        from unittest.mock import MagicMock
+
+        flickr = MagicMock()
+        if remove_side_effect:
+            flickr.remove_photo_from_photoset.side_effect = remove_side_effect
+        if delete_side_effect:
+            flickr.delete_photoset.side_effect = delete_side_effect
+        return flickr
+
+    def test_preview_mode_no_writes(self):
+        """--remove without --apply must not call Flickr or mutate DB."""
+        from flickr.sync_albums import run_removal_phase
+
+        self.db.mark_photo_album_removed(self.photo_id, self.album_id)
+        flickr = self._make_flickr()
+
+        result = run_removal_phase(self.db, flickr, apply=False)
+
+        flickr.remove_photo_from_photoset.assert_not_called()
+        flickr.delete_photoset.assert_not_called()
+        self.assertEqual(result["photos_removed"], 0)
+        # Row must still be tombstoned (not cleaned up)
+        row = self.db.conn.execute(
+            "SELECT removed_at FROM photo_albums WHERE photo_id=? AND album_id=?",
+            (self.photo_id, self.album_id),
+        ).fetchone()
+        self.assertIsNotNone(row["removed_at"])
+
+    def test_apply_removes_photo_from_photoset(self):
+        """--apply must call removePhoto and delete the photo_albums row."""
+        from flickr.sync_albums import run_removal_phase
+
+        self.db.mark_photo_album_removed(self.photo_id, self.album_id)
+        flickr = self._make_flickr()
+
+        result = run_removal_phase(self.db, flickr, apply=True)
+
+        flickr.remove_photo_from_photoset.assert_called_once_with("set-123", "flickr-111")
+        self.assertEqual(result["photos_removed"], 1)
+        row = self.db.conn.execute(
+            "SELECT 1 FROM photo_albums WHERE photo_id=? AND album_id=?",
+            (self.photo_id, self.album_id),
+        ).fetchone()
+        self.assertIsNone(row, "photo_albums row must be deleted after successful removal")
+
+    def test_apply_photo_not_in_set_treated_as_success(self):
+        """FLICKR_ERR_PHOTO_NOT_IN_SET during removePhoto must clean up the row
+        and count as already_gone (not photos_removed) — desired state achieved."""
+        from flickr.sync_albums import run_removal_phase
+        from flickr.flickr_client import FlickrError, FLICKR_ERR_PHOTO_NOT_IN_SET
+
+        self.db.mark_photo_album_removed(self.photo_id, self.album_id)
+        flickr = self._make_flickr(
+            remove_side_effect=FlickrError(FLICKR_ERR_PHOTO_NOT_IN_SET, "Photo not in set")
+        )
+
+        result = run_removal_phase(self.db, flickr, apply=True)
+
+        self.assertEqual(result["already_gone"], 1)
+        self.assertEqual(result["photos_removed"], 0)
+        row = self.db.conn.execute(
+            "SELECT 1 FROM photo_albums WHERE photo_id=? AND album_id=?",
+            (self.photo_id, self.album_id),
+        ).fetchone()
+        self.assertIsNone(row, "DB row must still be cleaned up even when Flickr says already gone")
+
+    def test_apply_photoset_not_found_during_remove_photo_treated_as_success(self):
+        """FLICKR_ERR_NOT_FOUND (code 1) from removePhoto means photoset gone — clean up
+        and count as already_gone."""
+        from flickr.sync_albums import run_removal_phase
+        from flickr.flickr_client import FlickrError, FLICKR_ERR_NOT_FOUND
+
+        self.db.mark_photo_album_removed(self.photo_id, self.album_id)
+        flickr = self._make_flickr(
+            remove_side_effect=FlickrError(FLICKR_ERR_NOT_FOUND, "Photoset not found")
+        )
+
+        result = run_removal_phase(self.db, flickr, apply=True)
+
+        self.assertEqual(result["already_gone"], 1)
+        self.assertEqual(result["photos_removed"], 0)
+
+    def test_apply_remove_failure_leaves_row_for_retry(self):
+        """An unexpected Flickr error must leave the tombstone in place for retry."""
+        from flickr.sync_albums import run_removal_phase
+        from flickr.flickr_client import FlickrError
+
+        self.db.mark_photo_album_removed(self.photo_id, self.album_id)
+        flickr = self._make_flickr(remove_side_effect=FlickrError(99, "Server exploded"))
+
+        result = run_removal_phase(self.db, flickr, apply=True)
+
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(result["photos_removed"], 0)
+        row = self.db.conn.execute(
+            "SELECT removed_at FROM photo_albums WHERE photo_id=? AND album_id=?",
+            (self.photo_id, self.album_id),
+        ).fetchone()
+        self.assertIsNotNone(row["removed_at"], "tombstone must remain on failure")
+
+    def test_step1_deleted_album_before_step2_prevents_double_processing(self):
+        """Deleting an album in Step 1 must CASCADE-delete its photo_albums rows
+        so Step 2 does not also process those rows via removePhoto."""
+        from flickr.sync_albums import run_removal_phase
+
+        # Mark the whole album as deleted in Apple Photos
+        self.db.mark_photo_album_removed(self.photo_id, self.album_id)
+        self.db.conn.execute(
+            "UPDATE albums SET deleted_at=? WHERE id=?",
+            ("2026-05-13T00:00:00+00:00", self.album_id),
+        )
+        self.db.conn.commit()
+        flickr = self._make_flickr()
+
+        run_removal_phase(self.db, flickr, apply=True)
+
+        flickr.delete_photoset.assert_called_once_with("set-123")
+        # removePhoto must NOT have been called — the CASCADE from delete_album handles it
+        flickr.remove_photo_from_photoset.assert_not_called()
+
+    def test_step1_photoset_not_found_cleans_local_state(self):
+        """FLICKR_ERR_NOT_FOUND from delete_photoset means photoset already gone —
+        must count as already_gone (not photosets_deleted) and still clean up local state."""
+        from flickr.sync_albums import run_removal_phase
+        from flickr.flickr_client import FlickrError, FLICKR_ERR_NOT_FOUND
+
+        self.db.conn.execute(
+            "UPDATE albums SET deleted_at=? WHERE id=?",
+            ("2026-05-13T00:00:00+00:00", self.album_id),
+        )
+        self.db.conn.commit()
+        flickr = self._make_flickr(
+            delete_side_effect=FlickrError(FLICKR_ERR_NOT_FOUND, "Photoset not found")
+        )
+
+        result = run_removal_phase(self.db, flickr, apply=True)
+
+        self.assertEqual(result["already_gone"], 1)
+        self.assertEqual(result["photosets_deleted"], 0)
+        album_row = self.db.conn.execute(
+            "SELECT 1 FROM albums WHERE id=?", (self.album_id,)
+        ).fetchone()
+        self.assertIsNone(
+            album_row, "albums row must be deleted even when photoset was already gone"
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
