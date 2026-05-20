@@ -7895,6 +7895,59 @@ class TestRotateFlickrApi(unittest.TestCase):
         finally:
             reviewer_app._client = None
 
+    def test_rotate_clears_display_rotation_when_info_refreshes(self):
+        """When get_photo_info returns a new secret, display_rotation must be 0."""
+        from unittest.mock import MagicMock
+        import reviewer.app as reviewer_app
+
+        mock_c = MagicMock()
+        mock_c.rotate.return_value = {"stat": "ok"}
+        mock_c.get_photo_info.return_value = {
+            "photo": {"secret": "newsecret999", "server": "65535"}
+        }
+        reviewer_app._client = mock_c
+        try:
+            resp = self._post(self.photo_id, 90)
+            self.assertEqual(resp.status_code, 200)
+            d = resp.get_json()
+            self.assertTrue(d["ok"])
+            self.assertEqual(d["display_rotation"], 0)
+            row = self._db.conn.execute(
+                "SELECT display_rotation FROM photos WHERE id = ?", (self.photo_id,)
+            ).fetchone()
+            self.assertEqual(row["display_rotation"], 0)
+        finally:
+            reviewer_app._client = None
+
+    def test_rotate_keeps_display_rotation_when_info_fails(self):
+        """When get_photo_info raises FlickrError, display_rotation must accumulate (current+degrees)."""
+        from unittest.mock import MagicMock
+        from flickr.flickr_client import FlickrError
+        import reviewer.app as reviewer_app
+
+        # Seed a non-zero starting rotation to verify accumulation, not just degrees
+        self._db.conn.execute(
+            "UPDATE photos SET display_rotation = 45 WHERE id = ?", (self.photo_id,)
+        )
+        self._db.conn.commit()
+
+        mock_c = MagicMock()
+        mock_c.rotate.return_value = {"stat": "ok"}
+        mock_c.get_photo_info.side_effect = FlickrError(1, "not found")
+        reviewer_app._client = mock_c
+        try:
+            resp = self._post(self.photo_id, 90)
+            self.assertEqual(resp.status_code, 200)
+            d = resp.get_json()
+            self.assertTrue(d["ok"])
+            self.assertEqual(d["display_rotation"], 135)  # (45 + 90) % 360
+            row = self._db.conn.execute(
+                "SELECT display_rotation FROM photos WHERE id = ?", (self.photo_id,)
+            ).fetchone()
+            self.assertEqual(row["display_rotation"], 135)
+        finally:
+            reviewer_app._client = None
+
     def test_rotate_buttons_shown_when_flickr_id_set(self):
         with self._app.test_request_context():
             resp = self._client.get(f"/photo/{self.photo_id}")
