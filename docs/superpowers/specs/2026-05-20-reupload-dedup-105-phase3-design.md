@@ -1,6 +1,7 @@
 # Re-upload Dedup Phase 3: Metadata Sync from Keeper to Linked Record — Design (#105)
 
 **GitHub issue:** #105
+**Status:** ✓ done
 **Depends on:** #17 (Phase 1 — detection + DB grouping), #104 (Phase 2 — mark/delete discards)
 
 ---
