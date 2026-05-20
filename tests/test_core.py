@@ -3323,6 +3323,126 @@ class TestSyncPhotoAlbumsRemovals(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# sync_deleted_albums
+# ---------------------------------------------------------------------------
+
+
+class TestSyncDeletedAlbums(unittest.TestCase):
+    """sync_deleted_albums must mark albums deleted in Apple Photos with deleted_at."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+
+        self.db = Database(Path(self._tmp.name) / "test.db")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _make_photosdb(self, album_uuids):
+        """Stub photosdb that returns AlbumInfo objects for the given UUIDs."""
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            album_info=[SimpleNamespace(uuid=u, title=f"Album-{u}") for u in album_uuids]
+        )
+
+    def test_marks_deleted_album(self):
+        from poller.scanner import sync_deleted_albums
+
+        aid = self.db.upsert_album("uuid-gone", "Gone Album")
+        # Seed a second album that still exists
+        self.db.upsert_album("uuid-here", "Here Album")
+
+        photosdb = self._make_photosdb(["uuid-here"])  # uuid-gone is absent
+        sync_deleted_albums(photosdb, self.db, dry_run=False)
+
+        row = self.db.conn.execute("SELECT deleted_at FROM albums WHERE id=?", (aid,)).fetchone()
+        self.assertIsNotNone(row["deleted_at"], "absent album must be tombstoned")
+
+    def test_does_not_mark_present_albums(self):
+        from poller.scanner import sync_deleted_albums
+
+        self.db.upsert_album("uuid-here", "Here Album")
+
+        photosdb = self._make_photosdb(["uuid-here"])
+        sync_deleted_albums(photosdb, self.db, dry_run=False)
+
+        row = self.db.conn.execute(
+            "SELECT deleted_at FROM albums WHERE apple_uuid=?", ("uuid-here",)
+        ).fetchone()
+        self.assertIsNone(row["deleted_at"])
+
+    def test_plausibility_guard_zero_albums(self):
+        from poller.scanner import sync_deleted_albums
+
+        self.db.upsert_album("uuid-a", "Album A")
+        self.db.upsert_album("uuid-b", "Album B")
+
+        photosdb = self._make_photosdb([])  # osxphotos returns nothing — suspicious
+        sync_deleted_albums(photosdb, self.db, dry_run=False)
+
+        count = self.db.conn.execute(
+            "SELECT COUNT(*) AS n FROM albums WHERE deleted_at IS NOT NULL"
+        ).fetchone()["n"]
+        self.assertEqual(
+            count, 0, "plausibility guard must block tombstoning when osxphotos returns zero"
+        )
+
+    def test_plausibility_guard_threshold(self):
+        from poller.scanner import sync_deleted_albums
+
+        # 4 albums in DB, osxphotos returns 1 (25% — below 50% threshold)
+        for i in range(4):
+            self.db.upsert_album(f"uuid-{i}", f"Album {i}")
+
+        photosdb = self._make_photosdb(["uuid-0"])
+        sync_deleted_albums(photosdb, self.db, dry_run=False)
+
+        count = self.db.conn.execute(
+            "SELECT COUNT(*) AS n FROM albums WHERE deleted_at IS NOT NULL"
+        ).fetchone()["n"]
+        self.assertEqual(count, 0, "plausibility guard must block when observed < 50% of stored")
+
+    def test_dry_run_does_not_tombstone(self):
+        from poller.scanner import sync_deleted_albums
+
+        self.db.upsert_album("uuid-gone", "Gone Album")
+        self.db.upsert_album("uuid-here", "Here Album")
+
+        photosdb = self._make_photosdb(["uuid-here"])
+        sync_deleted_albums(photosdb, self.db, dry_run=True)
+
+        row = self.db.conn.execute(
+            "SELECT deleted_at FROM albums WHERE apple_uuid=?", ("uuid-gone",)
+        ).fetchone()
+        self.assertIsNone(row["deleted_at"], "dry_run must not tombstone")
+
+    def test_does_not_re_tombstone_already_deleted(self):
+        from poller.scanner import sync_deleted_albums
+
+        aid = self.db.upsert_album("uuid-gone", "Gone")
+        self.db.conn.execute(
+            "UPDATE albums SET deleted_at='2026-01-01T00:00:00+00:00' WHERE id=?", (aid,)
+        )
+        self.db.conn.commit()
+
+        # Add a second album to avoid triggering the zero-albums guard
+        self.db.upsert_album("uuid-other", "Other")
+        # 1 non-deleted album, 1 deleted → stored_count (non-deleted) = 1, observed = 1 → OK
+        photosdb = self._make_photosdb(["uuid-other"])
+        sync_deleted_albums(photosdb, self.db, dry_run=False)
+
+        row = self.db.conn.execute("SELECT deleted_at FROM albums WHERE id=?", (aid,)).fetchone()
+        self.assertEqual(
+            row["deleted_at"],
+            "2026-01-01T00:00:00+00:00",
+            "existing deleted_at must not be overwritten",
+        )
+
+
+# ---------------------------------------------------------------------------
 # Album DB methods
 # ---------------------------------------------------------------------------
 

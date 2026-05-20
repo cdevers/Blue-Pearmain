@@ -264,6 +264,64 @@ def sync_photo_albums(photo, photo_db_id: int, db: Database, dry_run: bool) -> N
                 )
 
 
+def sync_deleted_albums(photosdb, db: Database, dry_run: bool) -> int:
+    """
+    Detect albums deleted from Apple Photos and mark them for Flickr photoset cleanup.
+
+    Compares all album UUIDs from osxphotos against stored album rows and tombstones
+    any that have disappeared. Includes a plausibility guard: if osxphotos returns
+    fewer than 50% of the stored baseline, aborts to prevent mass false-positives
+    from transient osxphotos failures.
+
+    Note: the 50% threshold may abort legitimately for very small libraries (e.g.,
+    deleting 1 of 2 albums). Blue Pearmain users have large libraries in practice;
+    if this ever matters, add an absolute minimum-difference floor alongside the %.
+
+    Returns the count of albums newly marked deleted.
+    """
+    try:
+        current_album_infos = photosdb.album_info
+    except Exception as e:
+        log.warning("sync_deleted_albums: could not fetch album list from osxphotos: %s", e)
+        return 0
+
+    current_uuids = {a.uuid for a in current_album_infos}
+
+    stored_count = db.conn.execute(
+        "SELECT COUNT(*) AS n FROM albums WHERE deleted_at IS NULL"
+    ).fetchone()["n"]
+
+    if stored_count > 0 and len(current_uuids) < stored_count * 0.5:
+        log.warning(
+            "sync_deleted_albums: plausibility guard triggered — "
+            "osxphotos returned %d albums but DB has %d non-deleted; "
+            "aborting to prevent false deletions",
+            len(current_uuids),
+            stored_count,
+        )
+        return 0
+
+    stored_albums = db.conn.execute(
+        "SELECT id, apple_uuid, name FROM albums WHERE deleted_at IS NULL"
+    ).fetchall()
+
+    marked = 0
+    for row in stored_albums:
+        if row["apple_uuid"] not in current_uuids:
+            if dry_run:
+                log.info(
+                    "  [dry-run] album %r (%s) would be marked deleted",
+                    row["name"],
+                    row["apple_uuid"],
+                )
+            else:
+                db.mark_album_deleted(row["id"])
+                log.info("album %r (%s) marked deleted", row["name"], row["apple_uuid"])
+            marked += 1
+
+    return marked
+
+
 # ---------------------------------------------------------------------------
 # Matching logic
 # ---------------------------------------------------------------------------
@@ -654,6 +712,8 @@ def scan(
     if since is None:
         deleted = sync_deleted_photos(photosdb, db, dry_run)
 
+    # Detect albums deleted from Apple Photos since last scan
+    sync_deleted_albums(photosdb, db, dry_run)
     return scanned, matched, enriched, inserted, linked, deleted
 
 
