@@ -234,7 +234,8 @@ CREATE TABLE IF NOT EXISTS albums (
     flickr_set_url  TEXT,
     flickr_name     TEXT,                   -- last name pushed to Flickr photoset title
     created_at      TEXT,
-    updated_at      TEXT
+    updated_at      TEXT,
+    deleted_at      TEXT                    -- ISO8601; set when album is removed from Photos
 );
 
 -- Per-photo album membership
@@ -243,6 +244,7 @@ CREATE TABLE IF NOT EXISTS photo_albums (
     album_id        INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
     flickr_pushed   INTEGER DEFAULT 0,      -- boolean: added to Flickr photoset?
     pushed_at       TEXT,
+    removed_at      TEXT,                   -- ISO8601; set when photo is removed from album in Photos
     PRIMARY KEY (photo_id, album_id)
 );
 

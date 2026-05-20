@@ -42,6 +42,7 @@ _TRANSIENT_FLICKR_CODES = {
 FLICKR_ERR_NOT_FOUND = 1  # Photo not found (e.g. manually deleted on Flickr)
 FLICKR_ERR_MAX_TAGS = 2  # Maximum number of tags reached (75 tag limit)
 FLICKR_ERR_ALREADY_IN_SET = 3  # Photo already in photoset — idempotent success
+FLICKR_ERR_PHOTO_NOT_IN_SET = 2  # photosets.removePhoto: photo not in the set
 
 
 class FlickrError(Exception):
@@ -427,6 +428,14 @@ class FlickrClient:
         self._call(
             "flickr.photosets.editMeta",
             {"photoset_id": photoset_id, "title": title},
+            http_method="POST",
+        )
+
+    def remove_photo_from_photoset(self, photoset_id: str, photo_id: str) -> None:
+        """Remove a photo from a Flickr photoset."""
+        self._call(
+            "flickr.photosets.removePhoto",
+            {"photoset_id": photoset_id, "photo_id": photo_id},
             http_method="POST",
         )
 

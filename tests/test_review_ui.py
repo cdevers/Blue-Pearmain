@@ -8,6 +8,7 @@ Run from repo root:
     python -m pytest tests/test_review_ui.py -v
 """
 
+import json as _json
 import sys
 import tempfile
 from pathlib import Path
@@ -1257,3 +1258,180 @@ class TestApiPushApprovedWritesPushedTags:
         ).fetchone()
         assert row is not None
         assert row["pushed_tags"] is None
+
+
+# ---------------------------------------------------------------------------
+# TestReuploadDuplicatesUI — GH #106
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def client_with_reupload_group():
+    """DB with one unresolved reupload group: keeper + discard with notes JSON."""
+    with tempfile.TemporaryDirectory() as tmp:
+        from db.migrations.migrate_003_dimensions_and_dedup import run as migrate_003
+
+        db_path = Path(tmp) / "test.db"
+        test_db = Database(db_path)
+        migrate_003(str(db_path))
+
+        notes = _json.dumps(
+            {
+                "summary": "Higher-res Flickr copy of a local photo",
+                "upload_session_gap": "14 days",
+                "filename_match": True,
+                "dimension_ratio": 0.85,
+                "keeper_flickr_id": "48910000",
+                "discard_flickr_id": "48900000",
+            }
+        )
+
+        # Keeper (higher-res Flickr-only)
+        keeper_id = test_db.upsert_photo(
+            {
+                "flickr_id": "48910000",
+                "flickr_secret": "sec1",
+                "flickr_server": "65535",
+                "original_filename": "IMG_001.JPG",
+                "date_taken": "2024-06-01 12:00:00",
+                "privacy_state": "candidate_public",
+                "width": 4000,
+                "height": 3000,
+            }
+        )
+
+        # Discard (lower-res, already marked)
+        discard_id = test_db.upsert_photo(
+            {
+                "flickr_id": "48900000",
+                "flickr_secret": "sec2",
+                "flickr_server": "65535",
+                "original_filename": "IMG_001.JPG",
+                "date_taken": "2024-06-01 12:00:00",
+                "privacy_state": "duplicate_flickr",
+            }
+        )
+
+        test_db.conn.execute(
+            "INSERT INTO duplicate_groups (match_key, group_type, photo_count, notes)"
+            " VALUES (?,?,?,?)",
+            ("reupload:48900000:48910000", "reupload", 2, notes),
+        )
+        group_id = test_db.conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+        test_db.conn.execute(
+            "UPDATE photos SET duplicate_group_id=?, duplicate_role='keeper' WHERE id=?",
+            (group_id, keeper_id),
+        )
+        test_db.conn.execute(
+            "UPDATE photos SET duplicate_group_id=?, duplicate_role='discard' WHERE id=?",
+            (group_id, discard_id),
+        )
+        test_db.conn.commit()
+
+        app_module._db = test_db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+
+        with app_module.app.test_client() as c:
+            yield c, test_db, group_id
+
+        app_module._db = None
+
+
+@pytest.fixture
+def client_with_reupload_uncertain_group():
+    """DB with one unresolved reupload_uncertain group (no notes JSON)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        from db.migrations.migrate_003_dimensions_and_dedup import run as migrate_003
+
+        db_path = Path(tmp) / "test.db"
+        test_db = Database(db_path)
+        migrate_003(str(db_path))
+
+        keeper_id = test_db.upsert_photo(
+            {
+                "flickr_id": "48920000",
+                "flickr_secret": "sec3",
+                "flickr_server": "65535",
+                "original_filename": "IMG_002.JPG",
+                "date_taken": "2024-07-01 10:00:00",
+                "privacy_state": "candidate_public",
+            }
+        )
+        discard_id = test_db.upsert_photo(
+            {
+                "flickr_id": "48910001",
+                "flickr_secret": "sec4",
+                "flickr_server": "65535",
+                "original_filename": "IMG_002.JPG",
+                "date_taken": "2024-07-01 10:00:00",
+                "privacy_state": "candidate_public",
+            }
+        )
+
+        test_db.conn.execute(
+            "INSERT INTO duplicate_groups (match_key, group_type, photo_count) VALUES (?,?,?)",
+            ("reupload:48910001:48920000", "reupload_uncertain", 2),
+        )
+        group_id = test_db.conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+        test_db.conn.execute(
+            "UPDATE photos SET duplicate_group_id=?, duplicate_role='keeper' WHERE id=?",
+            (group_id, keeper_id),
+        )
+        test_db.conn.execute(
+            "UPDATE photos SET duplicate_group_id=?, duplicate_role='discard' WHERE id=?",
+            (group_id, discard_id),
+        )
+        test_db.conn.commit()
+
+        app_module._db = test_db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+
+        with app_module.app.test_client() as c:
+            yield c, test_db, group_id
+
+        app_module._db = None
+
+
+class TestReuploadDuplicatesUI:
+    """GH #106 — reupload/reupload_uncertain groups appear in /duplicates."""
+
+    def test_reupload_group_appears_in_duplicates_page(self, client_with_reupload_group):
+        c, _, _ = client_with_reupload_group
+        resp = c.get("/duplicates")
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "Re-upload duplicate" in html
+        assert "48910000" in html
+        assert "48900000" in html
+
+    def test_reupload_uncertain_group_appears_in_duplicates_page(
+        self, client_with_reupload_uncertain_group
+    ):
+        c, _, _ = client_with_reupload_uncertain_group
+        resp = c.get("/duplicates")
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "Possible re-upload" in html
+        assert "Mark reviewed" in html
+
+    def test_reupload_notes_fields_rendered(self, client_with_reupload_group):
+        c, _, _ = client_with_reupload_group
+        resp = c.get("/duplicates")
+        html = resp.data.decode()
+        assert "14 days" in html
+        assert "Yes" in html  # filename_match=True → "Yes"
+        assert "0.85" in html
+
+    def test_reupload_match_key_no_crash(self, client_with_reupload_group):
+        """match_key 'reupload:{id1}:{id2}' must not cause a 500."""
+        c, _, _ = client_with_reupload_group
+        resp = c.get("/duplicates")
+        assert resp.status_code == 200
+
+    def test_reupload_null_notes_no_crash(self, client_with_reupload_uncertain_group):
+        """NULL notes must not cause a 500."""
+        c, _, _ = client_with_reupload_uncertain_group
+        resp = c.get("/duplicates")
+        assert resp.status_code == 200
