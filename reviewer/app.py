@@ -1166,22 +1166,27 @@ def api_rotate_flickr(photo_id: int):
     except FlickrError as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
-    # Accumulate rotation in DB so all views can apply the CSS correction
+    # display_rotation is a temporary CSS correction for the stale-thumbnail
+    # window. If get_photo_info returns a fresh secret, the /thumb/ route will
+    # redirect to the post-rotation CDN URL directly — no CSS correction needed.
+    # Only set it when we can't refresh the secret and the CDN URL is still stale.
     current = photo.get("display_rotation") or 0
-    new_rotation = (current + degrees) % 360
 
-    # Flickr re-encodes the image on rotation, which invalidates the stored
-    # secret (and therefore the CDN URL). Refresh secret/server before busting
-    # the thumbnail cache so the next thumbnailer run fetches the right URL.
     new_secret = photo.get("flickr_secret") or ""
     new_server = photo.get("flickr_server") or ""
+    info_refreshed = False
     try:
         info = c.get_photo_info(photo["flickr_id"])
         p = info.get("photo", {})
-        new_secret = p.get("secret") or new_secret
-        new_server = p.get("server") or new_server
+        fetched_secret = p.get("secret")
+        if fetched_secret:
+            new_secret = fetched_secret
+            new_server = p.get("server") or new_server
+            info_refreshed = True
     except FlickrError:
         pass  # stale secret is better than crashing; thumbnailer will retry
+
+    new_rotation = 0 if info_refreshed else (current + degrees) % 360
 
     db().conn.execute(
         """UPDATE photos
