@@ -829,6 +829,90 @@ def _insert_group_and_discard(
 
 
 # ---------------------------------------------------------------------------
+# TestCLI — CLI argument validation tests
+# ---------------------------------------------------------------------------
+
+
+class TestCLI(unittest.TestCase):
+    """Tests for main() CLI argument validation."""
+
+    def setUp(self):
+        """Create a minimal config file for tests."""
+        import tempfile
+        import yaml
+
+        self.config_dir = tempfile.TemporaryDirectory()
+        self.config_path = f"{self.config_dir.name}/test_config.yml"
+        config = {"database": {"path": ":memory:"}}
+        with open(self.config_path, "w") as f:
+            yaml.dump(config, f)
+
+    def tearDown(self):
+        """Clean up temp config."""
+        self.config_dir.cleanup()
+
+    def test_sync_metadata_requires_flickr(self):
+        """--sync-metadata without --flickr exits with error."""
+        from unittest.mock import patch
+        from poller.deduplicator import main
+
+        with self.assertRaises(SystemExit) as cm:
+            with patch("sys.argv", ["dedup", "--config", self.config_path, "--sync-metadata"]):
+                main()
+        self.assertNotEqual(cm.exception.code, 0)
+
+    def test_sync_metadata_mutually_exclusive_with_mark_discards(self):
+        """--sync-metadata with --mark-discards exits with error."""
+        from unittest.mock import patch
+        from poller.deduplicator import main
+
+        with self.assertRaises(SystemExit) as cm:
+            with patch(
+                "sys.argv",
+                [
+                    "dedup",
+                    "--config",
+                    self.config_path,
+                    "--flickr",
+                    "--sync-metadata",
+                    "--mark-discards",
+                ],
+            ):
+                main()
+        self.assertNotEqual(cm.exception.code, 0)
+
+    def test_sync_metadata_mutually_exclusive_with_delete_discards(self):
+        """--sync-metadata with --delete-discards exits with error."""
+        from unittest.mock import patch
+        from poller.deduplicator import main
+
+        with self.assertRaises(SystemExit) as cm:
+            with patch(
+                "sys.argv",
+                [
+                    "dedup",
+                    "--config",
+                    self.config_path,
+                    "--flickr",
+                    "--sync-metadata",
+                    "--delete-discards",
+                ],
+            ):
+                main()
+        self.assertNotEqual(cm.exception.code, 0)
+
+    def test_apply_requires_action_flag(self):
+        """--apply alone (without --delete-discards/--mark-discards/--sync-metadata) exits."""
+        from unittest.mock import patch
+        from poller.deduplicator import main
+
+        with self.assertRaises(SystemExit) as cm:
+            with patch("sys.argv", ["dedup", "--config", self.config_path, "--flickr", "--apply"]):
+                main()
+        self.assertNotEqual(cm.exception.code, 0)
+
+
+# ---------------------------------------------------------------------------
 # TestDeleteDiscards
 # ---------------------------------------------------------------------------
 

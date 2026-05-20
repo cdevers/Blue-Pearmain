@@ -1130,6 +1130,14 @@ def main() -> None:
             "(requires --flickr; use --apply to execute, default is dry-run)"
         ),
     )
+    parser.add_argument(
+        "--sync-metadata",
+        action="store_true",
+        help=(
+            "Transfer Flickr metadata from orphan keeper to linked record "
+            "(requires --flickr; use --apply to execute, default is dry-run)"
+        ),
+    )
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -1152,8 +1160,19 @@ def main() -> None:
     if args.mark_discards and args.delete_discards:
         log.error("--mark-discards and --delete-discards cannot be used together")
         sys.exit(1)
-    if args.apply and not args.delete_discards and not args.mark_discards:
-        log.error("--apply requires --delete-discards or --mark-discards")
+    if args.sync_metadata and not args.flickr:
+        log.error("--sync-metadata requires --flickr")
+        sys.exit(1)
+    if args.sync_metadata and (args.mark_discards or args.delete_discards):
+        log.error("--sync-metadata cannot be used with --mark-discards or --delete-discards")
+        sys.exit(1)
+    if (
+        args.apply
+        and not args.delete_discards
+        and not args.mark_discards
+        and not args.sync_metadata
+    ):
+        log.error("--apply requires --delete-discards, --mark-discards, or --sync-metadata")
         sys.exit(1)
 
     config_path = Path(args.config)
@@ -1177,6 +1196,11 @@ def main() -> None:
         if args.mark_discards:
             log.info("Marking reupload discards in %s …", db_path)
             _mark_reupload_discards(conn, dry_run=not args.apply, verbose=args.verbose)
+            conn.close()
+            return
+        if args.sync_metadata:
+            log.info("Syncing keeper metadata in %s …", db_path)
+            _sync_keeper_metadata(conn, dry_run=not args.apply, verbose=args.verbose)
             conn.close()
             return
         if args.delete_discards:
