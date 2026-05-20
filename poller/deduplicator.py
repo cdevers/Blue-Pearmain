@@ -910,61 +910,73 @@ def _sync_keeper_metadata(
         print("\nDry run — no changes written. Use --apply to persist.")
         return len(rows)
 
-    for r in rows:
-        # 1. Transfer orphan's Flickr presence to linked record
-        conn.execute(
-            """UPDATE photos
-               SET flickr_id         = ?,
-                   flickr_secret     = ?,
-                   flickr_server     = ?,
-                   flickr_farm       = ?,
-                   flickr_title      = ?,
-                   flickr_description = ?,
-                   flickr_tags       = ?,
-                   flickr_tags_hash  = ?,
-                   flickr_last_updated = ?,
-                   width             = ?,
-                   height            = ?,
-                   thumbnail_path    = ?,
-                   flickr_deleted    = 0,
-                   updated_at        = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-               WHERE id = ?""",
-            (
-                r["keeper_flickr_id"],
-                r["flickr_secret"],
-                r["flickr_server"],
-                r["flickr_farm"],
-                r["flickr_title"],
-                r["flickr_description"],
-                r["flickr_tags"],
-                r["flickr_tags_hash"],
-                r["flickr_last_updated"],
-                r["keeper_width"],
-                r["keeper_height"],
-                r["keeper_thumb"],
-                r["linked_id"],
-            ),
-        )
+    conn.execute("BEGIN")
+    try:
+        for r in rows:
+            # 1. Transfer orphan's Flickr presence to linked record.
+            # NULL out keeper's flickr_id first to avoid the UNIQUE constraint
+            # violation that would occur when two rows briefly hold the same value.
+            conn.execute(
+                "UPDATE photos SET flickr_id = NULL WHERE id = ?",
+                (r["keeper_id"],),
+            )
+            conn.execute(
+                """UPDATE photos
+                   SET flickr_id         = ?,
+                       flickr_secret     = ?,
+                       flickr_server     = ?,
+                       flickr_farm       = ?,
+                       flickr_title      = ?,
+                       flickr_description = ?,
+                       flickr_tags       = ?,
+                       flickr_tags_hash  = ?,
+                       flickr_last_updated = ?,
+                       width             = ?,
+                       height            = ?,
+                       thumbnail_path    = ?,
+                       flickr_deleted    = 0,
+                       updated_at        = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                   WHERE id = ?""",
+                (
+                    r["keeper_flickr_id"],
+                    r["flickr_secret"],
+                    r["flickr_server"],
+                    r["flickr_farm"],
+                    r["flickr_title"],
+                    r["flickr_description"],
+                    r["flickr_tags"],
+                    r["flickr_tags_hash"],
+                    r["flickr_last_updated"],
+                    r["keeper_width"],
+                    r["keeper_height"],
+                    r["keeper_thumb"],
+                    r["linked_id"],
+                ),
+            )
 
-        # 2. Soft-delete the orphan
-        conn.execute(
-            """UPDATE photos
-               SET merged_into_id = ?,
-                   updated_at     = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-               WHERE id = ?""",
-            (r["linked_id"], r["keeper_id"]),
-        )
+            # 2. Soft-delete the orphan (flickr_id already NULLed above)
+            conn.execute(
+                """UPDATE photos
+                   SET merged_into_id = ?,
+                       updated_at     = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                   WHERE id = ?""",
+                (r["linked_id"], r["keeper_id"]),
+            )
 
-        # 3. Resolve the group
-        conn.execute(
-            """UPDATE duplicate_groups
-               SET resolved    = 1,
-                   resolved_at = datetime('now')
-               WHERE id = ?""",
-            (r["group_id"],),
-        )
+            # 3. Resolve the group
+            conn.execute(
+                """UPDATE duplicate_groups
+                   SET resolved    = 1,
+                       resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+                       updated_at  = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                   WHERE id = ?""",
+                (r["group_id"],),
+            )
 
-    conn.commit()
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
     print(f"\nSynced metadata for {len(rows)} reupload groups.")
     return len(rows)
 

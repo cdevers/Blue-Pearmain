@@ -1059,13 +1059,14 @@ def _make_db_for_sync() -> _sqlite3.Connection:
             match_key TEXT NOT NULL UNIQUE,
             group_type TEXT NOT NULL,
             resolved INTEGER NOT NULL DEFAULT 0,
-            resolved_at TEXT
+            resolved_at TEXT,
+            updated_at TEXT
         )
     """)
     conn.execute("""
         CREATE TABLE photos (
             id INTEGER PRIMARY KEY,
-            flickr_id TEXT,
+            flickr_id TEXT UNIQUE,
             uuid TEXT,
             original_filename TEXT,
             duplicate_group_id INTEGER,
