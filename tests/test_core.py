@@ -11298,5 +11298,98 @@ class TestSyncAlbumsRemoval(unittest.TestCase):
         )
 
 
+class TestInterruptionAndRecovery(unittest.TestCase):
+    """
+    Verify recovery invariants:
+    - Proposals stay 'pending' when a Flickr write fails.
+    - Album pushes are resumable: only unpushed albums are retried.
+    - Reconcile transient errors leave the DB unchanged.
+    - WAL mode: uncommitted mid-operation state is invisible to other connections.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+
+        self.db = Database(Path(self._tmp.name) / "test.db")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    # ------------------------------------------------------------------
+    # Task 1
+    # ------------------------------------------------------------------
+
+    def test_flickr_tag_write_failure_leaves_proposal_pending(self):
+        """
+        When the Flickr API call inside apply_proposal fails, the proposal must
+        stay 'pending' so the next run can retry.  It must not be marked 'applied'.
+        """
+        from unittest.mock import MagicMock
+        from flickr.proposal_applier import apply_proposal
+
+        photo_id = self.db.upsert_photo(
+            {
+                "flickr_id": "F_RETRY",
+                "uuid": "U_RETRY",
+                "privacy_state": "approved_public",
+                "flickr_tags": "[]",
+                "flickr_tags_hash": "TGT_HASH",
+                "photos_tags": '["nature"]',
+                "photos_tags_hash": "SRC_HASH",
+                "meta_synced_flickr_at": "2026-01-01T00:00:00+00:00",
+                "meta_synced_photos_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
+        self.db.upsert_proposal(
+            {
+                "photo_id": photo_id,
+                "field": "tags",
+                "proposed_value": '["nature"]',
+                "source": "photos",
+                "target": "flickr",
+                "conflict_type": "non_conflict",
+                "source_hash_at_creation": "SRC_HASH",
+                "target_hash_at_creation": "TGT_HASH",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
+        self.db.conn.commit()
+        pid = self.db.conn.execute(
+            "SELECT id FROM metadata_proposals WHERE photo_id=? ORDER BY id DESC LIMIT 1",
+            (photo_id,),
+        ).fetchone()["id"]
+
+        # ── Run 1: Flickr API fails ──────────────────────────────────────
+        mock_client = MagicMock()
+        mock_client.set_tags.side_effect = Exception("network timeout")
+        result = apply_proposal(self.db, pid, library_path="", flickr_client=mock_client)
+
+        self.assertFalse(result["ok"])
+        status = self.db.conn.execute(
+            "SELECT status FROM metadata_proposals WHERE id=?", (pid,)
+        ).fetchone()["status"]
+        self.assertEqual(status, "pending", "proposal must stay pending after a failed write")
+
+        # ── Run 2: Flickr API succeeds ───────────────────────────────────
+        mock_client.set_tags.side_effect = None
+        result = apply_proposal(self.db, pid, library_path="", flickr_client=mock_client)
+
+        self.assertTrue(result["ok"])
+        status = self.db.conn.execute(
+            "SELECT status FROM metadata_proposals WHERE id=?", (pid,)
+        ).fetchone()["status"]
+        self.assertEqual(status, "applied")
+        mock_client.set_tags.assert_any_call("F_RETRY", ["nature"])
+
+        # No duplicate proposal rows must exist: exactly one row for this photo/field/direction.
+        proposal_count = self.db.conn.execute(
+            "SELECT COUNT(*) FROM metadata_proposals WHERE photo_id=? AND field='tags' AND target='flickr'",
+            (photo_id,),
+        ).fetchone()[0]
+        self.assertEqual(proposal_count, 1, "retry must not create a duplicate proposal row")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
