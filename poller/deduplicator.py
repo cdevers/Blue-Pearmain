@@ -847,6 +847,128 @@ def _mark_reupload_discards(
     return len(rows)
 
 
+def _sync_keeper_metadata(
+    conn: sqlite3.Connection,
+    dry_run: bool = True,
+    verbose: bool = False,
+) -> int:
+    """Transfer orphan keeper's Flickr metadata to linked discard.
+
+    Only acts on group_type='reupload' groups where:
+    - keeper is Flickr-only (no uuid)
+    - discard is Photos-linked (has uuid) and already flickr_deleted=1
+    - group is not yet resolved
+
+    Performs three updates per eligible group:
+    1. Transfer all Flickr fields from keeper → discard, set flickr_deleted=0
+    2. Soft-delete keeper via merged_into_id
+    3. Resolve the group
+
+    Returns count of groups synced (or eligible in dry-run).
+    """
+    rows = conn.execute("""
+        SELECT
+            k.id AS keeper_id,
+            k.flickr_id AS keeper_flickr_id,
+            k.flickr_secret, k.flickr_server, k.flickr_farm,
+            k.flickr_title, k.flickr_description,
+            k.flickr_tags, k.flickr_tags_hash, k.flickr_last_updated,
+            k.width AS keeper_width, k.height AS keeper_height,
+            k.thumbnail_path AS keeper_thumb,
+            d.id AS linked_id,
+            d.original_filename AS linked_filename,
+            dg.id AS group_id
+        FROM photos k
+        JOIN duplicate_groups dg ON k.duplicate_group_id = dg.id
+        JOIN photos d ON d.duplicate_group_id = dg.id
+        WHERE k.duplicate_role = 'keeper'
+          AND k.uuid IS NULL
+          AND d.duplicate_role = 'discard'
+          AND d.uuid IS NOT NULL
+          AND d.flickr_deleted = 1
+          AND dg.group_type = 'reupload'
+          AND dg.resolved = 0
+    """).fetchall()
+
+    if not rows:
+        print("No reupload groups eligible for metadata sync.")
+        return 0
+
+    label = "synced" if not dry_run else "eligible for metadata sync"
+    print(f"\nReupload groups {label}: {len(rows)}\n")
+
+    show = rows if verbose else rows[:10]
+    for r in show:
+        print(
+            f"  group_id={r['group_id']}  flickr_id={r['keeper_flickr_id']} "
+            f"→ linked id={r['linked_id']} ({r['linked_filename']})"
+        )
+    if not verbose and len(rows) > 10:
+        print(f"  ... ({len(rows) - 10} shown, use --verbose to see all)")
+
+    if dry_run:
+        print("\nDry run — no changes written. Use --apply to persist.")
+        return len(rows)
+
+    for r in rows:
+        # 1. Transfer orphan's Flickr presence to linked record
+        conn.execute(
+            """UPDATE photos
+               SET flickr_id         = ?,
+                   flickr_secret     = ?,
+                   flickr_server     = ?,
+                   flickr_farm       = ?,
+                   flickr_title      = ?,
+                   flickr_description = ?,
+                   flickr_tags       = ?,
+                   flickr_tags_hash  = ?,
+                   flickr_last_updated = ?,
+                   width             = ?,
+                   height            = ?,
+                   thumbnail_path    = ?,
+                   flickr_deleted    = 0,
+                   updated_at        = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+               WHERE id = ?""",
+            (
+                r["keeper_flickr_id"],
+                r["flickr_secret"],
+                r["flickr_server"],
+                r["flickr_farm"],
+                r["flickr_title"],
+                r["flickr_description"],
+                r["flickr_tags"],
+                r["flickr_tags_hash"],
+                r["flickr_last_updated"],
+                r["keeper_width"],
+                r["keeper_height"],
+                r["keeper_thumb"],
+                r["linked_id"],
+            ),
+        )
+
+        # 2. Soft-delete the orphan
+        conn.execute(
+            """UPDATE photos
+               SET merged_into_id = ?,
+                   updated_at     = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+               WHERE id = ?""",
+            (r["linked_id"], r["keeper_id"]),
+        )
+
+        # 3. Resolve the group
+        conn.execute(
+            """UPDATE duplicate_groups
+               SET resolved    = 1,
+                   resolved_at = datetime('now')
+               WHERE id = ?""",
+            (r["group_id"],),
+        )
+
+    conn.commit()
+    print(f"\nSynced metadata for {len(rows)} reupload groups.")
+    return len(rows)
+
+
 # ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
