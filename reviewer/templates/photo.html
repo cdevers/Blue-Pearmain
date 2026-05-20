@@ -209,7 +209,7 @@
     {% if photo.uuid %}
     <a href="#" onclick="openInPhotos({{ photo.id }}); return false;" class="photos-link" title="Open in Photos.app">Photos ↗</a>
     {% endif %}
-    <img src="{{ url_for('thumb', photo_id=photo.id) }}"
+    <img src="{{ url_for('thumb', photo_id=photo.id, v=photo.updated_at) }}"
          alt="{{ photo.original_filename or '' }}"
          id="main-image"
          {% if photo.display_rotation %}style="transform:rotate({{ photo.display_rotation }}deg)"{% endif %}>
@@ -575,8 +575,8 @@ async function rotateFlickr(degrees) {
   if (d.ok) {
     const img = document.getElementById('main-image');
     if (img) {
-      // Use server-returned value so JS and DB stay in sync
-      img.style.transform = `rotate(${d.display_rotation}deg)`;
+      img.style.transform = d.display_rotation ? `rotate(${d.display_rotation}deg)` : '';
+      img.src = `/thumb/{{ photo.id }}?r=${Date.now()}`;
     }
     toast(`Rotated ${degrees}° on Flickr`);
   } else {

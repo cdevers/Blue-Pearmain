@@ -263,7 +263,7 @@
        ondblclick="openDetail({{ photo.id }})">
 
     <div class="thumb">
-      <img src="{{ url_for('thumb', photo_id=photo.id) }}"
+      <img src="{{ url_for('thumb', photo_id=photo.id, v=photo.updated_at) }}"
            alt="{{ photo.original_filename or '' }}"
            loading="lazy"
            {% if photo.display_rotation %}style="transform:rotate({{ photo.display_rotation }}deg)"{% endif %}>
