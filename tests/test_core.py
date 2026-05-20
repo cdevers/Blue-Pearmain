@@ -532,6 +532,19 @@ class TestDatabase(unittest.TestCase):
         # NULL date_taken sorts last (after 2022 WITHTAKEN)
         self.assertGreater(ids.index("NOTAKEN"), ids.index("WITHTAKEN"))
 
+    def test_review_queue_includes_updated_at(self):
+        """review_queue() results must include updated_at for thumbnail cache-busting."""
+        self.db.conn.execute(
+            """INSERT INTO photos (uuid, original_filename, privacy_state, updated_at)
+               VALUES ('uuid-updated-at-test', 'test.jpg', 'candidate_public', '2026-01-15 10:00:00')"""
+        )
+        self.db.conn.commit()
+        rows = self.db.review_queue(states=["candidate_public"], limit=10)
+        match = next((r for r in rows if r.get("uuid") == "uuid-updated-at-test"), None)
+        self.assertIsNotNone(match, "seeded photo not found in review_queue results")
+        self.assertIn("updated_at", match, "updated_at must be present in review_queue results")
+        self.assertEqual(match["updated_at"], "2026-01-15 10:00:00")
+
     def test_get_photo_nav(self):
         """get_photo_nav returns correct prev/next IDs using indexed lookups."""
         self.db.upsert_photo(
