@@ -610,7 +610,7 @@ class Database:
         rows = self.conn.execute(
             f"""SELECT id, uuid, flickr_id, original_filename,
                        apple_unknown_faces, apple_named_faces, proposed_tags,
-                       display_rotation, is_screenshot
+                       display_rotation, is_screenshot, updated_at
                 FROM photos
                 WHERE privacy_state IN ({placeholders}){screenshot_filter}
                 ORDER BY date_taken DESC, id DESC

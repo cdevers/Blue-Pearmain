@@ -201,7 +201,7 @@ def review():
             .conn.execute(
                 f"""SELECT id, flickr_id, original_filename,
                        apple_unknown_faces, apple_named_faces, proposed_tags,
-                       display_rotation
+                       display_rotation, updated_at
                 FROM photos
                 WHERE {condition}
                 ORDER BY date_taken DESC, id DESC
