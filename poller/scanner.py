@@ -184,8 +184,8 @@ def photos_record_to_db(photo) -> dict:
 
 def sync_photo_albums(photo, photo_db_id: int, db: Database, dry_run: bool) -> None:
     """
-    Upsert album membership rows for one osxphotos PhotoInfo object.
-    Also upserts folder ancestry from album.parent, root-first.
+    Upsert album membership rows for one osxphotos PhotoInfo object, and
+    tombstone any rows for albums the photo is no longer in.
 
     Uses photo.album_info (list of AlbumInfo objects with .title and .uuid).
     photo.albums returns plain strings and must not be used here.
@@ -196,11 +196,14 @@ def sync_photo_albums(photo, photo_db_id: int, db: Database, dry_run: bool) -> N
     """
     album_infos = getattr(photo, "album_info", []) or []
     seen_folder_uuids: set[str] = set()
+    seen_album_uuids: set[str] = set()  # track all accepted albums for removal detection
 
     for album in album_infos:
         album_type = getattr(album, "album_type", "Album")
         if album_type != "Album":
             continue
+
+        seen_album_uuids.add(album.uuid)  # collect before dry_run check
 
         if dry_run:
             log.debug("  [dry-run] album: %r (%s)", album.title, album.uuid)
@@ -225,7 +228,40 @@ def sync_photo_albums(photo, photo_db_id: int, db: Database, dry_run: bool) -> N
             parent_db_id = row["id"]
 
         album_id = db.upsert_album(album.uuid, album.title, folder_id=parent_db_id)
-        db.upsert_photo_album(photo_db_id, album_id)
+        db.upsert_photo_album(photo_db_id, album_id)  # also clears any removed_at tombstone
+
+    # Removal detection: tombstone rows for albums this photo is no longer in.
+    # Only compare against non-tombstoned rows (already-tombstoned rows are pending sync).
+    stored_rows = db.conn.execute(
+        """SELECT pa.album_id, a.apple_uuid, pa.flickr_pushed
+           FROM photo_albums pa
+           JOIN albums a ON a.id = pa.album_id
+           WHERE pa.photo_id = ? AND pa.removed_at IS NULL""",
+        (photo_db_id,),
+    ).fetchall()
+
+    for row in stored_rows:
+        if row["apple_uuid"] not in seen_album_uuids:
+            if dry_run:
+                log.debug(
+                    "  [dry-run] photo_id=%s would be removed from album %s",
+                    photo_db_id,
+                    row["apple_uuid"],
+                )
+            elif row["flickr_pushed"]:
+                db.mark_photo_album_removed(photo_db_id, row["album_id"])
+                log.debug(
+                    "photo_id=%s removed from album_id=%s — tombstoned (was pushed to Flickr)",
+                    photo_db_id,
+                    row["album_id"],
+                )
+            else:
+                db.delete_photo_album_row(photo_db_id, row["album_id"])
+                log.debug(
+                    "photo_id=%s removed from album_id=%s — deleted (never pushed)",
+                    photo_db_id,
+                    row["album_id"],
+                )
 
 
 # ---------------------------------------------------------------------------

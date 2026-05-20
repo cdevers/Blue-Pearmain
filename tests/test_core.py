@@ -3204,6 +3204,124 @@ class TestSyncPhotoAlbums(unittest.TestCase):
         self.assertEqual(count, 0, "dry_run must not write folders")
 
 
+class TestSyncPhotoAlbumsRemovals(unittest.TestCase):
+    """sync_photo_albums must tombstone photo_albums rows when a photo leaves an album."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        from db.db import Database
+
+        self.db = Database(Path(self._tmp.name) / "test.db")
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "photo-uuid-001",
+                "original_filename": "IMG_001.jpg",
+                "privacy_state": "candidate_public",
+            }
+        )
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _make_album_info(self, title, uuid):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(title=title, uuid=uuid)
+
+    def _make_photo(self, album_infos):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(album_info=album_infos)
+
+    def _push_photo_to_album(self, album_id):
+        """Helper: mark a photo_albums row as flickr_pushed=1."""
+        self.db.mark_album_pushed(self.photo_id, album_id)
+
+    def test_removal_from_one_album_tombstones_row(self):
+        """When a pushed photo leaves one album but stays in another, only the departed row is tombstoned."""
+        from poller.scanner import sync_photo_albums
+
+        album_b = self._make_album_info("London", "uuid-b")
+        # Seed both memberships as pushed
+        aid_a = self.db.upsert_album("uuid-a", "Paris")
+        aid_b = self.db.upsert_album("uuid-b", "London")
+        self.db.upsert_photo_album(self.photo_id, aid_a)
+        self.db.upsert_photo_album(self.photo_id, aid_b)
+        self._push_photo_to_album(aid_a)
+        self._push_photo_to_album(aid_b)
+
+        # Now scan: photo is only in album_b
+        photo = self._make_photo([album_b])
+        sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)
+
+        row_a = self.db.conn.execute(
+            "SELECT removed_at FROM photo_albums WHERE photo_id=? AND album_id=?",
+            (self.photo_id, aid_a),
+        ).fetchone()
+        row_b = self.db.conn.execute(
+            "SELECT removed_at FROM photo_albums WHERE photo_id=? AND album_id=?",
+            (self.photo_id, aid_b),
+        ).fetchone()
+        self.assertIsNotNone(row_a["removed_at"], "departed album must be tombstoned")
+        self.assertIsNone(row_b["removed_at"], "remaining album must not be tombstoned")
+
+    def test_removal_of_unpushed_row_deletes_immediately(self):
+        """A row with flickr_pushed=0 must be deleted outright, not tombstoned."""
+        from poller.scanner import sync_photo_albums
+
+        aid = self.db.upsert_album("uuid-a", "Paris")
+        self.db.upsert_photo_album(self.photo_id, aid)
+        # Do NOT push — flickr_pushed stays 0
+
+        photo = self._make_photo([])  # photo no longer in any album
+        sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)
+
+        row = self.db.conn.execute(
+            "SELECT 1 FROM photo_albums WHERE photo_id=? AND album_id=?",
+            (self.photo_id, aid),
+        ).fetchone()
+        self.assertIsNone(row, "unpushed row must be deleted, not tombstoned")
+
+    def test_readd_clears_tombstone(self):
+        """If a photo is re-added to an album after being tombstoned, removed_at is cleared."""
+        from poller.scanner import sync_photo_albums
+
+        album_a = self._make_album_info("Paris", "uuid-a")
+        aid = self.db.upsert_album("uuid-a", "Paris")
+        self.db.upsert_photo_album(self.photo_id, aid)
+        self._push_photo_to_album(aid)
+        self.db.mark_photo_album_removed(self.photo_id, aid)
+
+        # Re-scan: photo is back in the album
+        photo = self._make_photo([album_a])
+        sync_photo_albums(photo, self.photo_id, self.db, dry_run=False)
+
+        row = self.db.conn.execute(
+            "SELECT removed_at FROM photo_albums WHERE photo_id=? AND album_id=?",
+            (self.photo_id, aid),
+        ).fetchone()
+        self.assertIsNone(row["removed_at"], "re-added photo must have tombstone cleared")
+
+    def test_dry_run_does_not_tombstone(self):
+        """dry_run=True must not write any tombstones."""
+        from poller.scanner import sync_photo_albums
+
+        aid = self.db.upsert_album("uuid-a", "Paris")
+        self.db.upsert_photo_album(self.photo_id, aid)
+        self._push_photo_to_album(aid)
+
+        photo = self._make_photo([])  # album missing
+        sync_photo_albums(photo, self.photo_id, self.db, dry_run=True)
+
+        row = self.db.conn.execute(
+            "SELECT removed_at FROM photo_albums WHERE photo_id=? AND album_id=?",
+            (self.photo_id, aid),
+        ).fetchone()
+        self.assertIsNotNone(row, "dry_run must not delete the row either")
+        self.assertIsNone(row["removed_at"], "dry_run must not tombstone")
+
+
 # ---------------------------------------------------------------------------
 # Album DB methods
 # ---------------------------------------------------------------------------
