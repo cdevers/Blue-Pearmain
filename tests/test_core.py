@@ -2559,6 +2559,25 @@ class TestSchemaMigrations(unittest.TestCase):
         self.db.close()
         os.unlink(self.tmp_path)
 
+    def test_migration_filenames_have_unique_numeric_prefixes(self):
+        """No two migration files may share the same NNN numeric prefix."""
+        import re
+
+        migrations_dir = Path(__file__).parent.parent / "db" / "migrations"
+        prefix_re = re.compile(r"^migrate_(\d+)_")
+        seen: dict[str, list[str]] = {}
+        for f in sorted(migrations_dir.glob("migrate_*.py")):
+            m = prefix_re.match(f.name)
+            if m:
+                prefix = m.group(1)
+                seen.setdefault(prefix, []).append(f.name)
+        duplicates = {p: names for p, names in seen.items() if len(names) > 1}
+        self.assertEqual(
+            duplicates,
+            {},
+            f"Migration numeric prefix collision(s): {duplicates}",
+        )
+
     def test_migration_008_adds_metadata_cache_columns(self):
         import sys as _sys
         import io
@@ -10486,7 +10505,7 @@ class TestMigrate015FriendsFamily(unittest.TestCase):
         return conn
 
     def test_migration_allows_approved_friends_after_run(self):
-        from db.migrations.migrate_015_friends_family import run
+        from db.migrations.migrate_016_friends_family import run
 
         conn = self._old_schema_db()
         # Before migration: inserting approved_friends must fail
@@ -10507,7 +10526,7 @@ class TestMigrate015FriendsFamily(unittest.TestCase):
 
     def test_migration_is_idempotent(self):
         from db.db import Database
-        from db.migrations.migrate_015_friends_family import run
+        from db.migrations.migrate_016_friends_family import run
 
         db = Database(Path(self.db_path))
         db.close()
@@ -10734,7 +10753,7 @@ class TestMigrate016PushedTags(unittest.TestCase):
         return cols
 
     def test_column_exists_after_run(self):
-        from db.migrations.migrate_016_pushed_tags import run
+        from db.migrations.migrate_018_pushed_tags import run
 
         db = Database(Path(self.db_path))
         db.close()
@@ -10743,7 +10762,7 @@ class TestMigrate016PushedTags(unittest.TestCase):
 
     def test_existing_rows_get_null(self):
         import sqlite3
-        from db.migrations.migrate_016_pushed_tags import run
+        from db.migrations.migrate_018_pushed_tags import run
 
         db = Database(Path(self.db_path))
         photo_id = db.upsert_photo(
@@ -10762,7 +10781,7 @@ class TestMigrate016PushedTags(unittest.TestCase):
         self.assertIsNone(row[0])
 
     def test_migration_is_idempotent(self):
-        from db.migrations.migrate_016_pushed_tags import run
+        from db.migrations.migrate_018_pushed_tags import run
 
         db = Database(Path(self.db_path))
         db.close()
