@@ -151,6 +151,8 @@ bp link-orphans --dry-run          # Count linkable pairs without writing
 bp sync-albums                     # Sync Apple Photos albums → Flickr photosets (backfill); also pushes title changes to existing photosets
 bp sync-albums --dry-run           # Preview what would be pushed without writing
 bp sync-albums --album "Vacation"  # Sync a single named album only
+bp sync-albums --remove            # Preview pending Flickr removals (photos/albums removed in Apple Photos since last push)
+bp sync-albums --remove --apply    # Execute pending removals (destructive)
 bp sync-album-collections          # Sync folder hierarchy → Flickr Collections; also pushes title changes to existing collections
 bp sync-album-collections --dry-run # Preview without API calls
 bp sync-album-collections --remove  # Remove collections for deleted folders
@@ -216,7 +218,7 @@ For ongoing use, all three services run as launchd agents — no terminal window
 | `db/migrate_002_updated_at_and_indexes.py` | DB migration: adds updated_at, indexes on push state and tags, schema_migrations table |
 | `db/migrate_003_dimensions_and_dedup.py` | DB migration: adds width/height columns and duplicate_groups table |
 | `bp` | Unified command-line entry point |
-| `tests/` | Unit tests (794 tests) |
+| `tests/` | Unit tests (811 tests) |
 
 ## Review UI
 
@@ -374,12 +376,20 @@ bp sync-albums                      # Push all pending album memberships to Flic
 bp sync-albums --dry-run            # Preview what would be pushed without writing
 bp sync-albums --album "Vacation"   # Sync a single named album only
 bp sync-albums --limit 100          # Process at most 100 photo+album pairs
+bp sync-albums --remove             # Preview pending Flickr removals (photos/albums removed in Apple Photos since last push)
+bp sync-albums --remove --apply     # Execute pending removals (destructive)
 ```
 
 The command prints a one-line summary on completion:
 
 ```
 albums created=2  photos added=47  skipped=0  failed=0
+```
+
+When `--remove` is given, a second summary line is printed:
+
+```
+photosets deleted=1  photos removed=3  already-reconciled=0  removal failed=0
 ```
 
 Exit codes follow the same convention as `bp reconcile`: `0` = success, `1` = some pushes failed, `2` = operational error (DB or API unavailable).
@@ -540,7 +550,7 @@ The Flickr client uses exponential backoff with jitter; write operations update 
 python -m pytest tests/ -q
 ```
 
-794 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, Friends/Family visibility, reconcile convergence (pushed_tags ledger), tag write-back to Photos.app, reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration), and Flickr re-upload duplicate enforcement (mark/delete discards). See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
+811 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, Friends/Family visibility, reconcile convergence (pushed_tags ledger), tag write-back to Photos.app, reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration), Flickr re-upload duplicate enforcement (mark/delete discards), and sync-albums removal phase. See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
 
 ## License
 

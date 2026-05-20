@@ -35,6 +35,16 @@ def main() -> int:
     parser.add_argument("--album", default=None, help="Sync only this album name")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument(
+        "--remove",
+        action="store_true",
+        help="Show pending removals (preview). Add --apply to execute.",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Execute removals (requires --remove). Destructive.",
+    )
+    parser.add_argument(
         "--coalesce",
         action="store_true",
         help=(
@@ -188,6 +198,21 @@ def main() -> int:
 
     sync_album_titles(db, flickr, dry_run=args.dry_run)
 
+    if args.remove:
+        if args.apply and args.dry_run:
+            log.warning("--apply and --dry-run are mutually exclusive; running in preview mode")
+            removal_result = run_removal_phase(db, flickr, apply=False)
+        else:
+            removal_result = run_removal_phase(db, flickr, apply=args.apply)
+        print(
+            f"photosets deleted={removal_result['photosets_deleted']}  "
+            f"photos removed={removal_result['photos_removed']}  "
+            f"already-reconciled={removal_result['already_gone']}  "
+            f"removal failed={removal_result['failed']}"
+        )
+        if failed == 0:
+            failed = removal_result["failed"]
+
     db.close()
     return 1 if failed else 0
 
@@ -197,6 +222,109 @@ def _count_created_sets(db) -> int:
         "SELECT COUNT(*) AS n FROM albums WHERE flickr_set_id IS NOT NULL"
     ).fetchone()
     return row["n"] if row else 0
+
+
+def run_removal_phase(db, flickr, apply: bool) -> dict:
+    """
+    Execute the removal phase of sync-albums.
+
+    Dry-run contract: apply=False performs all DB reads (queries tombstones,
+    logs what would happen) but makes zero DB writes and zero Flickr API calls.
+    This contract must be preserved — callers rely on it for safe previewing.
+
+    If apply=True: calls Flickr API and cleans up local DB rows on success.
+
+    Idempotency contract: FLICKR_ERR_NOT_FOUND and FLICKR_ERR_PHOTO_NOT_IN_SET
+    are treated as successful reconciliation outcomes, not errors. The desired
+    state (photo not in photoset, photoset gone) is already achieved. The local
+    DB row is cleaned up identically to a clean API success. This prevents
+    retries on already-reconciled state.
+
+    Two steps (Step 1 before Step 2 is critical — CASCADE from delete_album
+    prevents double-processing of photos in deleted albums):
+      Step 1: Delete Flickr photosets for albums deleted in Apple Photos
+      Step 2: Remove individual photos from surviving photosets
+
+    Return dict keys:
+      photosets_deleted  — delete_photoset API call succeeded
+      photos_removed     — removePhoto API call succeeded
+      already_gone       — Flickr confirmed desired state without our intervention
+                           (photoset/photo already absent); local state cleaned up
+      failed             — unexpected errors; tombstones left in place for retry
+    """
+    from flickr.flickr_client import (
+        FlickrError,
+        FLICKR_ERR_NOT_FOUND,
+        FLICKR_ERR_PHOTO_NOT_IN_SET,
+    )
+
+    photosets_deleted = 0
+    photos_removed = 0
+    already_gone = 0
+    failed = 0
+
+    # --- Step 1: Whole photoset deletions ---
+    deleted_albums = db.get_deleted_albums()
+    for row in deleted_albums:
+        if not apply:
+            log.info("[preview] would delete photoset %s (%r)", row["flickr_set_id"], row["name"])
+            continue
+        try:
+            flickr.delete_photoset(row["flickr_set_id"])
+            photosets_deleted += 1
+        except FlickrError as e:
+            if e.code == FLICKR_ERR_NOT_FOUND:
+                log.warning(
+                    "photoset %s not found on Flickr (already deleted?) — cleaning local state",
+                    row["flickr_set_id"],
+                )
+                already_gone += 1
+            else:
+                log.error("delete_photoset failed for album %r: %s", row["name"], e)
+                failed += 1
+                continue
+        db.delete_album(row["id"])  # CASCADE removes photo_albums rows
+
+    # --- Step 2: Individual photo removals ---
+    pending = db.get_pending_album_removals(limit=500)
+    for row in pending:
+        if not apply:
+            log.info(
+                "[preview] would remove flickr_id=%s from photoset %s (%r)",
+                row["flickr_id"],
+                row["flickr_set_id"],
+                row["album_name"],
+            )
+            continue
+        try:
+            flickr.remove_photo_from_photoset(row["flickr_set_id"], row["flickr_id"])
+            photos_removed += 1
+        except FlickrError as e:
+            if e.code in (FLICKR_ERR_NOT_FOUND, FLICKR_ERR_PHOTO_NOT_IN_SET):
+                log.warning(
+                    "flickr_id=%s / photoset %s: %s — cleaning local state",
+                    row["flickr_id"],
+                    row["flickr_set_id"],
+                    e,
+                )
+                already_gone += 1
+            else:
+                log.error(
+                    "removePhoto failed flickr_id=%s photoset=%s: %s",
+                    row["flickr_id"],
+                    row["flickr_set_id"],
+                    e,
+                )
+                failed += 1
+                continue
+        db.delete_photo_album_row(row["photo_id"], row["album_id"])
+
+    return {
+        "photosets_deleted": photosets_deleted,
+        "photos_removed": photos_removed,
+        "already_gone": already_gone,
+        "failed": failed,
+    }
 
 
 def sync_album_titles(db, flickr, dry_run: bool = False) -> dict:
