@@ -911,6 +911,48 @@ class TestCLI(unittest.TestCase):
                 main()
         self.assertNotEqual(cm.exception.code, 0)
 
+    def test_apply_error_message_mentions_sync_metadata(self):
+        """--apply guard error message includes --sync-metadata as a valid action."""
+        from unittest.mock import patch, MagicMock
+        from poller.deduplicator import main
+
+        mock_error = MagicMock()
+        with self.assertRaises(SystemExit):
+            with patch("sys.argv", ["dedup", "--config", self.config_path, "--flickr", "--apply"]):
+                with patch("poller.deduplicator.log") as mock_log:
+                    mock_log.error = mock_error
+                    main()
+        error_msg = mock_error.call_args[0][0]
+        self.assertIn("--sync-metadata", error_msg)
+
+    def test_sync_metadata_apply_without_flickr_exits(self):
+        """--sync-metadata --apply without --flickr still exits (guard ordering check)."""
+        from unittest.mock import patch
+        from poller.deduplicator import main
+
+        with self.assertRaises(SystemExit) as cm:
+            with patch(
+                "sys.argv",
+                ["dedup", "--config", self.config_path, "--sync-metadata", "--apply"],
+            ):
+                main()
+        self.assertNotEqual(cm.exception.code, 0)
+
+    def test_sync_metadata_calls_function_with_dry_run(self):
+        """--flickr --sync-metadata reaches _sync_keeper_metadata with dry_run=True."""
+        from unittest.mock import patch, MagicMock
+        from poller.deduplicator import main
+
+        mock_fn = MagicMock(return_value=0)
+        with patch(
+            "sys.argv", ["dedup", "--config", self.config_path, "--flickr", "--sync-metadata"]
+        ):
+            with patch("poller.deduplicator._sync_keeper_metadata", mock_fn):
+                main()
+        mock_fn.assert_called_once()
+        _, kwargs = mock_fn.call_args
+        self.assertTrue(kwargs["dry_run"])
+
 
 # ---------------------------------------------------------------------------
 # TestDeleteDiscards
