@@ -712,7 +712,9 @@ def scan(
     if since is None:
         deleted = sync_deleted_photos(photosdb, db, dry_run)
 
-    # Detect albums deleted from Apple Photos since last scan
+    # Detect albums deleted from Apple Photos. Unlike sync_deleted_photos, this runs
+    # on every scan (including incremental). photosdb.album_info always returns the
+    # full album list regardless of the since= filter, so incremental scans are safe.
     sync_deleted_albums(photosdb, db, dry_run)
     return scanned, matched, enriched, inserted, linked, deleted
 
