@@ -7,7 +7,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # macOS is also free for public repos; worth revisiting if real integration tests (photoscript/osxphotos) are ever added
 
     steps:
       - uses: actions/checkout@v4
