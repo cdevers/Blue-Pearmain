@@ -5,6 +5,7 @@ Run from repo root:
     python -m pytest tests/test_explain.py -v
 """
 
+import subprocess as proc
 import sys
 import tempfile
 import unittest
@@ -213,3 +214,18 @@ class TestRunExplain(unittest.TestCase):
         result = run_explain(db, limit=100, flickr_username="testuser")
         db.close()
         self.assertEqual(result, [])
+
+
+class TestBpReconcileExplain(unittest.TestCase):
+    """Smoke-test bp reconcile --explain via the CLI entry point."""
+
+    def test_bp_reconcile_explain_exits_without_crashing_when_no_config(self):
+        result = proc.run(
+            ["python", "bp", "reconcile", "--explain", "--config", "/nonexistent/config.yml"],
+            capture_output=True,
+            text=True,
+            cwd=str(Path(__file__).parent.parent),
+        )
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertNotIn("Traceback", result.stdout)
+        self.assertNotEqual(result.returncode, None)

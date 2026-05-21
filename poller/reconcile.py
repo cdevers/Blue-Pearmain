@@ -207,6 +207,11 @@ def main():
     )
     parser.add_argument("--limit", type=int, default=500)
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="Show current→desired→reason for each photo with pending drift (DB-only, no Flickr calls)",
+    )
     args = parser.parse_args()
 
     setup_logging(args.verbose)
@@ -232,6 +237,19 @@ def main():
         )
         db.close()
         return 1 if totals["failed"] else 0
+
+    # --explain: DB-only drift explanation, no Flickr API calls
+    if args.explain:
+        from poller.explain import format_explain_text, run_explain
+
+        flickr_username = config.get("flickr", {}).get("username") or config.get("flickr", {}).get(
+            "user_nsid", "unknown"
+        )
+        limit = args.limit or 500
+        explanations = run_explain(db, limit=limit, flickr_username=flickr_username)
+        print(format_explain_text(explanations, flickr_username=flickr_username))
+        db.close()
+        return 0
 
     log.info("Blue Pearmain reconciliation starting")
 

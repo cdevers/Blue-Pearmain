@@ -230,6 +230,7 @@ def cmd_reconcile(args):
         ("--config",          args.config),
         ("--fix",             args.fix),
         ("--apply-proposals", args.apply_proposals),
+        ("--explain",         args.explain),
         ("--limit",           str(args.limit) if args.limit is not None else None),
         ("--verbose",         args.verbose),
     ])
@@ -738,6 +739,7 @@ def main():
     p_rec = sub.add_parser("reconcile", help="Check DB state vs actual Flickr state")
     p_rec.add_argument("--fix",              action="store_true", help="Re-push mismatches")
     p_rec.add_argument("--apply-proposals",  action="store_true", help="Apply pending non-conflict metadata proposals")
+    p_rec.add_argument("--explain",          action="store_true", help="Show current→desired→reason for each photo with pending drift (DB-only)")
     p_rec.add_argument("--limit",            type=int, default=None)
 
     # tag-writeback
@@ -889,6 +891,7 @@ def main():
     if not hasattr(args, "backfill"):        args.backfill = False
     if not hasattr(args, "fix"):             args.fix = False
     if not hasattr(args, "apply_proposals"): args.apply_proposals = False
+    if not hasattr(args, "explain"):         args.explain = False
     if not hasattr(args, "limit"):           args.limit = None
     if not hasattr(args, "port"):            args.port = 5173
     if not hasattr(args, "debug"):           args.debug = False
