@@ -242,3 +242,25 @@ class TestReviewDecisionLogging(unittest.TestCase):
         self.assertEqual(entries[0]["trigger"], "decision:make_public")
         self.assertEqual(entries[0]["old_value"], "needs_review")
         self.assertEqual(entries[0]["new_value"], "approved_public")
+
+
+class TestProposalApplyLogging(unittest.TestCase):
+    """Verify the log_operation DB contract for proposal auto-apply logging."""
+
+    def test_log_operation_stores_auto_apply_entry(self):
+        db = _make_db()
+        db.log_operation(
+            photo_id=7,
+            operation="auto_apply_proposal",
+            target="tags→flickr",
+            old_value=None,
+            new_value='["beach", "scanned-film"]',
+            trigger="proposal_id=42",
+            actor="bp",
+        )
+        entries = db.get_operation_log(operation="auto_apply_proposal")
+        db.close()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["photo_id"], 7)
+        self.assertIn("proposal_id=42", entries[0]["trigger"])
+        self.assertEqual(entries[0]["target"], "tags→flickr")

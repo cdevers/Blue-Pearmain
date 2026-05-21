@@ -104,11 +104,12 @@ def apply_proposal(
             if not result["ok"] and result.get("stale_uuid"):
                 _handle_stale_uuid(db, row["id"], row["photo_id"])
                 return {"ok": False, "reason": "stale_uuid"}
-            return result
-        if row["target"] == "flickr":
+        elif row["target"] == "flickr":
             if flickr_client is None:
                 return {"ok": False, "reason": "no flickr_client provided"}
-            return _apply_to_flickr(db, row, new_tags, flickr_client)
+            result = _apply_to_flickr(db, row, new_tags, flickr_client)
+        else:
+            return {"ok": False, "reason": f"unknown target '{row['target']}'"}
     else:
         new_value = row["proposed_value"] or ""
         if row["target"] == "photos":
@@ -116,12 +117,24 @@ def apply_proposal(
             if not result["ok"] and result.get("stale_uuid"):
                 _handle_stale_uuid(db, row["id"], row["photo_id"])
                 return {"ok": False, "reason": "stale_uuid"}
-            return result
-        if row["target"] == "flickr":
+        elif row["target"] == "flickr":
             if flickr_client is None:
                 return {"ok": False, "reason": "no flickr_client provided"}
-            return _apply_text_to_flickr(db, row, new_value, flickr_client)
-    return {"ok": False, "reason": f"unknown target '{row['target']}'"}
+            result = _apply_text_to_flickr(db, row, new_value, flickr_client)
+        else:
+            return {"ok": False, "reason": f"unknown target '{row['target']}'"}
+
+    if result.get("ok"):
+        db.log_operation(
+            photo_id=row["photo_id"],
+            operation="auto_apply_proposal",
+            target=f"{row['field']}→{row['target']}",
+            old_value=None,
+            new_value=str(row["proposed_value"]),
+            trigger=f"proposal_id={proposal_id}",
+            actor="bp",
+        )
+    return result
 
 
 def _count_pending(db: "Database", conflict_types: list[str] | None = None) -> int:
