@@ -511,6 +511,47 @@ def cmd_status(args):
     sys.exit(status_exit_code(status))
 
 
+def cmd_export(args):
+    """Export BP database state to portable NDJSON files."""
+    import yaml
+    from datetime import date
+    from db.db import Database
+    from poller.exporter import collect_export_data, write_export
+
+    config_path = Path(args.config)
+    if not config_path.exists():
+        print(f"Error: config file not found: {config_path}", file=sys.stderr)
+        sys.exit(2)
+
+    try:
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+    except Exception as e:
+        print(f"Error reading config: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    try:
+        db = Database(Path(config["database"]["path"]).expanduser())
+    except Exception as e:
+        print(f"Error opening database: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    out_dir = Path(args.out) if args.out else Path(f"bp-export-{date.today()}")
+
+    try:
+        data = collect_export_data(db)
+    finally:
+        db.close()
+
+    write_export(data, out_dir)
+    photo_count = data["manifest"]["photo_count"]
+    zone_count = data["manifest"]["zone_count"]
+    print(f"Exported {photo_count} photos and {zone_count} zones → {out_dir}/")
+    print(f"  photos.ndjson  (NDJSON — one object per line)")
+    print(f"  zones.json     (JSON array)")
+    print(f"  manifest.json  (export metadata)")
+
+
 def cmd_doctor(args):
     """
     Validate config, environment, and DB state before running the pipeline.
@@ -921,6 +962,16 @@ def main():
     )
     p_prune.add_argument("--dry-run", action="store_true", help="Report counts without modifying the DB")
 
+    # export
+    p_export = sub.add_parser(
+        "export",
+        help="Export DB state to portable NDJSON (photos.ndjson, zones.json, manifest.json)",
+    )
+    p_export.add_argument(
+        "--out", default=None,
+        help="Output directory (default: ./bp-export-YYYY-MM-DD/)",
+    )
+
     args = parser.parse_args()
 
     # Attach config/verbose to all subcommands
@@ -945,6 +996,7 @@ def main():
     if not hasattr(args, "older_than"):     args.older_than = 90
     if not hasattr(args, "write"):          args.write = False
     if not hasattr(args, "confirm"):        args.confirm = False
+    if not hasattr(args, "out"):           args.out = None
 
     dispatch = {
         "pipeline":      cmd_pipeline,
@@ -968,6 +1020,7 @@ def main():
         "status":            cmd_status,
         "deduplicator":      cmd_deduplicator,
         "prune-proposals":   cmd_prune_proposals,
+        "export":            cmd_export,
     }
     dispatch[args.command](args)
 

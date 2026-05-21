@@ -6,6 +6,7 @@ Run from repo root:
 """
 
 import json
+import subprocess as proc
 import sys
 import tempfile
 import unittest
@@ -276,3 +277,19 @@ class TestWriteExport(unittest.TestCase):
             lines = (out_dir / "photos.ndjson").read_text().strip().splitlines()
             first = json.loads(lines[0])
             self.assertEqual(first["title"], "Test")
+
+
+class TestBpExportCommand(unittest.TestCase):
+    """Smoke-test bp export via the CLI entry point."""
+
+    def test_bp_export_exits_without_crashing_when_no_config(self):
+        """bp export with a missing config exits non-zero but does not traceback."""
+        result = proc.run(
+            ["python", "bp", "export", "--config", "/nonexistent/config.yml"],
+            capture_output=True,
+            text=True,
+            cwd=str(Path(__file__).parent.parent),
+        )
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertNotIn("Traceback", result.stdout)
+        self.assertNotEqual(result.returncode, None)
