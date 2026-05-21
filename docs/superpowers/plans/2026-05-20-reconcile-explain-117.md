@@ -6,6 +6,13 @@
 
 **Architecture:** A new `poller/explain.py` module contains pure functions that build per-photo explanation dicts from DB row data. `reconcile.py` gains an `--explain` mode that queries pushed photos, calls these functions, and prints the formatted output. `bp` exposes `--explain` on the `reconcile` subparser. `--explain` implies read-only (no Flickr API calls, no writes).
 
+**reason_code taxonomy:** Each explain dict includes a machine-readable `reason_code` alongside the human-readable `reason` prose. Codes are stable strings, not freeform text, so they can be filtered, counted, or used by scripts:
+- `missing_remote_tag` — tag is in Photos but absent from Flickr cache
+- `disappeared_pushed_tag` — tag was previously pushed but is no longer in Flickr cache
+- `perms_not_yet_pushed` — review decision made but permissions not yet pushed to Flickr
+
+The JSON output (`--json` flag, future) uses `reason_code` for reliable machine consumption; human text output uses `reason` prose.
+
 **Tech Stack:** Python stdlib only. Reads `photos`, `metadata_proposals` tables. No new DB tables or migrations.
 
 ---
@@ -92,8 +99,10 @@ class TestExplainPhotoTags(unittest.TestCase):
         ))
         self.assertIn("last_known_flickr", result)
         self.assertIn("desired", result)
+        self.assertIn("reason_codes", result)
         self.assertIn("reason", result)
         self.assertIn("scanned-film", result["reason"])
+        self.assertIn("missing_remote_tag", result["reason_codes"])
 
     def test_returns_none_when_flickr_tags_is_null_and_photos_tags_empty(self):
         result = explain_photo_tags(_row(flickr_tags=None, photos_tags=None, pushed_tags=None))
@@ -232,6 +241,7 @@ def explain_photo_tags(row: dict) -> dict | None:
     Keys:
         last_known_flickr — sorted list of tags in the DB Flickr cache
         desired           — sorted list of tags from Apple Photos
+        reason_codes      — list of stable machine-readable codes (never freeform text)
         reason            — human-readable explanation of the discrepancy
     """
     flickr_tags = set(t.lower().strip() for t in _json_loads_safe(row.get("flickr_tags")) if t.strip())
@@ -249,17 +259,21 @@ def explain_photo_tags(row: dict) -> dict | None:
     if not to_push and not disappeared:
         return None
 
+    reason_codes: list[str] = []
     reasons: list[str] = []
     if to_push:
+        reason_codes.append("missing_remote_tag")
         tag_list = ", ".join(sorted(to_push))
         reasons.append(f"in Photos but not on Flickr (not yet pushed): {tag_list}")
     if disappeared:
+        reason_codes.append("disappeared_pushed_tag")
         tag_list = ", ".join(sorted(disappeared))
         reasons.append(f"previously pushed but missing from Flickr cache: {tag_list}")
 
     return {
         "last_known_flickr": sorted(flickr_tags),
         "desired": sorted(photos_tags),
+        "reason_codes": reason_codes,
         "reason": "; ".join(reasons),
     }
 
@@ -269,8 +283,9 @@ def explain_photo_perms(row: dict) -> dict | None:
     Return a permission explanation dict, or None if there is nothing to explain.
 
     Keys:
-        desired — human-readable desired permission label
-        reason  — explanation of why the push has not happened
+        desired      — human-readable desired permission label
+        reason_code  — stable machine-readable code
+        reason       — explanation of why the push has not happened
     """
     review_decision = row.get("review_decision")
     if not review_decision:
@@ -287,6 +302,7 @@ def explain_photo_perms(row: dict) -> dict | None:
 
     return {
         "desired": desired,
+        "reason_code": "perms_not_yet_pushed",
         "reason": (
             f"review decision ({review_decision}, {reviewed_at}) "
             "not yet pushed to Flickr"

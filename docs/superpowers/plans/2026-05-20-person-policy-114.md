@@ -4,7 +4,16 @@
 
 **Goal:** Allow the user to declare persistent "always private" rules for named people in Apple Photos. Photos containing a policy-protected person are classified `auto_private` at scan time — even for future arrivals — without requiring repeated manual batch actions.
 
-**Architecture:** A `person_policies` table (migration 019) stores `(person_name, policy)` pairs. `db.py` gets three new methods (get/set/delete). `analyzer/privacy.py`'s `classify()` receives a `person_policies` dict and checks it immediately after the geofence step. `poller/scanner.py` loads policies from the DB and passes them through. The reviewer's Faces page gets a policy badge per person and a new `POST /api/person_policy` endpoint to toggle it.
+**Architecture:** A `person_policies` table (migration 019) stores `(person_name, policy)` pairs with `UNIQUE(person_name)`. `db.py` gets three new methods (get/set/delete). `analyzer/privacy.py`'s `classify()` receives a `person_policies` dict and checks it immediately after the geofence step. `poller/scanner.py` loads policies from the DB and passes them through. The reviewer's Faces page gets a policy badge per person and a new `POST /api/person_policy` endpoint to toggle it.
+
+**Privacy precedence order (explicit):**
+1. Apple's home flag (`place_ishome`) — always wins
+2. Custom geofence zones — overrides everything except home
+3. **Person policies** (`always_private`) — overrides classifier logic
+4. Classifier heuristics (named persons, unknown faces, body detection)
+5. Manual review decisions — permanently override classifier for already-reviewed photos (enforced at the DB layer in `upsert_photo`, not in `classify()`)
+
+**Name normalization:** Person names from Apple Photos may have inconsistent casing across library versions. `set_person_policy()` stores names as-is (preserving user intent), but `classify()` performs case-insensitive matching by normalising both the stored keys and the photo's person names to lowercase before comparison.
 
 **Tech Stack:** SQLite migration (same pattern as existing `migrate_018_*`), `analyzer/privacy.py` (pure logic, no I/O), Flask JSON endpoints, Jinja2 template update.
 
@@ -441,6 +450,34 @@ class TestClassifyWithPersonPolicies(unittest.TestCase):
         )
         self.assertEqual(state, "auto_private")
         self.assertIn("home", reason)
+
+    def test_policy_match_is_case_insensitive(self):
+        """Policy keyed as 'alice' matches photo person named 'Alice'."""
+        photo = self._photo(["Alice"])
+        state, reason = classify(
+            photo, zones=[], self_name="Me",
+            person_policies={"alice": "always_private"},
+        )
+        self.assertEqual(state, "auto_private")
+
+    def test_already_reviewed_photos_protected_at_db_layer_not_classify(self):
+        """
+        classify() returns auto_private for a policy-matched photo regardless
+        of any prior state — the protection for already-reviewed photos is
+        enforced at the DB layer (upsert_photo checks review_decision and does
+        not overwrite it). classify() itself is stateless and always re-evaluates.
+        This test documents that behaviour explicitly.
+        """
+        photo = self._photo(["Alice"])
+        # classify() doesn't know about prior decisions — it always classifies fresh
+        state, reason = classify(
+            photo, zones=[], self_name="Me",
+            person_policies={"Alice": "always_private"},
+        )
+        self.assertEqual(state, "auto_private")
+        # The DB-level guard (upsert_photo's already_reviewed check) is what
+        # ensures existing reviewed photos are not retroactively overwritten.
+        # That guard is exercised in the existing db.py tests.
 ```
 
 - [ ] **Step 3.2 — Run to confirm failure**
@@ -504,12 +541,16 @@ def classify(
 
     # ------------------------------------------------------------------
     # 2b. Person policies — before general person detection
+    # Case-insensitive: normalise both stored keys and photo names to
+    # lowercase so that Apple Photos naming drift doesn't break matches.
     # ------------------------------------------------------------------
     if person_policies:
+        # Build a lowercase-keyed view of the policies dict for matching
+        _lower_policies = {k.lower(): v for k, v in person_policies.items()}
         persons = _get_persons(photo)
         named_others = [p for p in persons if p and p != self_name and p != "_UNKNOWN_"]
         for name in named_others:
-            if person_policies.get(name) == "always_private":
+            if _lower_policies.get(name.lower()) == "always_private":
                 return "auto_private", f"person policy: {name}"
 
     # ------------------------------------------------------------------

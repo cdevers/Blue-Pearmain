@@ -6,6 +6,8 @@
 
 **Architecture:** A new DB migration (020) creates the `operation_log` table. Two new methods on `Database` (`log_operation`, `get_operation_log`) provide access. Four instrumentation tasks add `log_operation` calls at the key mutation sites: review decisions (`reviewer/app.py`), proposal auto-apply (`flickr/proposal_applier.py`), reconcile `--fix` (`poller/reconcile.py`), and tag writeback (`poller/tag_writeback.py`). `log_operation` swallows all errors — journaling never breaks the main operation.
 
+> **Journaling guarantee — fire-and-forget (intentional):** `log_operation` uses a separate `conn.commit()` after each journal write rather than being part of the mutation's own transaction. This means a journal write failure leaves the mutation in place with no journal entry. An alternative — making mutation + journal atomic — would mean a failing `operation_log` INSERT could roll back the mutation itself, which is unacceptable for operations like reconcile fixes or review decisions. The fire-and-forget model is intentional: the journal enriches the record, but the mutation is always the primary goal. The table's `CREATE TABLE IF NOT EXISTS` guard in `log_operation` also handles pre-migration DBs gracefully.
+>
 > **Scope note:** Album membership pushes are listed in the issue but excluded from this plan (YAGNI). Album push logging is per-membership rather than per-photo; it adds implementation complexity but low query value. It can be added in a follow-on task once the journal infrastructure is proven useful.
 
 **Tech Stack:** SQLite (via existing `db.db.Database`), Python stdlib only. No new dependencies.
