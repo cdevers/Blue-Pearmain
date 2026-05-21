@@ -965,6 +965,7 @@ class TestProposalRoutes:
 
         c, db, nc_id, div_id, col_f2p, col_p2f, _ = client_with_proposals
         with (
+            patch.dict("sys.modules", {"photoscript": MagicMock()}),
             patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
             patch(
                 "flickr.proposal_applier._run_with_timeout",
@@ -991,6 +992,7 @@ class TestProposalRoutes:
 
         c, db, nc_id, div_id, col_f2p, col_p2f, _ = client_with_proposals
         with (
+            patch.dict("sys.modules", {"photoscript": MagicMock()}),
             patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
             patch(
                 "flickr.proposal_applier._run_with_timeout",
@@ -1016,6 +1018,7 @@ class TestProposalRoutes:
 
         c, db, nc_id, div_id, col_f2p, col_p2f, _ = client_with_proposals
         with (
+            patch.dict("sys.modules", {"photoscript": MagicMock()}),
             patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
             patch(
                 "flickr.proposal_applier._run_with_timeout",
@@ -1033,6 +1036,7 @@ class TestProposalRoutes:
 
         c, db, nc_id, div_id, col_f2p, col_p2f, _ = client_with_proposals
         with (
+            patch.dict("sys.modules", {"photoscript": MagicMock()}),
             patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
             patch(
                 "flickr.proposal_applier._run_with_timeout",
