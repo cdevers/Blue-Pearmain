@@ -41,6 +41,7 @@ from flask import (
     send_file,
     session,
 )
+from flask.typing import ResponseReturnValue
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.db import Database
@@ -48,6 +49,10 @@ from flickr.flickr_client import FlickrClient, FlickrError, FLICKR_ERR_NOT_FOUND
 
 log = logging.getLogger("blue-pearmain.reviewer")
 app = Flask(__name__)
+
+# Return type alias used by JSON API route annotations.
+# Flask routes can return a plain Response (jsonify) or a (Response, status) tuple.
+_JsonResp = Response | tuple[Response, int]
 app.secret_key = os.urandom(24)
 
 # Globals set at startup
@@ -62,17 +67,18 @@ def db() -> Database:
 
 
 @app.before_request
-def _require_xhr_for_api():
+def _require_xhr_for_api() -> _JsonResp | None:
     # Require X-Requested-With on all state-changing /api/ routes.
     # This blocks casual cross-origin POST requests from other pages on the same network
     # because browsers cannot set custom headers cross-origin without a CORS preflight
     # (which this server never grants). It is not a substitute for a synchronizer token
     # against a targeted attack. The reviewer UI is designed for trusted local networks only.
     if app.config.get("TESTING"):
-        return
+        return None
     if request.path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS"):
         if request.headers.get("X-Requested-With") != "XMLHttpRequest":
             return jsonify({"ok": False, "error": "CSRF check failed"}), 403
+    return None
 
 
 def client() -> FlickrClient | None:
@@ -80,7 +86,7 @@ def client() -> FlickrClient | None:
 
 
 @app.teardown_appcontext
-def _close_db_connection(exc):
+def _close_db_connection(exc: BaseException | None) -> None:
     """Close the per-thread SQLite connection at the end of every request."""
     if _db is not None:
         _db.close()
@@ -107,7 +113,7 @@ def truncate_tags(tags: list, n: int = 8) -> str:
 
 
 @app.route("/")
-def dashboard():
+def dashboard() -> str:
     stats = db().stats()
     recent = (
         db()
@@ -128,7 +134,7 @@ def dashboard():
 
 
 @app.route("/review")
-def review():
+def review() -> str:
     state_filter = request.args.get("state", "candidate_public")
     person_filter = request.args.get("person", "").strip()
     page = int(request.args.get("page", 1))
@@ -255,7 +261,7 @@ def review():
 
 
 @app.route("/photo/<int:photo_id>")
-def photo_detail(photo_id: int):
+def photo_detail(photo_id: int) -> str:
     photo = db().get_photo(photo_id)
     if not photo:
         abort(404)
@@ -289,7 +295,7 @@ def photo_detail(photo_id: int):
 
 
 @app.route("/faces")
-def faces():
+def faces() -> str:
     """People directory — aggregated from apple_persons across all photos."""
     # Aggregate named persons using SQLite's json_each
     rows = (
@@ -343,7 +349,7 @@ def faces():
 
 
 @app.route("/api/batch_person", methods=["POST"])
-def api_batch_person():
+def api_batch_person() -> _JsonResp:
     """
     Batch-set privacy decision for all photos containing a named person.
     decision: 'keep_private' | 'make_public'
@@ -386,7 +392,7 @@ def api_batch_person():
 
 
 @app.route("/duplicates")
-def duplicates():
+def duplicates() -> str:
     try:
         rows = (
             db()
@@ -564,7 +570,7 @@ def duplicates():
 
 
 @app.route("/api/duplicates/<int:group_id>/resolve", methods=["POST"])
-def api_dup_resolve(group_id: int):
+def api_dup_resolve(group_id: int) -> _JsonResp:
     row = db().conn.execute("SELECT id FROM duplicate_groups WHERE id = ?", (group_id,)).fetchone()
     if not row:
         return jsonify({"ok": False, "error": "not found"}), 404
@@ -577,7 +583,7 @@ def api_dup_resolve(group_id: int):
 
 
 @app.route("/api/duplicates/<int:group_id>/assign", methods=["POST"])
-def api_dup_assign(group_id: int):
+def api_dup_assign(group_id: int) -> _JsonResp:
     data = request.get_json(force=True)
     action = data.get("action")
 
@@ -654,7 +660,7 @@ def api_dup_assign(group_id: int):
 
 
 @app.route("/settings/zones")
-def zones():
+def zones() -> str:
     zone_rows = db().conn.execute("SELECT * FROM geofence_zones ORDER BY name").fetchall()
     return render_template("zones.html", zones=[dict(r) for r in zone_rows])
 
@@ -665,7 +671,7 @@ def zones():
 
 
 @app.route("/api/decide", methods=["POST"])
-def api_decide():
+def api_decide() -> _JsonResp:
     """Record a review decision. Optionally push to Flickr."""
     data = request.get_json(force=True)
     photo_id = data.get("photo_id")
@@ -813,7 +819,7 @@ def api_decide():
 
 
 @app.route("/api/tags", methods=["POST"])
-def api_tags():
+def api_tags() -> _JsonResp:
     """Update proposed tags for a photo."""
     data = request.get_json(force=True)
     photo_id = data.get("photo_id")
@@ -831,7 +837,7 @@ def api_tags():
 
 
 @app.route("/api/undo", methods=["POST"])
-def api_undo():
+def api_undo() -> _JsonResp:
     """Undo the most recent review decision recorded in this session."""
     history = session.get("undo_history", [])
     if not history:
@@ -844,7 +850,7 @@ def api_undo():
 
 
 @app.route("/api/zone", methods=["POST"])
-def api_zone():
+def api_zone() -> _JsonResp:
     """Create or update a geofence zone."""
     data = request.get_json(force=True)
     required = ("name", "latitude", "longitude", "radius_m")
@@ -867,19 +873,19 @@ def api_zone():
 
 
 @app.route("/api/zone/<int:zone_id>", methods=["DELETE"])
-def api_zone_delete(zone_id: int):
+def api_zone_delete(zone_id: int) -> _JsonResp:
     db().conn.execute("UPDATE geofence_zones SET active = 0 WHERE id = ?", (zone_id,))
     db().conn.commit()
     return jsonify({"ok": True})
 
 
 @app.route("/api/stats")
-def api_stats():
+def api_stats() -> _JsonResp:
     return jsonify(db().stats())
 
 
 @app.route("/api/open-in-photos/<int:photo_id>", methods=["POST"])
-def open_in_photos(photo_id: int):
+def open_in_photos(photo_id: int) -> _JsonResp:
     """
     Open the photo in Photos.app via AppleScript spotlight.
     Only meaningful when called from the Mac running the reviewer.
@@ -916,7 +922,7 @@ def open_in_photos(photo_id: int):
 
 
 @app.route("/conflicts")
-def conflicts():
+def conflicts() -> str:
     """Show unresolved metadata conflicts queue."""
     rows = db().get_unresolved_conflicts(limit=200)
     # Group rows by photo_id so one card shows all fields for a photo
@@ -953,7 +959,7 @@ def conflicts():
 
 
 @app.route("/api/conflict/<int:conflict_id>/resolve", methods=["POST"])
-def api_conflict_resolve(conflict_id: int):
+def api_conflict_resolve(conflict_id: int) -> _JsonResp:
     """
     Resolve a single metadata conflict.
     Body JSON: {"resolution": "flickr" | "photos" | "manual"}
@@ -972,7 +978,7 @@ def api_conflict_resolve(conflict_id: int):
 
 
 @app.route("/proposals")
-def proposals():
+def proposals() -> str:
     page = int(request.args.get("page", 1))
     per_page = int(request.args.get("per_page", 50))
     offset = (page - 1) * per_page
@@ -990,7 +996,7 @@ def proposals():
 
 
 @app.route("/api/proposals/<int:proposal_id>/approve", methods=["POST"])
-def api_proposal_approve(proposal_id: int):
+def api_proposal_approve(proposal_id: int) -> _JsonResp:
     from flickr.proposal_applier import apply_proposal
 
     library_path = str(Path(_config.get("photos_library", {}).get("path", "")).expanduser())
@@ -1003,7 +1009,7 @@ def api_proposal_approve(proposal_id: int):
 
 
 @app.route("/api/proposals/<int:proposal_id>/approve-reverse", methods=["POST"])
-def api_proposal_approve_reverse(proposal_id: int):
+def api_proposal_approve_reverse(proposal_id: int) -> _JsonResp:
     """Write the current Photos value to Flickr, resolving the collision."""
     from flickr.proposal_applier import apply_collision_reverse
 
@@ -1012,7 +1018,7 @@ def api_proposal_approve_reverse(proposal_id: int):
 
 
 @app.route("/api/proposals/<int:proposal_id>/apply-manual", methods=["POST"])
-def api_proposal_apply_manual(proposal_id: int):
+def api_proposal_apply_manual(proposal_id: int) -> _JsonResp:
     """Apply a user-constructed merged tag set to both Photos and Flickr."""
     data = request.get_json() or {}
     custom_tags = data.get("value")
@@ -1032,7 +1038,7 @@ def api_proposal_apply_manual(proposal_id: int):
 
 
 @app.route("/api/proposals/<int:proposal_id>/reject", methods=["POST"])
-def api_proposal_reject(proposal_id: int):
+def api_proposal_reject(proposal_id: int) -> _JsonResp:
     _d = db()
     _d.resolve_proposal(proposal_id, "rejected")
     sibling = _d.find_collision_sibling(proposal_id)
@@ -1042,7 +1048,7 @@ def api_proposal_reject(proposal_id: int):
 
 
 @app.route("/api/proposals/bulk-approve", methods=["POST"])
-def api_proposals_bulk_approve():
+def api_proposals_bulk_approve() -> _JsonResp:
     from flickr.proposal_applier import apply_batch
 
     data = request.get_json() or {}
@@ -1059,7 +1065,7 @@ def api_proposals_bulk_approve():
 
 
 @app.route("/api/push_approved", methods=["POST"])
-def api_push_approved():
+def api_push_approved() -> _JsonResp:
     """
     Batch-push all approved_public photos to Flickr.
     Sets permissions to public and writes tags for each.
@@ -1134,7 +1140,7 @@ def api_push_approved():
     return jsonify({"ok": True, "pushed": pushed, "failed": failed, "skipped": skipped})
 
 
-def _json_loads_safe(value):
+def _json_loads_safe(value: Any) -> Any:
     if not value:
         return []
     try:
@@ -1146,7 +1152,7 @@ def _json_loads_safe(value):
 
 
 @app.route("/api/photos/<int:photo_id>/rotate-flickr", methods=["POST"])
-def api_rotate_flickr(photo_id: int):
+def api_rotate_flickr(photo_id: int) -> _JsonResp:
     """Rotate a photo on Flickr clockwise by 90, 180, or 270 degrees.
     Destructive and irreversible — re-encodes the image stored on Flickr."""
     data = request.get_json(force=True, silent=True) or {}
@@ -1212,7 +1218,7 @@ def api_rotate_flickr(photo_id: int):
 
 
 @app.route("/api/photos/<int:photo_id>/set-text", methods=["POST"])
-def api_set_photo_text(photo_id: int):
+def api_set_photo_text(photo_id: int) -> _JsonResp:
     """Write title and description to both Apple Photos and Flickr."""
     data = request.get_json(force=True, silent=True) or {}
     title = (data.get("title") or "").strip()
@@ -1230,7 +1236,7 @@ def api_set_photo_text(photo_id: int):
 
 
 @app.route("/api/poll", methods=["POST"])
-def api_poll():
+def api_poll() -> _JsonResp:
     """Trigger a manual Flickr poll in-process (quick, last 24h only)."""
     import subprocess
 
@@ -1249,7 +1255,7 @@ def api_poll():
 
 
 @app.route("/thumb/<int:photo_id>")
-def thumb(photo_id: int):
+def thumb(photo_id: int) -> ResponseReturnValue:
     """
     Serve a thumbnail. Priority order:
       1. Local file (Photos derivative or downloaded Flickr thumb)
@@ -1310,7 +1316,7 @@ def _placeholder_svg(label: str) -> Response:
 # ---------------------------------------------------------------------------
 
 
-def _validate_config(config: dict, config_path: str):
+def _validate_config(config: dict, config_path: str) -> None:
     """
     Validate required config fields at startup.
     Raises SystemExit with a clear message rather than a cryptic KeyError later.
