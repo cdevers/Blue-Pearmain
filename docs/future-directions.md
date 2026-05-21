@@ -54,7 +54,7 @@ BP records state, not causation. You can see that a photo is `auto_private`, but
 
 An append-only `operation_log` table in the DB that records every mutation BP makes — to Flickr, to Apple Photos, to DB state — along with the reason and trigger. Covers proposal auto-apply, manual review decisions, reconcile --fix writes, tag-writeback, album pushes, and privacy state changes. Makes BP behave more like an archival system of record than a sync utility.
 
-### `bp reconcile --explain` ([#117](https://github.com/cdevers/Blue-Pearmain/issues/117)) `size:M` · plan ready
+### `bp reconcile --explain` ([#117](https://github.com/cdevers/Blue-Pearmain/issues/117)) `size:S` · ✓ done
 
 A richer dry-run mode that shows, for each proposed reconcile change: current Flickr state, desired state, source of truth, and the reason for the discrepancy. The current `--dry-run` tells you *what* would change; `--explain` tells you *why*. Especially valuable years after deployment when the original context has been forgotten. If the operation journal (#116) is implemented first, `--explain` can reference journal entries to show when a state was last changed and by what.
 

@@ -141,6 +141,7 @@ bp thumbs                          # Populate missing thumbnail paths
 bp reconcile                       # Check DB vs actual Flickr state
 bp reconcile --fix                 # Check and repair mismatches
 bp reconcile --apply-proposals     # Apply pending non-conflict metadata proposals
+bp reconcile --explain             # Show why each pushed photo has drift (DB-only, no Flickr calls)
 bp tag-writeback                   # Write pushed Flickr tags back to Photos.app as explicit keywords (enables Smart Albums)
 bp tag-writeback --dry-run         # Preview which photos would be updated without writing
 bp tag-writeback --source proposed-tags  # Use proposed (not yet pushed) tags as source instead
@@ -554,7 +555,7 @@ make test              # runs: python -m pytest tests/ -q
 make lint              # runs: mypy + ruff check + ruff format --check
 ```
 
-851 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, Friends/Family visibility, reconcile convergence (pushed_tags ledger), tag write-back to Photos.app, reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration), Flickr re-upload duplicate enforcement (mark/delete discards), sync-albums removal phase, macOS daemon notifications, and tag protection rules. See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
+874 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, Friends/Family visibility, reconcile convergence (pushed_tags ledger), tag write-back to Photos.app, reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration), Flickr re-upload duplicate enforcement (mark/delete discards), sync-albums removal phase, macOS daemon notifications, tag protection rules, and reconcile --explain. See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
 
 CI runs the same suite on every push to `main` and on pull requests.
 
