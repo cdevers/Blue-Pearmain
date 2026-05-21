@@ -66,7 +66,7 @@ A richer dry-run mode that shows, for each proposed reconcile change: current Fl
 
 BP's SQLite database is the authoritative record of everything it knows about your photo archive. But it is a binary format tied to BP's schema. If Flickr changes its API, goes dark, or needs to be migrated away from, acting on that data requires reverse-engineering the DB. A periodic export to portable formats gives durable access independent of any tool or service.
 
-### Export mode ([#118](https://github.com/cdevers/Blue-Pearmain/issues/118)) `size:M` · plan ready
+### Export mode ([#118](https://github.com/cdevers/Blue-Pearmain/issues/118)) `size:M` · ✓ done
 
 A `bp export` command that serialises the full BP state — per-photo metadata, review decisions, sync state, geofence zones — to JSON or YAML. One file (or directory of files) that can be read without BP, understood without documentation, and imported into a future tool. Not a backup of the DB; a human-readable record of the archive's metadata.
 
