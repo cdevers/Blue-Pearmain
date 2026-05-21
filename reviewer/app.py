@@ -752,6 +752,21 @@ def api_decide() -> _JsonResp:
 
     db().record_review(photo_id, decision, notes)
 
+    # Journal the decision
+    _new_state_row = (
+        db().conn.execute("SELECT privacy_state FROM photos WHERE id = ?", (photo_id,)).fetchone()
+    )
+    _new_state = _new_state_row["privacy_state"] if _new_state_row else None
+    db().log_operation(
+        photo_id=photo_id,
+        operation="review_decision",
+        target="privacy_state",
+        old_value=old["privacy_state"] if old else None,
+        new_value=_new_state,
+        trigger=f"decision:{decision}",
+        actor="user",
+    )
+
     # Push to Flickr in a background thread so the response returns immediately
     if push and photo.get("flickr_id"):
         c = client()

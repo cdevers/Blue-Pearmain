@@ -218,3 +218,27 @@ class TestGetOperationLog(unittest.TestCase):
         db.close()
         os.unlink(f.name)
         self.assertEqual(result, [])
+
+
+class TestReviewDecisionLogging(unittest.TestCase):
+    """Verify the log_operation DB contract for review decision logging."""
+
+    def test_log_operation_stores_review_decision_entry(self):
+        """Verify the DB fields written by a review decision log entry."""
+        db = _make_db()
+        db.log_operation(
+            photo_id=42,
+            operation="review_decision",
+            target="privacy_state",
+            old_value="needs_review",
+            new_value="approved_public",
+            trigger="decision:make_public",
+            actor="user",
+        )
+        entries = db.get_operation_log(operation="review_decision")
+        db.close()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["actor"], "user")
+        self.assertEqual(entries[0]["trigger"], "decision:make_public")
+        self.assertEqual(entries[0]["old_value"], "needs_review")
+        self.assertEqual(entries[0]["new_value"], "approved_public")
