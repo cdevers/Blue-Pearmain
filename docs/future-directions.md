@@ -50,7 +50,7 @@ A config-driven way to declare tag namespaces or specific tags as protected from
 
 BP records state, not causation. You can see that a photo is `auto_private`, but not whether it was geofenced, flagged by a person policy, or manually decided. You can see that a tag is on Flickr, but not when it was added or what triggered it. For a tool designed around archival stewardship, this is a meaningful gap.
 
-### Operation journal ([#116](https://github.com/cdevers/Blue-Pearmain/issues/116)) `size:L` · plan ready
+### Operation journal ([#116](https://github.com/cdevers/Blue-Pearmain/issues/116)) `size:L` · ✓ done
 
 An append-only `operation_log` table in the DB that records every mutation BP makes — to Flickr, to Apple Photos, to DB state — along with the reason and trigger. Covers proposal auto-apply, manual review decisions, reconcile --fix writes, tag-writeback, album pushes, and privacy state changes. Makes BP behave more like an archival system of record than a sync utility.
 
