@@ -586,6 +586,35 @@ class Database:
         return row_id
 
     # -----------------------------------------------------------------------
+    # Person policies
+    # -----------------------------------------------------------------------
+
+    def get_person_policies(self) -> dict[str, str]:
+        """Return {person_name: policy} for all rows in person_policies."""
+        try:
+            rows = self.conn.execute("SELECT person_name, policy FROM person_policies").fetchall()
+            return {r["person_name"]: r["policy"] for r in rows}
+        except Exception:
+            # Table absent (migration not yet applied): return empty dict
+            return {}
+
+    def set_person_policy(self, person_name: str, policy: str) -> None:
+        """Insert or replace a policy for person_name."""
+        now = _now_iso()
+        self.conn.execute(
+            """INSERT INTO person_policies (person_name, policy, created_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(person_name) DO UPDATE SET policy=excluded.policy""",
+            (person_name, policy, now),
+        )
+        self.conn.commit()
+
+    def delete_person_policy(self, person_name: str) -> None:
+        """Remove any policy for person_name. No-op if none exists."""
+        self.conn.execute("DELETE FROM person_policies WHERE person_name = ?", (person_name,))
+        self.conn.commit()
+
+    # -----------------------------------------------------------------------
     # Review queue queries
     # -----------------------------------------------------------------------
 
