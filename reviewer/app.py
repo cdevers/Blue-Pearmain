@@ -391,6 +391,40 @@ def api_batch_person() -> _JsonResp:
     return jsonify({"ok": True, "updated": count, "person": person, "decision": decision})
 
 
+@app.route("/api/person_policy", methods=["POST"])
+def api_person_policy() -> _JsonResp:
+    """
+    Set or clear a privacy policy for a named person.
+
+    Request body: {"person": "Alice", "policy": "always_private" | null}
+    policy=null removes any existing policy for that person.
+    """
+    data = request.get_json(force=True)
+    person = (data.get("person") or "").strip()
+    policy = data.get("policy")
+
+    if not person:
+        return jsonify({"ok": False, "error": "person name required"}), 400
+
+    valid_policies = {"always_private", None}
+    if policy not in valid_policies:
+        return jsonify({"ok": False, "error": f"unknown policy: {policy!r}"}), 400
+
+    if policy is None:
+        db().delete_person_policy(person)
+    else:
+        db().set_person_policy(person, policy)
+
+    return jsonify({"ok": True, "person": person, "policy": policy})
+
+
+@app.route("/api/person_policy/<path:person_name>", methods=["GET"])
+def api_get_person_policy(person_name: str) -> _JsonResp:
+    """Return the current policy for a named person, or null if none."""
+    policies = db().get_person_policies()
+    return jsonify({"person": person_name, "policy": policies.get(person_name)})
+
+
 @app.route("/duplicates")
 def duplicates() -> str:
     try:

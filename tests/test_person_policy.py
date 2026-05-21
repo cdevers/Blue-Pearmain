@@ -5,11 +5,14 @@ Run from repo root:
     python -m pytest tests/test_person_policy.py -v
 """
 
+import json
 import sqlite3
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+import reviewer.app as app_module
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -282,3 +285,60 @@ class TestScannerPassesPolicies(unittest.TestCase):
             person_policies={"Alice": "always_private"},
         )
         self.assertEqual(result["privacy_state"], "auto_private")
+
+
+class TestPersonPolicyApi(unittest.TestCase):
+    """Test POST /api/person_policy endpoint via Flask test client."""
+
+    def setUp(self):
+        self.db_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.db_file.close()
+
+        # Apply the person_policies migration
+        from db.db import Database
+
+        self.test_db = Database(Path(self.db_file.name))
+        from db.migrations.migrate_019_person_policies import run as migrate
+
+        migrate(self.db_file.name)
+
+        # Inject test DB into the app
+        app_module._db = self.test_db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+        self.client = app_module.app.test_client()
+
+    def tearDown(self):
+        import os
+
+        app_module._db = None
+        self.test_db.close()
+        os.unlink(self.db_file.name)
+
+    def _post(self, person, policy):
+        return self.client.post(
+            "/api/person_policy",
+            data=json.dumps({"person": person, "policy": policy}),
+            content_type="application/json",
+        )
+
+    def test_set_policy_returns_ok(self):
+        resp = self._post("Alice", "always_private")
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertTrue(data["ok"])
+
+    def test_clear_policy_returns_ok(self):
+        self._post("Alice", "always_private")
+        resp = self._post("Alice", None)
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertTrue(data["ok"])
+
+    def test_invalid_policy_returns_400(self):
+        resp = self._post("Alice", "unknown_policy")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_empty_person_returns_400(self):
+        resp = self._post("", "always_private")
+        self.assertEqual(resp.status_code, 400)
