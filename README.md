@@ -554,7 +554,7 @@ make test              # runs: python -m pytest tests/ -q
 make lint              # runs: mypy + ruff check + ruff format --check
 ```
 
-815 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, Friends/Family visibility, reconcile convergence (pushed_tags ledger), tag write-back to Photos.app, reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration), Flickr re-upload duplicate enforcement (mark/delete discards), and sync-albums removal phase. See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
+819 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, Friends/Family visibility, reconcile convergence (pushed_tags ledger), tag write-back to Photos.app, reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration), Flickr re-upload duplicate enforcement (mark/delete discards), and sync-albums removal phase. See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
 
 CI runs the same suite on every push to `main` and on pull requests.
 

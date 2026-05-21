@@ -11516,6 +11516,72 @@ class TestInterruptionAndRecovery(unittest.TestCase):
             "second run must detect mismatch after transient error clears",
         )
 
+    def test_wal_uncommitted_merge_invisible_to_readers_and_rolls_back(self):
+        """
+        Intermediate state produced during merge_flickr_into_photos must be
+        invisible to other connections (WAL isolation).  Rolling back the
+        uncommitted work must leave both records in their original state.
+        """
+        import sqlite3
+
+        donor_id = self.db.upsert_photo(
+            {
+                "flickr_id": "F_DONOR",
+                "privacy_state": "candidate_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+        target_id = self.db.upsert_photo(
+            {
+                "uuid": "U_TARGET",
+                "privacy_state": "candidate_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+        self.db.conn.commit()
+
+        # Simulate the intermediate step: clear flickr_id on donor (as the merge does)
+        # but do NOT commit.
+        self.db.conn.execute("UPDATE photos SET flickr_id = NULL WHERE id = ?", (donor_id,))
+
+        # A fresh reader connection must still see the original flickr_id (WAL isolation).
+        fresh = sqlite3.connect(str(self.db.path))
+        fresh.row_factory = sqlite3.Row
+        fresh.execute("PRAGMA journal_mode = WAL")
+        fresh_row = fresh.execute("SELECT flickr_id FROM photos WHERE id=?", (donor_id,)).fetchone()
+        self.assertEqual(
+            fresh_row["flickr_id"],
+            "F_DONOR",
+            "uncommitted change must not be visible to a concurrent reader",
+        )
+        fresh.close()
+
+        # Roll back the uncommitted work.
+        self.db.conn.rollback()
+
+        # After rollback, our own connection also sees the original state.
+        own_row = self.db.conn.execute(
+            "SELECT flickr_id FROM photos WHERE id=?", (donor_id,)
+        ).fetchone()
+        self.assertEqual(
+            own_row["flickr_id"],
+            "F_DONOR",
+            "rollback must restore flickr_id on the original connection",
+        )
+
+        # Target must be untouched.
+        target_row = self.db.conn.execute(
+            "SELECT flickr_id FROM photos WHERE id=?", (target_id,)
+        ).fetchone()
+        self.assertIsNone(
+            target_row["flickr_id"],
+            "target must have no flickr_id after rollback",
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
