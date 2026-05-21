@@ -18,7 +18,7 @@ Future work should deepen those qualities, not compromise them. The ideas below 
 
 BP runs as three always-on launchd daemons. Right now, if something goes wrong — an auth token expires, the pipeline stalls, reconcile finds drift — the signal is buried in a log file. There is no at-a-glance view of system health.
 
-### bp status — operational health dashboard ([#112](https://github.com/cdevers/Blue-Pearmain/issues/112)) `size:M` · needs plan
+### bp status — operational health dashboard ([#112](https://github.com/cdevers/Blue-Pearmain/issues/112)) `size:M` · plan ready
 
 A new `bp status` command that prints a structured summary of daemon state, queue sizes, last-run times, and unresolved drift. Reads only from the local DB and `launchctl` — no network calls. Intended to answer "is everything OK?" in one command.
 
@@ -34,7 +34,7 @@ Surface high-signal failures (auth expiry, sustained API errors, unresolved reco
 
 BP's current model is reactive: classify what arrives, queue what needs review, apply what's unambiguous. Two gaps have emerged where a persistent *policy* would be more appropriate than a repeated manual action.
 
-### Per-person privacy policy ([#114](https://github.com/cdevers/Blue-Pearmain/issues/114)) `size:M` · needs plan
+### Per-person privacy policy ([#114](https://github.com/cdevers/Blue-Pearmain/issues/114)) `size:M` · plan ready
 
 A way to declare "any photo containing Person X is always auto-private" — stored in the DB, checked at scan time. Currently, batch-marking all of a person's photos private is a one-shot action; new photos of that person re-enter the queue. A persistent policy is the right primitive for people who should never appear on Flickr (children, people who've asked not to be photographed publicly).
 
@@ -50,11 +50,11 @@ A config-driven way to declare tag namespaces or specific tags as protected from
 
 BP records state, not causation. You can see that a photo is `auto_private`, but not whether it was geofenced, flagged by a person policy, or manually decided. You can see that a tag is on Flickr, but not when it was added or what triggered it. For a tool designed around archival stewardship, this is a meaningful gap.
 
-### Operation journal ([#116](https://github.com/cdevers/Blue-Pearmain/issues/116)) `size:L` · needs plan
+### Operation journal ([#116](https://github.com/cdevers/Blue-Pearmain/issues/116)) `size:L` · plan ready
 
 An append-only `operation_log` table in the DB that records every mutation BP makes — to Flickr, to Apple Photos, to DB state — along with the reason and trigger. Covers proposal auto-apply, manual review decisions, reconcile --fix writes, tag-writeback, album pushes, and privacy state changes. Makes BP behave more like an archival system of record than a sync utility.
 
-### `bp reconcile --explain` ([#117](https://github.com/cdevers/Blue-Pearmain/issues/117)) `size:M` · needs plan
+### `bp reconcile --explain` ([#117](https://github.com/cdevers/Blue-Pearmain/issues/117)) `size:M` · plan ready
 
 A richer dry-run mode that shows, for each proposed reconcile change: current Flickr state, desired state, source of truth, and the reason for the discrepancy. The current `--dry-run` tells you *what* would change; `--explain` tells you *why*. Especially valuable years after deployment when the original context has been forgotten. If the operation journal (#116) is implemented first, `--explain` can reference journal entries to show when a state was last changed and by what.
 
@@ -66,7 +66,7 @@ A richer dry-run mode that shows, for each proposed reconcile change: current Fl
 
 BP's SQLite database is the authoritative record of everything it knows about your photo archive. But it is a binary format tied to BP's schema. If Flickr changes its API, goes dark, or needs to be migrated away from, acting on that data requires reverse-engineering the DB. A periodic export to portable formats gives durable access independent of any tool or service.
 
-### Export mode ([#118](https://github.com/cdevers/Blue-Pearmain/issues/118)) `size:M` · needs plan
+### Export mode ([#118](https://github.com/cdevers/Blue-Pearmain/issues/118)) `size:M` · plan ready
 
 A `bp export` command that serialises the full BP state — per-photo metadata, review decisions, sync state, geofence zones — to JSON or YAML. One file (or directory of files) that can be read without BP, understood without documentation, and imported into a future tool. Not a backup of the DB; a human-readable record of the archive's metadata.
 
