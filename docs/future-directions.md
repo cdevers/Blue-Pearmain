@@ -34,7 +34,7 @@ Surface high-signal failures (auth expiry, sustained API errors, unresolved reco
 
 BP's current model is reactive: classify what arrives, queue what needs review, apply what's unambiguous. Two gaps have emerged where a persistent *policy* would be more appropriate than a repeated manual action.
 
-### Per-person privacy policy ([#114](https://github.com/cdevers/Blue-Pearmain/issues/114)) `size:M` · plan ready
+### Per-person privacy policy ([#114](https://github.com/cdevers/Blue-Pearmain/issues/114)) `size:M` · ✓ done
 
 A way to declare "any photo containing Person X is always auto-private" — stored in the DB, checked at scan time. Currently, batch-marking all of a person's photos private is a one-shot action; new photos of that person re-enter the queue. A persistent policy is the right primitive for people who should never appear on Flickr (children, people who've asked not to be photographed publicly).
 
