@@ -132,6 +132,7 @@ chmod +x bp   # once, after cloning
 
 bp stats                           # Photo counts by privacy state (includes approved+pushed count)
 bp stats --oneliner                # Single-line summary for watch loops (includes pushed=N)
+bp status                          # Operational health: daemon state, queue sizes, proposals
 bp poll                            # Pull recent Flickr uploads (incremental)
 bp poll --backfill --days 365      # Backfill a year of Flickr history
 bp poll --backfill --days 100000   # Full historical backfill
@@ -555,7 +556,7 @@ make test              # runs: python -m pytest tests/ -q
 make lint              # runs: mypy + ruff check + ruff format --check
 ```
 
-874 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, Friends/Family visibility, reconcile convergence (pushed_tags ledger), tag write-back to Photos.app, reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration), Flickr re-upload duplicate enforcement (mark/delete discards), sync-albums removal phase, macOS daemon notifications, tag protection rules, and reconcile --explain. See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
+893 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, Friends/Family visibility, reconcile convergence (pushed_tags ledger), tag write-back to Photos.app, reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration), Flickr re-upload duplicate enforcement (mark/delete discards), sync-albums removal phase, macOS daemon notifications, tag protection rules, reconcile --explain, and operational status reporting. See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
 
 CI runs the same suite on every push to `main` and on pull requests.
 

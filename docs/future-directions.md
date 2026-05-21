@@ -18,7 +18,7 @@ Future work should deepen those qualities, not compromise them. The ideas below 
 
 BP runs as three always-on launchd daemons. Right now, if something goes wrong — an auth token expires, the pipeline stalls, reconcile finds drift — the signal is buried in a log file. There is no at-a-glance view of system health.
 
-### bp status — operational health dashboard ([#112](https://github.com/cdevers/Blue-Pearmain/issues/112)) `size:M` · plan ready
+### bp status — operational health dashboard ([#112](https://github.com/cdevers/Blue-Pearmain/issues/112)) `size:M` · ✓ done
 
 A new `bp status` command that prints a structured summary of daemon state, queue sizes, last-run times, and unresolved drift. Reads only from the local DB and `launchctl` — no network calls. Intended to answer "is everything OK?" in one command.
 
