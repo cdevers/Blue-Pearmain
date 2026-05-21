@@ -33,14 +33,20 @@ HUMAN_CONFIDENCE_THRESHOLD = 0.35
 FACE_QUALITY_THRESHOLD = 0.0
 
 
-def classify(photo: dict, zones: list[dict], self_name: str = "") -> tuple[str, str]:
+def classify(
+    photo: dict,
+    zones: list[dict],
+    self_name: str = "",
+    person_policies: dict[str, str] | None = None,
+) -> tuple[str, str]:
     """
     Classify a photo into a privacy state.
 
     Args:
-        photo:     dict from osxphotos (or equivalent from Flickr poller)
-        zones:     list of active geofence zone dicts from the database
-        self_name: the photographer's name as it appears in Apple's People
+        photo:            dict from osxphotos (or equivalent from Flickr poller)
+        zones:            list of active geofence zone dicts from the database
+        self_name:        the photographer's name as it appears in Apple's People
+        person_policies:  dict mapping person names to policy strings (e.g. "always_private")
 
     Returns:
         (state, reason) tuple
@@ -71,6 +77,19 @@ def classify(photo: dict, zones: list[dict], self_name: str = "") -> tuple[str, 
                 elif policy == "flag_review":
                     return "needs_review", f"geofence flag: {label}"
                 # policy == 'auto_public' falls through to normal logic
+
+    # ------------------------------------------------------------------
+    # 2b. Person policies — before general person detection
+    # Case-insensitive: normalise both stored keys and photo names to
+    # lowercase so that Apple Photos naming drift doesn't break matches.
+    # ------------------------------------------------------------------
+    if person_policies:
+        _lower_policies = {k.lower(): v for k, v in person_policies.items()}
+        persons = _get_persons(photo)
+        named_others = [p for p in persons if p and p != self_name and p != "_UNKNOWN_"]
+        for name in named_others:
+            if _lower_policies.get(name.lower()) == "always_private":
+                return "auto_private", f"person policy: {name}"
 
     # ------------------------------------------------------------------
     # 3. Named persons other than self
