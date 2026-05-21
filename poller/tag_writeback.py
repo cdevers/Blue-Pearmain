@@ -94,6 +94,15 @@ def writeback(
             else:
                 if not dry_run:
                     photo.keywords = merged
+                    db.log_operation(
+                        photo_id=int(row["id"]),
+                        operation="tag_writeback",
+                        target="photos_keywords",
+                        old_value=None,
+                        new_value=json.dumps(sorted(set(merged) - set(current))),
+                        trigger="tag_writeback",
+                        actor="bp",
+                    )
                 totals["updated"] += 1
                 log.info(
                     f"  {uuid}: {'would add' if dry_run else 'added'} "

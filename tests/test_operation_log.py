@@ -285,3 +285,24 @@ class TestReconcileFixLogging(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["target"], "flickr_permissions")
         self.assertEqual(entries[0]["old_value"], "private")
+
+
+class TestTagWritebackLogging(unittest.TestCase):
+    """Verify the log_operation DB contract for tag writeback."""
+
+    def test_log_operation_stores_tag_writeback_entry(self):
+        db = _make_db()
+        db.log_operation(
+            photo_id=3,
+            operation="tag_writeback",
+            target="photos_keywords",
+            old_value=None,
+            new_value='["beach", "archive"]',
+            trigger="tag_writeback",
+            actor="bp",
+        )
+        entries = db.get_operation_log(operation="tag_writeback")
+        db.close()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["photo_id"], 3)
+        self.assertIn("beach", entries[0]["new_value"])
