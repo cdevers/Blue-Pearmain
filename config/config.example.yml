@@ -32,3 +32,6 @@ review:
 logging:
   level: "INFO"               # DEBUG | INFO | WARNING | ERROR
   file: "/volume1/flickr-curator/curator.log"
+
+notifications:
+  enabled: true               # Set false to disable macOS desktop notifications from daemons

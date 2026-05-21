@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from db.db import Database
 from flickr.flickr_client import FlickrClient, FlickrError
+from utils.notifier import notify
 
 log = logging.getLogger("blue-pearmain.reconcile")
 
@@ -240,6 +241,10 @@ def main():
         log.info("Flickr auth OK")
     except Exception as e:
         log.error(f"Flickr auth failed: {e}")
+        notify(
+            "Flickr authentication failed. Run flickr/flickr_auth.py to re-authorise.",
+            config=config,
+        )
         sys.exit(1)
 
     # Fetch photos where we believe we've pushed something to Flickr
@@ -327,6 +332,10 @@ def main():
 
     if mismatch_count > 0 and not args.fix:
         print("  → Run with --fix to attempt automatic repair.")
+        notify(
+            f"Reconcile found {mismatch_count} photos with Flickr drift. Run: bp reconcile --fix",
+            config=config,
+        )
 
     db.close()
     # Exit code differentiation:

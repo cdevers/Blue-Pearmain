@@ -43,6 +43,7 @@ from db.db import Database
 from flickr.flickr_client import FlickrClient, FlickrError
 from analyzer.privacy import classify
 from analyzer.tagger import propose_tags
+from utils.notifier import notify
 
 log = logging.getLogger("blue-pearmain.poller")
 
@@ -595,7 +596,7 @@ def _validate_config(config: dict, config_path: str):
 # ---------------------------------------------------------------------------
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Blue Pearmain poller — sync Flickr → local DB")
     parser.add_argument("--config", default="config/config.yml", help="Path to config.yml")
     parser.add_argument(
@@ -638,6 +639,10 @@ def main():
     except Exception as e:
         log.error(f"Flickr auth failed: {e}")
         log.error("Run flickr/flickr_auth.py first to authorise.")
+        notify(
+            "Flickr authentication failed. Run flickr/flickr_auth.py to re-authorise.",
+            config=config,
+        )
         sys.exit(1)
 
     # Thumbnail root
