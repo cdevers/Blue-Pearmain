@@ -11459,6 +11459,63 @@ class TestInterruptionAndRecovery(unittest.TestCase):
             "photoset must not be re-created on retry",
         )
 
+    def test_reconcile_transient_error_leaves_db_unchanged(self):
+        """
+        A transient FlickrError (code=0) during reconcile must not modify the DB.
+        The photo must not be marked flickr_deleted.  A subsequent run must be
+        able to detect the real state (permission mismatch).
+        """
+        from unittest.mock import MagicMock
+        from flickr.flickr_client import FlickrError
+        from poller.reconcile import check_photo
+
+        photo_id = self.db.upsert_photo(
+            {
+                "flickr_id": "F_NET",
+                "uuid": "U_NET",
+                "privacy_state": "approved_public",
+                "perms_pushed_flickr": 1,
+                "tags_pushed_flickr": 0,
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+        self.db.conn.commit()
+        row = dict(self.db.conn.execute("SELECT * FROM photos WHERE id=?", (photo_id,)).fetchone())
+
+        # ── Run 1: transient network error ───────────────────────────────
+        mock_client = MagicMock()
+        mock_client.get_photo_info.side_effect = FlickrError(0, "service unavailable")
+
+        result = check_photo(mock_client, row, self.db, fix=False, verbose=False)
+
+        self.assertEqual(result["status"], "flickr_error")
+        db_photo = self.db.conn.execute(
+            "SELECT flickr_deleted FROM photos WHERE id=?", (photo_id,)
+        ).fetchone()
+        self.assertFalse(
+            bool(db_photo["flickr_deleted"]),
+            "transient error must not mark photo as flickr_deleted",
+        )
+
+        # ── Run 2: API now responds — photo is private (mismatch) ───────
+        mock_client.get_photo_info.side_effect = None
+        mock_client.get_photo_info.return_value = {
+            "photo": {
+                "visibility": {"ispublic": 0, "isfriend": 0, "isfamily": 0},
+                "tags": {"tag": []},
+            }
+        }
+
+        result2 = check_photo(mock_client, row, self.db, fix=False, verbose=False)
+
+        self.assertEqual(
+            result2["status"],
+            "perm_mismatch",
+            "second run must detect mismatch after transient error clears",
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
