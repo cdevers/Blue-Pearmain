@@ -264,3 +264,24 @@ class TestProposalApplyLogging(unittest.TestCase):
         self.assertEqual(entries[0]["photo_id"], 7)
         self.assertIn("proposal_id=42", entries[0]["trigger"])
         self.assertEqual(entries[0]["target"], "tags→flickr")
+
+
+class TestReconcileFixLogging(unittest.TestCase):
+    """Verify the log_operation DB contract for reconcile --fix."""
+
+    def test_log_operation_stores_reconcile_fix_entry(self):
+        db = _make_db()
+        db.log_operation(
+            photo_id=5,
+            operation="reconcile_fix",
+            target="flickr_permissions",
+            old_value="private",
+            new_value="public",
+            trigger="reconcile_fix",
+            actor="bp",
+        )
+        entries = db.get_operation_log(operation="reconcile_fix")
+        db.close()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["target"], "flickr_permissions")
+        self.assertEqual(entries[0]["old_value"], "private")

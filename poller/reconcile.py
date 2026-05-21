@@ -120,6 +120,15 @@ def check_photo(
                         is_family=expected[2],
                     )
                     result["fixes"].append("perm")
+                    db.log_operation(
+                        photo_id=result["row_id"],
+                        operation="reconcile_fix",
+                        target="flickr_permissions",
+                        old_value=result["perm_actual"],
+                        new_value=result["perm_expected"],
+                        trigger="reconcile_fix",
+                        actor="bp",
+                    )
                 except FlickrError as e:
                     result["errors"].append(f"perm fix failed: {e}")
 
@@ -152,6 +161,15 @@ def check_photo(
                 try:
                     client.add_tags(flickr_id, missing)
                     result["fixes"].append("tags")
+                    db.log_operation(
+                        photo_id=result["row_id"],
+                        operation="reconcile_fix",
+                        target="flickr_tags",
+                        old_value=None,
+                        new_value=str(missing),
+                        trigger="reconcile_fix",
+                        actor="bp",
+                    )
                     new_pushed = sorted(set(db_pushed) | set(missing))
                     db.conn.execute(
                         "UPDATE photos SET pushed_tags = ? WHERE id = ?",
