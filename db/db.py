@@ -1386,6 +1386,74 @@ class Database:
         }
 
     # -----------------------------------------------------------------------
+    # Operation log
+    # -----------------------------------------------------------------------
+
+    def log_operation(
+        self,
+        photo_id: int | None,
+        operation: str,
+        target: str | None = None,
+        old_value: str | None = None,
+        new_value: str | None = None,
+        trigger: str | None = None,
+        actor: str = "bp",
+    ) -> None:
+        """
+        Append one entry to the operation_log table.
+
+        Fire-and-forget: swallows all errors so journaling never interrupts
+        the main operation. Safe to call even before migration 020 is applied.
+        """
+        try:
+            self.conn.execute(
+                """INSERT INTO operation_log
+                   (occurred_at, photo_id, operation, target,
+                    old_value, new_value, trigger, actor)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (_now_iso(), photo_id, operation, target, old_value, new_value, trigger, actor),
+            )
+            self.conn.commit()
+        except Exception:
+            pass
+
+    def get_operation_log(
+        self,
+        photo_id: int | None = None,
+        operation: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """
+        Return operation log entries, newest first.
+
+        Optionally filter by photo_id, operation type, or both.
+        Returns [] if the table doesn't exist (pre-migration) or on error.
+        """
+        try:
+            conditions: list[str] = []
+            params: list[Any] = []
+            if photo_id is not None:
+                conditions.append("photo_id = ?")
+                params.append(photo_id)
+            if operation is not None:
+                conditions.append("operation = ?")
+                params.append(operation)
+            where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            params.append(limit)
+            rows = self.conn.execute(
+                f"""SELECT id, occurred_at, photo_id, operation, target,
+                           old_value, new_value, trigger, actor
+                    FROM operation_log
+                    {where}
+                    ORDER BY occurred_at DESC
+                    LIMIT ?""",
+                params,
+            ).fetchall()
+            return [dict(row) for row in rows]
+        except Exception:
+            return []
+
+    # -----------------------------------------------------------------------
     # Stats (for dashboard)
     # -----------------------------------------------------------------------
 
