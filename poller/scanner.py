@@ -459,6 +459,7 @@ def build_enriched_row(
     existing: dict,
     zones: list[dict],
     self_name: str,
+    person_policies: dict[str, str] | None = None,
 ) -> dict:
     """
     Merge Photos metadata into an existing Flickr DB record.
@@ -542,7 +543,9 @@ def build_enriched_row(
         "approved_family",
         "approved_friends_family",
     ):
-        state, reason = classify(merged, zones, self_name=self_name)
+        state, reason = classify(
+            merged, zones, self_name=self_name, person_policies=person_policies
+        )
         merged["privacy_state"] = state
         merged["privacy_reason"] = reason
 
@@ -580,6 +583,7 @@ def scan(
     photosdb = osxphotos.PhotosDB(dbfile=library_path)
 
     zones = db.active_zones()
+    person_policies = db.get_person_policies()
     scanned = 0
     matched = 0
     enriched = 0
@@ -646,7 +650,9 @@ def scan(
             )
             if analysis_unchanged and photos_cache_fresh:
                 continue
-            enriched_row = build_enriched_row(photo_row, existing_by_uuid, zones, self_name)
+            enriched_row = build_enriched_row(
+                photo_row, existing_by_uuid, zones, self_name, person_policies=person_policies
+            )
             if not dry_run:
                 db.upsert_photo(enriched_row)
             enriched += 1
@@ -659,7 +665,9 @@ def scan(
             matched += 1
             # Handle duplicates: link first candidate, flag others
             primary = candidates[0]
-            enriched_row = build_enriched_row(photo_row, primary, zones, self_name)
+            enriched_row = build_enriched_row(
+                photo_row, primary, zones, self_name, person_policies=person_policies
+            )
 
             if not dry_run:
                 row_id = db.upsert_photo(enriched_row)
@@ -699,7 +707,9 @@ def scan(
                 photo_row["privacy_reason"] = "screenshot"
                 photo_row["proposed_tags"] = []
             else:
-                state, reason = classify(photo_row, zones, self_name=self_name)
+                state, reason = classify(
+                    photo_row, zones, self_name=self_name, person_policies=person_policies
+                )
                 photo_row["privacy_state"] = state
                 photo_row["privacy_reason"] = reason
                 photo_row["proposed_tags"] = propose_tags(photo_row)
