@@ -477,6 +477,40 @@ def _step_args(base, **overrides):
     return _ap.Namespace(**d)
 
 
+def cmd_status(args):
+    """Print operational status: daemon state, queue sizes, pending proposals."""
+    import yaml
+
+    from db.db import Database
+    from poller.status import collect_status, format_status, status_exit_code
+
+    config_path = Path(args.config)
+    if not config_path.exists():
+        print(f"Error: config file not found: {config_path}", file=sys.stderr)
+        sys.exit(2)
+
+    try:
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+    except Exception as e:
+        print(f"Error reading config: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    try:
+        db = Database(Path(config["database"]["path"]).expanduser())
+    except Exception as e:
+        print(f"Error opening database: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    try:
+        status = collect_status(config, db)
+    finally:
+        db.close()
+
+    print(format_status(status))
+    sys.exit(status_exit_code(status))
+
+
 def cmd_doctor(args):
     """
     Validate config, environment, and DB state before running the pipeline.
@@ -849,6 +883,12 @@ def main():
     p_doc.add_argument("--check-flickr", action="store_true",
                        help="Make a live Flickr API call to verify credentials (requires network)")
 
+    # status
+    p_status = sub.add_parser(
+        "status",
+        help="Operational health: daemon state, queue sizes, pending proposals",
+    )
+
     # checkpoint
     p_ckpt = sub.add_parser("checkpoint", help="Run a WAL checkpoint to shrink the WAL file")
     p_ckpt.add_argument(
@@ -925,6 +965,7 @@ def main():
         "install-daemons":   cmd_install_daemons,
         "uninstall-daemons": cmd_uninstall_daemons,
         "doctor":            cmd_doctor,
+        "status":            cmd_status,
         "deduplicator":      cmd_deduplicator,
         "prune-proposals":   cmd_prune_proposals,
     }
