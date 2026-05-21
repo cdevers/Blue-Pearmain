@@ -5,6 +5,7 @@ Run from repo root:
     python -m pytest tests/test_status.py -v
 """
 
+import subprocess as proc
 import sys
 import tempfile
 import unittest
@@ -13,7 +14,13 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from poller.status import check_daemon, log_mtime_ago, collect_status
+from poller.status import (
+    check_daemon,
+    log_mtime_ago,
+    collect_status,
+    format_status,
+    status_exit_code,
+)
 from db.db import Database
 
 
@@ -137,3 +144,95 @@ class TestCollectStatus(unittest.TestCase):
         db.close()
         for key in ("total", "collision", "non_conflict"):
             self.assertIn(key, result["proposals"])
+
+
+class TestFormatStatus(unittest.TestCase):
+    def _sample_status(self, daemon_state="loaded", collision=0):
+        return {
+            "daemons": [
+                {"name": "poller", "state": daemon_state, "last_run": "2h ago"},
+                {"name": "pipeline", "state": daemon_state, "last_run": "5h ago"},
+                {"name": "reviewer", "state": daemon_state, "last_run": "serving"},
+                {"name": "reconcile", "state": daemon_state, "last_run": "1d ago"},
+            ],
+            "queue": {
+                "needs_review": 10,
+                "candidate_public": 5,
+                "approved_public": 3,
+                "pushable": 1,
+            },
+            "proposals": {
+                "total": collision,
+                "collision": collision,
+                "non_conflict": 0,
+                "divergence": 0,
+            },
+        }
+
+    def test_output_contains_daemon_names(self):
+        out = format_status(self._sample_status())
+        for name in ("poller", "pipeline", "reviewer", "reconcile"):
+            self.assertIn(name, out)
+
+    def test_output_contains_loaded_state(self):
+        out = format_status(self._sample_status(daemon_state="loaded"))
+        self.assertIn("loaded", out)
+
+    def test_output_contains_not_loaded_state(self):
+        out = format_status(self._sample_status(daemon_state="not loaded"))
+        self.assertIn("not loaded", out)
+
+    def test_output_contains_queue_numbers(self):
+        out = format_status(self._sample_status())
+        self.assertIn("10", out)  # needs_review
+        self.assertIn("5", out)  # candidate_public
+
+    def test_output_contains_proposals_section(self):
+        out = format_status(self._sample_status(collision=2))
+        self.assertIn("2", out)
+
+
+class TestStatusExitCode(unittest.TestCase):
+    def _sample_status(self, daemon_state="loaded", collision=0):
+        return {
+            "daemons": [
+                {"name": n, "state": daemon_state, "last_run": "ok"}
+                for n in ("poller", "pipeline", "reviewer", "reconcile")
+            ],
+            "queue": {
+                "needs_review": 0,
+                "candidate_public": 0,
+                "approved_public": 0,
+                "pushable": 0,
+            },
+            "proposals": {
+                "total": collision,
+                "collision": collision,
+                "non_conflict": 0,
+                "divergence": 0,
+            },
+        }
+
+    def test_exit_zero_when_all_healthy(self):
+        self.assertEqual(status_exit_code(self._sample_status()), 0)
+
+    def test_exit_one_when_daemon_not_loaded(self):
+        self.assertEqual(status_exit_code(self._sample_status(daemon_state="not loaded")), 1)
+
+    def test_exit_one_when_collisions_pending(self):
+        self.assertEqual(status_exit_code(self._sample_status(collision=3)), 1)
+
+
+class TestBpStatusCommand(unittest.TestCase):
+    """Smoke-test bp status via the CLI entry point."""
+
+    def test_bp_status_exits_without_crashing_when_no_config(self):
+        result = proc.run(
+            ["python", "bp", "status", "--config", "/nonexistent/config.yml"],
+            capture_output=True,
+            text=True,
+            cwd=str(Path(__file__).parent.parent),
+        )
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertNotIn("Traceback", result.stdout)
+        self.assertNotEqual(result.returncode, None)

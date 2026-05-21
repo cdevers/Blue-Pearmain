@@ -120,3 +120,61 @@ def collect_status(config: dict, db: "Database") -> dict:
     proposals = db.get_proposal_counts()
 
     return {"daemons": daemons, "queue": queue, "proposals": proposals}
+
+
+def format_status(status: dict) -> str:
+    """Format the status dict into a multi-section human-readable string."""
+    lines: list[str] = []
+
+    lines.append("")
+    lines.append("Blue Pearmain — operational status")
+    lines.append("─" * 42)
+
+    # Daemons
+    lines.append("")
+    lines.append("Daemons")
+    for d in status["daemons"]:
+        state_str = d["state"]
+        last_run = d.get("last_run", "—")
+        marker = "✓" if state_str == "loaded" else "✗"
+        lines.append(f"  {marker}  {d['name']:<12}  {state_str:<12}  {last_run}")
+
+    # Queue
+    lines.append("")
+    lines.append("Review queue")
+    q = status["queue"]
+    lines.append(f"    needs_review      {q['needs_review']}")
+    lines.append(f"    candidate_public  {q['candidate_public']}")
+    lines.append(
+        f"    approved_public   {q['approved_public']}"
+        + (f"  (pushable: {q['pushable']})" if q["pushable"] else "")
+    )
+
+    # Proposals
+    lines.append("")
+    lines.append("Proposals")
+    p = status["proposals"]
+    lines.append(f"    pending total     {p['total']}")
+    if p["collision"]:
+        lines.append(f"    collisions        {p['collision']}  ← needs manual resolution")
+    if p["non_conflict"]:
+        lines.append(
+            f"    non-conflict      {p['non_conflict']}  (auto-apply on next pipeline run)"
+        )
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def status_exit_code(status: dict) -> int:
+    """
+    Return:
+      0 — all daemons loaded, no collisions
+      1 — one or more daemons not loaded, or unresolved collisions
+      2 — reserved for error (DB unavailable, config missing); caller raises before here
+    """
+    daemons_ok = all(d["state"] == "loaded" for d in status["daemons"])
+    collisions_ok = status["proposals"]["collision"] == 0
+    if daemons_ok and collisions_ok:
+        return 0
+    return 1
