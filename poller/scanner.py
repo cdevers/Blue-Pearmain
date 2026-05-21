@@ -833,7 +833,7 @@ def backfill_dimensions(db, library) -> int:
     return updated
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Blue Pearmain scanner — sync Apple Photos → local DB"
     )

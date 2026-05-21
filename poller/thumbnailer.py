@@ -33,7 +33,7 @@ import yaml
 try:
     import osxphotos
 except ImportError:
-    osxphotos = None  # type: ignore
+    osxphotos = None  # type: ignore[assignment]
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.db import Database
@@ -191,7 +191,7 @@ def run(
     )
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Blue Pearmain thumbnailer")
     parser.add_argument("--config", default="config/config.yml")
     parser.add_argument(

@@ -1414,7 +1414,7 @@ def _start_mdns(host: str, port: int, lan_ip: str | None) -> None:
         log.warning("mDNS registration failed: %s", exc)
 
 
-def main():
+def main() -> None:
     import argparse
 
     # Pre-parse --config so we can read reviewer defaults from the config file.
