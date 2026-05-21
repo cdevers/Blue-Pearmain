@@ -95,12 +95,17 @@ def run_sync_engine(
     photo_ids: list[int],
     dry_run: bool = False,
     verbose: bool = False,
+    protected_tags: list[str] | None = None,
+    protected_namespaces: list[str] | None = None,
 ) -> dict:
     """
     Diff flickr_tags vs photos_tags for each photo, classify the divergence,
     and write proposals to metadata_proposals. Sets meta_last_harmonized_at.
     No Flickr API calls. No writes to Photos or Flickr.
     Returns aggregate counts.
+
+    protected_tags / protected_namespaces: passed through to _classify_tags to
+    suppress source=photos proposals that would remove protected tags from Flickr.
     """
     COMMIT_EVERY = 500
     totals = {"proposals": 0, "hash_matches": 0, "skipped": 0, "failed": 0}
@@ -111,7 +116,13 @@ def run_sync_engine(
 
     for i, photo_id in enumerate(photo_ids, 1):
         try:
-            proposals = _harmonise_one(db, photo_id, now)
+            proposals = _harmonise_one(
+                db,
+                photo_id,
+                now,
+                protected_tags=protected_tags,
+                protected_namespaces=protected_namespaces,
+            )
         except Exception as e:
             log.warning("sync_engine: photo_id=%s error: %s", photo_id, e)
             totals["failed"] += 1
@@ -221,7 +232,13 @@ def run_sync_engine(
     return totals
 
 
-def _harmonise_one(db: "Database", photo_id: int, now: str):
+def _harmonise_one(
+    db: "Database",
+    photo_id: int,
+    now: str,
+    protected_tags: list[str] | None = None,
+    protected_namespaces: list[str] | None = None,
+):
     """
     Return one of:
       "hash_match"  — all fields already in sync (tags confirmed via hash)
@@ -256,6 +273,8 @@ def _harmonise_one(db: "Database", photo_id: int, now: str):
                 phash,
                 now,
                 proposed_tags_json=row["proposed_tags"],
+                protected_tags=protected_tags,
+                protected_namespaces=protected_namespaces,
             )
         )
 
@@ -282,6 +301,42 @@ def _harmonise_one(db: "Database", photo_id: int, now: str):
     return proposals
 
 
+def _would_remove_protected(
+    flickr_tags_raw: list[str],
+    photos_tags_raw: list[str],
+    protected_tags: list[str] | None,
+    protected_namespaces: list[str] | None,
+) -> bool:
+    """
+    Return True if applying Photos tags to Flickr (set_tags replacement) would
+    remove any tag that is protected by name or namespace prefix.
+
+    Matching is case-insensitive and whitespace-stripped, consistent with how
+    Flickr normalises tags for display.
+    """
+    if not protected_tags and not protected_namespaces:
+        return False
+
+    pt = protected_tags or []
+    pns = protected_namespaces or []
+    photos_set = {t.strip().lower() for t in photos_tags_raw}
+
+    for tag in flickr_tags_raw:
+        t = tag.strip().lower()
+        if not t:
+            continue
+        # Protected by explicit name
+        if t in {p.strip().lower() for p in pt}:
+            if t not in photos_set:
+                return True
+        # Protected by namespace prefix
+        for ns in pns:
+            if t.startswith(ns.strip().lower()):
+                if t not in photos_set:
+                    return True
+    return False
+
+
 def _classify_tags(
     photo_id: int,
     flickr_tags_json: str | None,
@@ -290,6 +345,8 @@ def _classify_tags(
     photos_hash: str | None,
     now: str,
     proposed_tags_json: str | None = None,
+    protected_tags: list[str] | None = None,
+    protected_namespaces: list[str] | None = None,
 ) -> list[dict]:
     """
     Classify the tag divergence and return proposal dicts.
@@ -298,6 +355,11 @@ def _classify_tags(
     proposed_tags_json: tags Blue Pearmain computed and pushed to Flickr.
     These are excluded from the Flickr side before comparison so that
     BP-managed tags don't generate spurious Flickr→Photos proposals.
+
+    protected_tags / protected_namespaces: any source=photos proposal that
+    would remove a protected tag from Flickr is silently dropped at generation
+    time. Flickr uses set_tags (full replacement), so a Photos-side proposal
+    that omits a protected tag would delete it from Flickr.
     """
     ftags_raw = json.loads(flickr_tags_json) if flickr_tags_json else []
     ptags_raw = json.loads(photos_tags_json) if photos_tags_json else []
@@ -338,6 +400,12 @@ def _classify_tags(
             "created_at": now,
         }
 
+    # Determine whether a source=photos→flickr proposal would delete a protected tag.
+    # If so, we suppress that proposal rather than risking silent removal.
+    photos_would_lose_protected = _would_remove_protected(
+        ftags_raw, ptags_raw, protected_tags, protected_namespaces
+    )
+
     if not ftags_effective:
         return [make("photos", "flickr", photos_tags_json, "non_conflict")]
 
@@ -348,13 +416,15 @@ def _classify_tags(
         return [make("flickr", "photos", flickr_tags_json, "divergence")]
 
     if ptags_norm > ftags_effective:
+        if photos_would_lose_protected:
+            return []
         return [make("photos", "flickr", photos_tags_json, "divergence")]
 
     # Collision: neither is a superset (even after excluding managed tags)
-    return [
-        make("flickr", "photos", flickr_tags_json, "collision"),
-        make("photos", "flickr", photos_tags_json, "collision"),
-    ]
+    proposals = [make("flickr", "photos", flickr_tags_json, "collision")]
+    if not photos_would_lose_protected:
+        proposals.append(make("photos", "flickr", photos_tags_json, "collision"))
+    return proposals
 
 
 # ---------------------------------------------------------------------------

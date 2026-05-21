@@ -105,7 +105,15 @@ def main() -> int:
 
     from flickr.metadata_puller import run_sync_engine
 
-    totals = run_sync_engine(db, photo_ids, dry_run=args.dry_run, verbose=args.verbose)
+    tag_prot = config.get("tag_protection", {})
+    totals = run_sync_engine(
+        db,
+        photo_ids,
+        dry_run=args.dry_run,
+        verbose=args.verbose,
+        protected_tags=tag_prot.get("protected_tags") or [],
+        protected_namespaces=tag_prot.get("protected_namespaces") or [],
+    )
 
     suffix = "  (dry-run)" if args.dry_run else ""
     print(
