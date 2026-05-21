@@ -65,6 +65,23 @@
 .btn-all-prv { background: var(--red);   border-color: var(--red);   color: #fff; }
 .btn-all-pub { background: var(--green); border-color: var(--green); color: #fff; }
 .btn-review  { background: transparent; color: var(--accent); border-color: var(--accent); }
+.policy-badge {
+  font-size: 11px;
+  color: var(--red);
+  font-weight: 600;
+  margin-left: 8px;
+}
+.btn-policy {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.btn-policy:hover { border-color: var(--red); color: var(--red); }
+.btn-policy.active { border-color: var(--red); color: var(--red); background: rgba(229,115,115,0.08); }
 
 .unknown-row {
   background: var(--surface);
@@ -129,6 +146,9 @@
         <a href="{{ url_for('review', state='needs_review', person=person.person) }}">
           {{ person.person }}
         </a>
+        {% if person_policies.get(person.person) == 'always_private' %}
+          <span class="policy-badge">🔒 always private</span>
+        {% endif %}
       </div>
       <div class="person-counts">
         <span class="total">{{ person.photo_count }} photos</span>
@@ -154,6 +174,13 @@
         <button class="btn-all-pub"
                 onclick="confirmBatch('{{ person.person | e }}', 'make_public', {{ person.photo_count }}, {{ loop.index }})">
           All public
+        </button>
+        <button
+          class="btn-policy {% if person_policies.get(person.person) == 'always_private' %}active{% endif %}"
+          data-person="{{ person.person | e }}"
+          data-has-policy="{{ 'true' if person_policies.get(person.person) == 'always_private' else 'false' }}"
+          onclick="togglePersonPolicy(this)">
+          {% if person_policies.get(person.person) == 'always_private' %}Remove policy{% else %}Always private{% endif %}
         </button>
       </div>
     </div>
@@ -289,5 +316,21 @@ function scrollToHash() {
   }
 }
 scrollToHash();
+
+async function togglePersonPolicy(btn) {
+  const person = btn.dataset.person;
+  const hasPolicy = btn.dataset.hasPolicy === 'true';
+  const newPolicy = hasPolicy ? null : 'always_private';
+
+  const resp = await fetch('/api/person_policy', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({person, policy: newPolicy}),
+  });
+  if (!resp.ok) { alert('Failed to update policy.'); return; }
+
+  // Reload the page so the badge and button state reflect the new policy
+  window.location.reload();
+}
 </script>
 {% endblock %}

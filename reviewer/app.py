@@ -345,6 +345,7 @@ def faces() -> str:
         unknown_count=unknown_count,
         unknown_photos=unknown_photos,
         stats=db().stats(),
+        person_policies=db().get_person_policies(),
     )
 
 
