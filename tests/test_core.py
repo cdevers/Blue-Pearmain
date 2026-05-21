@@ -11390,6 +11390,75 @@ class TestInterruptionAndRecovery(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(proposal_count, 1, "retry must not create a duplicate proposal row")
 
+    # ------------------------------------------------------------------
+    # Task 2
+    # ------------------------------------------------------------------
+
+    def test_partial_album_push_retry_resumes_from_failure_point(self):
+        """
+        push_photo_to_albums commits each album push individually.  If album A
+        succeeds and album B fails, a retry must push only album B — album A must
+        NOT be pushed again (no duplicate Flickr API call).
+        """
+        from unittest.mock import MagicMock
+        from flickr.album_pusher import push_photo_to_albums
+        from flickr.flickr_client import FlickrError
+
+        photo_id = self.db.upsert_photo(
+            {
+                "flickr_id": "F_ALBUM",
+                "uuid": "U_ALBUM",
+                "privacy_state": "approved_public",
+                "perms_pushed_flickr": 1,
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+        # album1: already has a Flickr set → will call add_photo_to_photoset
+        album1_id = self.db.upsert_album("apple-uuid-1", "Album One")
+        self.db.set_album_flickr_set_id(album1_id, "SET_EXISTING")
+        self.db.upsert_photo_album(photo_id, album1_id)
+
+        # album2: no Flickr set yet → will call create_photoset
+        album2_id = self.db.upsert_album("apple-uuid-2", "Album Two")
+        self.db.upsert_photo_album(photo_id, album2_id)
+
+        # ── Run 1: add_photo_to_photoset (album1) fails; create_photoset (album2) succeeds ──
+        mock = MagicMock()
+        mock.add_photo_to_photoset.side_effect = FlickrError(9999, "server error")
+        mock.create_photoset.return_value = "SET_NEW"
+
+        push_photo_to_albums(self.db, mock, photo_id)
+
+        row1 = self.db.conn.execute(
+            "SELECT flickr_pushed FROM photo_albums WHERE photo_id=? AND album_id=?",
+            (photo_id, album1_id),
+        ).fetchone()
+        row2 = self.db.conn.execute(
+            "SELECT flickr_pushed FROM photo_albums WHERE photo_id=? AND album_id=?",
+            (photo_id, album2_id),
+        ).fetchone()
+        self.assertEqual(row1["flickr_pushed"], 0, "album1 must stay pending after failure")
+        self.assertEqual(row2["flickr_pushed"], 1, "album2 must be pushed after success")
+
+        # ── Run 2: add_photo_to_photoset now succeeds ────────────────────
+        mock.add_photo_to_photoset.side_effect = None
+        push_photo_to_albums(self.db, mock, photo_id)
+
+        row1 = self.db.conn.execute(
+            "SELECT flickr_pushed FROM photo_albums WHERE photo_id=? AND album_id=?",
+            (photo_id, album1_id),
+        ).fetchone()
+        self.assertEqual(row1["flickr_pushed"], 1, "album1 must be pushed after retry")
+
+        # create_photoset must have been called exactly once across both runs
+        self.assertEqual(
+            mock.create_photoset.call_count,
+            1,
+            "photoset must not be re-created on retry",
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
