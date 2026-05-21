@@ -9,6 +9,10 @@ No side effects.
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from db.db import Database
 
 
 # ---------------------------------------------------------------------------
@@ -118,3 +122,98 @@ def explain_photo_perms(row: dict) -> dict | None:
         "reason_code": "perms_not_yet_pushed",
         "reason": (f"review decision ({review_decision}, {reviewed_at}) not yet pushed to Flickr"),
     }
+
+
+# ---------------------------------------------------------------------------
+# Formatting
+# ---------------------------------------------------------------------------
+
+
+def format_explain_text(explanations: list[dict], flickr_username: str) -> str:
+    """
+    Render a list of per-photo explanation dicts as a human-readable string.
+
+    Each dict must have keys: photo_id, flickr_id, title, perms, tags.
+    perms and tags are the dicts returned by explain_photo_perms/tags, or None.
+    """
+    if not explanations:
+        return "\nNo drift found in DB cache — everything looks consistent.\n"
+
+    lines: list[str] = [""]
+    for exp in explanations:
+        title = exp.get("title") or f"Photo {exp['photo_id']}"
+        fid = exp.get("flickr_id") or ""
+        url = f"https://www.flickr.com/photos/{flickr_username}/{fid}" if fid else "(no Flickr ID)"
+        lines.append(f'Photo {exp["photo_id"]} — "{title}"  [{url}]')
+        lines.append("")
+
+        if exp.get("perms"):
+            p = exp["perms"]
+            lines.append("  permissions")
+            lines.append(f"    desired:       {p['desired']}")
+            lines.append(f"    reason:        {p['reason']}")
+            lines.append("")
+
+        if exp.get("tags"):
+            t = exp["tags"]
+            flickr_str = ", ".join(t["last_known_flickr"]) or "(none)"
+            desired_str = ", ".join(t["desired"]) or "(none)"
+            lines.append("  tags")
+            lines.append(f"    last-known Flickr:  {flickr_str}")
+            lines.append(f"    desired (Photos):   {desired_str}")
+            lines.append(f"    reason:             {t['reason']}")
+            lines.append("")
+
+        lines.append("─" * 60)
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# DB query
+# ---------------------------------------------------------------------------
+
+
+def run_explain(db: "Database", limit: int, flickr_username: str) -> list[dict]:
+    """
+    Query photos with pending drift (from DB cache) and return explanation dicts.
+
+    Only reads from DB — no Flickr API calls.
+    Returns a list of explanation dicts, one per photo with something to explain.
+    """
+    rows = db.conn.execute(
+        """SELECT id, flickr_id, flickr_title,
+                  flickr_tags, photos_tags, pushed_tags,
+                  privacy_state, review_decision, reviewed_at,
+                  perms_pushed_flickr, tags_pushed_flickr
+           FROM photos
+           WHERE flickr_id IS NOT NULL
+             AND (flickr_deleted IS NULL OR flickr_deleted = 0)
+             AND (
+               tags_pushed_flickr = 1
+               OR (review_decision IS NOT NULL AND perms_pushed_flickr = 0)
+             )
+           ORDER BY reviewed_at DESC
+           LIMIT ?""",
+        (limit,),
+    ).fetchall()
+
+    results = []
+    for row in rows:
+        r = dict(row)
+        perms_exp = explain_photo_perms(r)
+        tags_exp = explain_photo_tags(r)
+
+        if perms_exp or tags_exp:
+            results.append(
+                {
+                    "photo_id": r["id"],
+                    "flickr_id": r.get("flickr_id"),
+                    "title": r.get("flickr_title") or "",
+                    "perms": perms_exp,
+                    "tags": tags_exp,
+                }
+            )
+
+    return results

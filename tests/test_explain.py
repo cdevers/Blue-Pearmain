@@ -6,12 +6,19 @@ Run from repo root:
 """
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from poller.explain import explain_photo_tags, explain_photo_perms
+from db.db import Database
+from poller.explain import (
+    explain_photo_tags,
+    explain_photo_perms,
+    format_explain_text,
+    run_explain,
+)
 
 
 def _row(**kw) -> dict:
@@ -152,3 +159,57 @@ class TestExplainPhotoPerms(unittest.TestCase):
             )
         )
         self.assertIn("friends-only", result["desired"])
+
+
+def _make_db() -> Database:
+    f = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    f.close()
+    return Database(Path(f.name))
+
+
+class TestFormatExplainText(unittest.TestCase):
+    def _sample_explanation(self) -> dict:
+        return {
+            "photo_id": 42,
+            "flickr_id": "99900001",
+            "title": "Beach trip 2019",
+            "perms": None,
+            "tags": {
+                "last_known_flickr": ["beach"],
+                "desired": ["beach", "scanned-film"],
+                "reason": "in Photos but not on Flickr (not yet pushed): scanned-film",
+            },
+        }
+
+    def test_output_contains_photo_title(self):
+        out = format_explain_text([self._sample_explanation()], flickr_username="testuser")
+        self.assertIn("Beach trip 2019", out)
+
+    def test_output_contains_flickr_url(self):
+        out = format_explain_text([self._sample_explanation()], flickr_username="testuser")
+        self.assertIn("99900001", out)
+        self.assertIn("testuser", out)
+
+    def test_output_contains_tags_section(self):
+        out = format_explain_text([self._sample_explanation()], flickr_username="testuser")
+        self.assertIn("tags", out)
+        self.assertIn("scanned-film", out)
+
+    def test_empty_list_returns_no_drift_message(self):
+        out = format_explain_text([], flickr_username="testuser")
+        self.assertIn("No drift", out)
+
+    def test_perm_section_shown_when_present(self):
+        exp = self._sample_explanation()
+        exp["perms"] = {"desired": "public", "reason": "not yet pushed to Flickr"}
+        out = format_explain_text([exp], flickr_username="testuser")
+        self.assertIn("permissions", out)
+        self.assertIn("public", out)
+
+
+class TestRunExplain(unittest.TestCase):
+    def test_returns_empty_list_for_empty_db(self):
+        db = _make_db()
+        result = run_explain(db, limit=100, flickr_username="testuser")
+        db.close()
+        self.assertEqual(result, [])
