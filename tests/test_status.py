@@ -6,13 +6,15 @@ Run from repo root:
 """
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from poller.status import check_daemon, log_mtime_ago
+from poller.status import check_daemon, log_mtime_ago, collect_status
+from db.db import Database
 
 
 class TestCheckDaemon(unittest.TestCase):
@@ -76,3 +78,62 @@ class TestLogMtimeAgo(unittest.TestCase):
         p.exists.return_value = True
         p.stat.return_value = MagicMock(st_mtime=1000.0 - 90000)  # ~1 day ago
         self.assertEqual(log_mtime_ago(p), "1d ago")
+
+
+def _make_db() -> Database:
+    """Create a minimal temp DB for testing."""
+    f = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    f.close()
+    return Database(Path(f.name))
+
+
+class TestCollectStatus(unittest.TestCase):
+    @patch("poller.status.check_daemon", return_value="loaded")
+    @patch("poller.status.log_mtime_ago", return_value="5m ago")
+    def test_returns_dict_with_required_keys(self, _mtime, _daemon):
+        db = _make_db()
+        config = {"logging": {"file": "/tmp/bp.log"}}
+        result = collect_status(config, db)
+        db.close()
+        self.assertIn("daemons", result)
+        self.assertIn("queue", result)
+        self.assertIn("proposals", result)
+
+    @patch("poller.status.check_daemon", return_value="loaded")
+    @patch("poller.status.log_mtime_ago", return_value="1h ago")
+    def test_daemons_list_has_four_entries(self, _mtime, _daemon):
+        db = _make_db()
+        config = {"logging": {"file": "/tmp/bp.log"}}
+        result = collect_status(config, db)
+        db.close()
+        self.assertEqual(len(result["daemons"]), 4)
+
+    @patch("poller.status.check_daemon", return_value="not loaded")
+    @patch("poller.status.log_mtime_ago", return_value="never")
+    def test_daemon_state_propagated(self, _mtime, _daemon):
+        db = _make_db()
+        config = {"logging": {"file": "/tmp/bp.log"}}
+        result = collect_status(config, db)
+        db.close()
+        states = {d["name"]: d["state"] for d in result["daemons"]}
+        self.assertEqual(states["poller"], "not loaded")
+
+    @patch("poller.status.check_daemon", return_value="loaded")
+    @patch("poller.status.log_mtime_ago", return_value="2h ago")
+    def test_queue_has_required_keys(self, _mtime, _daemon):
+        db = _make_db()
+        config = {"logging": {"file": "/tmp/bp.log"}}
+        result = collect_status(config, db)
+        db.close()
+        for key in ("needs_review", "candidate_public", "approved_public"):
+            self.assertIn(key, result["queue"])
+
+    @patch("poller.status.check_daemon", return_value="loaded")
+    @patch("poller.status.log_mtime_ago", return_value="2h ago")
+    def test_proposals_has_required_keys(self, _mtime, _daemon):
+        db = _make_db()
+        config = {"logging": {"file": "/tmp/bp.log"}}
+        result = collect_status(config, db)
+        db.close()
+        for key in ("total", "collision", "non_conflict"):
+            self.assertIn(key, result["proposals"])
