@@ -315,6 +315,8 @@ All review decisions push tags to Flickr — tags are useful for search even on 
 
 **Friends / Family visibility:** The review grid has a "▸ More" toggle on each card that reveals three additional buttons — Friends only, Family only, and Friends & Family — for photos that should be shared with a restricted audience rather than made fully public or kept fully private. The detail view has the same three buttons plus the `F` keyboard shortcut for Friends only. These decisions push the appropriate Flickr permission flags (`is_friend`/`is_family`) via the same background push path used for public photos. `bp reconcile` also checks and repairs friend/family permission drift.
 
+**Privacy guardrail:** Photos taken within a geofence zone or containing a person with an `always_private` policy are flagged with a ⚠️ warning badge. The `p` keyboard shortcut is suppressed for these photos; approving them requires clicking "Override →" and confirming in a modal. Overrides are recorded in the operation log.
+
 **Album membership** is displayed on the single-photo detail page, under an "Albums → Photosets" section that shows each album name and whether it has been synced to Flickr. The review grid shows a small album badge (e.g. "📁 2 albums") on any photo that belongs to at least one album. Action button labels on the detail page include "+ photosets" to make this push explicit.
 
 ### Undo
