@@ -704,17 +704,20 @@ async function decideWithOverride(id, note, card) {
   }
 }
 
-// Modal event handlers
-document.getElementById('override-modal-cancel')
-  .addEventListener('click', closeOverrideModal);
+// Modal event handlers — wrapped in DOMContentLoaded because the modal <div>
+// appears after this <script> block and would otherwise be null at parse time.
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('override-modal-cancel')
+    .addEventListener('click', closeOverrideModal);
 
-document.getElementById('override-modal-backdrop')
-  .addEventListener('click', closeOverrideModal);
+  document.getElementById('override-modal-backdrop')
+    .addEventListener('click', closeOverrideModal);
 
-document.getElementById('override-modal-confirm').addEventListener('click', () => {
-  if (!_overrideCard) return;
-  const note = document.getElementById('override-note-field').value.trim();
-  decideWithOverride(+_overrideCard.dataset.id, note, _overrideCard);
+  document.getElementById('override-modal-confirm').addEventListener('click', () => {
+    if (!_overrideCard) return;
+    const note = document.getElementById('override-note-field').value.trim();
+    decideWithOverride(+_overrideCard.dataset.id, note, _overrideCard);
+  });
 });
 
 document.addEventListener('keydown', e => {
