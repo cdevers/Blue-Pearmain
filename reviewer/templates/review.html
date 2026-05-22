@@ -581,8 +581,14 @@ document.addEventListener('keydown', e => {
     const prev = cards[idx - 1];
     if (prev) selectCard(prev);
   } else if (e.key === 'p' || e.key === 'P') {
-    const _pubDecision = _stateFilter === 'screenshot_public' ? 'confirm_public' : 'make_public';
-    if (selected) quickDecide(+selected.dataset.id, _pubDecision, selected);
+    if (selected) {
+      if (isProtected(selected)) {
+        pulseProtectedBadge(selected);
+      } else {
+        const _pubDecision = _stateFilter === 'screenshot_public' ? 'confirm_public' : 'make_public';
+        quickDecide(+selected.dataset.id, _pubDecision, selected);
+      }
+    }
   } else if (e.key === 'x' || e.key === 'X') {
     if (selected) quickDecide(+selected.dataset.id, 'keep_private', selected);
   } else if (e.key === ' ') {
@@ -634,45 +640,90 @@ window.addEventListener('load', () => {
 // Private persons set for guardrail UI
 const PRIVATE_PERSONS = new Set({{ private_person_names | tojson }});
 
+function isProtected(card) {
+  return card.dataset.protected === '1';
+}
+
+function pulseProtectedBadge(card) {
+  const badge = card.querySelector('.protected-badge');
+  if (!badge) return;
+  badge.classList.remove('pulse');
+  void badge.offsetWidth; // force reflow to re-trigger animation
+  badge.classList.add('pulse');
+  setTimeout(() => badge.classList.remove('pulse'), 500);
+}
+
 let _overrideCard = null;
+
+function closeOverrideModal() {
+  document.getElementById('override-modal').style.display = 'none';
+  _overrideCard = null;
+}
 
 function openOverrideModal(card) {
   _overrideCard = card;
-  const reasons = card.dataset.geofenceZone
-    ? ['Geofence: ' + card.dataset.geofenceZone]
-    : [];
-  try {
-    const persons = JSON.parse(card.dataset.persons || '[]');
-    for (const p of persons) {
-      if (PRIVATE_PERSONS.has(p)) reasons.push('Private person: ' + p);
-    }
-  } catch (e) {}
+  const zone = card.dataset.geofenceZone || '';
+  const persons = JSON.parse(card.dataset.persons || '[]');
+  const privatePersons = persons.filter(p => PRIVATE_PERSONS.has(p));
+
+  const reasons = [];
+  if (zone) reasons.push(`taken in the '${zone}' geofence zone`);
+  if (privatePersons.length) {
+    reasons.push(`contains private person: ${privatePersons.join(', ')}`);
+  }
+
   document.getElementById('override-modal-reason').textContent =
-    'This photo is protected: ' + (reasons.join(', ') || 'unknown reason') + '. Are you sure you want to make it public?';
+    `This photo was ${reasons.join(' and ')} and would normally be kept private.`;
   document.getElementById('override-note-field').value = '';
-  const modal = document.getElementById('override-modal');
-  modal.style.display = 'flex';
+  document.getElementById('override-modal').style.display = 'flex';
   document.getElementById('override-note-field').focus();
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('override-modal-cancel').addEventListener('click', () => {
-    document.getElementById('override-modal').style.display = 'none';
-    _overrideCard = null;
+async function decideWithOverride(id, note, card) {
+  const r = await apiFetch('/api/decide', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      photo_id: id,
+      decision: 'make_public',
+      push: true,
+      override_note: note,
+    }),
   });
-  document.getElementById('override-modal-backdrop').addEventListener('click', () => {
-    document.getElementById('override-modal').style.display = 'none';
-    _overrideCard = null;
-  });
-  document.getElementById('override-modal-confirm').addEventListener('click', async () => {
-    if (!_overrideCard) return;
-    const id = +_overrideCard.dataset.id;
-    const note = document.getElementById('override-note-field').value.trim();
-    const decision = {{ state_filter | tojson }} === 'screenshot_public' ? 'confirm_public' : 'make_public';
-    document.getElementById('override-modal').style.display = 'none';
-    await quickDecide(id, decision, _overrideCard);
-    _overrideCard = null;
-  });
+  const data = await r.json();
+  closeOverrideModal();
+  if (data.ok) {
+    toast('✓ Approved (override)');
+    card.classList.add('decided-pub');
+    _updateReviewCounts('make_public');
+    const cards = [...document.querySelectorAll('.photo-card')];
+    const idx = cards.indexOf(card);
+    if (idx >= 0 && idx < cards.length - 1) selectCard(cards[idx + 1]);
+  } else {
+    toast('Error: ' + (data.error || 'unknown'), 'err');
+  }
+}
+
+// Modal event handlers
+document.getElementById('override-modal-cancel')
+  .addEventListener('click', closeOverrideModal);
+
+document.getElementById('override-modal-backdrop')
+  .addEventListener('click', closeOverrideModal);
+
+document.getElementById('override-modal-confirm').addEventListener('click', () => {
+  if (!_overrideCard) return;
+  const note = document.getElementById('override-note-field').value.trim();
+  decideWithOverride(+_overrideCard.dataset.id, note, _overrideCard);
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const modal = document.getElementById('override-modal');
+    if (modal && modal.style.display !== 'none') {
+      closeOverrideModal();
+    }
+  }
 });
 </script>
 
