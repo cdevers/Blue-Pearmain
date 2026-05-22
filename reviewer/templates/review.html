@@ -122,6 +122,42 @@
   white-space: nowrap;
 }
 .btn-override:hover { background: rgba(184, 120, 0, 0.12); }
+
+/* Panoramic tile — double-wide, contain layout */
+.photo-card.pano {
+  grid-column: span 2;
+}
+.photo-card.pano .thumb {
+  aspect-ratio: 3/1;
+  background: #1a1a1a;
+}
+.photo-card.pano .thumb img {
+  object-fit: contain;
+}
+
+/* Person name chips — rendered below thumbnail in pano tiles */
+.person-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.person-chip {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: #2a2a2a;
+  color: #ccc;
+  white-space: nowrap;
+}
+.person-chip.unknown {
+  color: #888;
+}
+.person-chip.protected {
+  background: #3a2a1a;
+  color: #e0a060;
+}
+
 /* Badge pulse animation */
 @keyframes protected-pulse {
   0%   { opacity: 1; transform: scale(1); }
@@ -372,7 +408,8 @@
 {% if photos %}
 <div class="grid" id="photo-grid">
   {% for photo in photos %}
-  <div class="photo-card"
+  {% set is_pano = photo.width and photo.height and (photo.width / photo.height) > 2.0 %}
+  <div class="photo-card{% if is_pano %} pano{% endif %}"
        id="card-{{ photo.id }}"
        data-id="{{ photo.id }}"
        data-flickr="{{ photo.flickr_id or '' }}"
@@ -416,6 +453,19 @@
           <span style="color:#444">no tags yet</span>
         {% endif %}
       </div>
+      {% if is_pano and photo.apple_persons %}
+      <div class="person-chips">
+        {% for name in photo.apple_persons %}
+          {% if name == '_UNKNOWN_' %}
+            <span class="person-chip unknown">unknown</span>
+          {% elif name in private_person_names %}
+            <span class="person-chip protected">🔒 {{ name }}</span>
+          {% else %}
+            <span class="person-chip">{{ name }}</span>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
       {% if photo.album_count %}
       <span class="album-badge">&#128193; {{ photo.album_count }} album{{ 's' if photo.album_count != 1 }}</span>
       {% endif %}
