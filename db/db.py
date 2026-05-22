@@ -639,7 +639,8 @@ class Database:
         rows = self.conn.execute(
             f"""SELECT id, uuid, flickr_id, original_filename,
                        apple_unknown_faces, apple_named_faces, proposed_tags,
-                       display_rotation, is_screenshot, updated_at
+                       display_rotation, is_screenshot, updated_at,
+                       geofence_zone, apple_persons, privacy_reason
                 FROM photos
                 WHERE privacy_state IN ({placeholders}){screenshot_filter}
                 ORDER BY date_taken DESC, id DESC
@@ -650,6 +651,7 @@ class Database:
         for row in rows:
             d = dict(row)
             d["proposed_tags"] = _json_loads_safe(d.get("proposed_tags"))
+            d["apple_persons"] = _json_loads_safe(d.get("apple_persons"))
             result.append(d)
         return result
 
