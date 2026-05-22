@@ -247,6 +247,20 @@ def review() -> str:
     for p in photos:
         p["album_count"] = album_counts.get(p["id"], 0)
 
+    # Compute protection annotation for the guardrail UI
+    policies = db().get_person_policies()
+    private_person_names = [n for n, p in policies.items() if p == "always_private"]
+    private_person_set = set(private_person_names)
+    for photo in photos:
+        reasons: list[str] = []
+        if photo.get("geofence_zone"):
+            reasons.append(f"Geofence: {photo['geofence_zone']}")
+        for person in photo.get("apple_persons") or []:
+            if person in private_person_set:
+                reasons.append(f"Private person: {person}")
+        photo["is_protected"] = bool(reasons)
+        photo["protected_reasons"] = reasons
+
     return render_template(
         "review.html",
         photos=photos,
@@ -257,6 +271,7 @@ def review() -> str:
         total=total,
         total_pages=total_pages,
         stats=db().stats(),
+        private_person_names=private_person_names,
     )
 
 

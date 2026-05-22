@@ -96,6 +96,124 @@
   font-weight: 600;
 }
 
+.photo-card .thumb .protected-badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  background: rgba(180, 120, 0, 0.92);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+  line-height: 1.4;
+  pointer-events: none;
+  max-width: calc(100% - 8px);
+}
+.btn-override {
+  background: transparent;
+  border: 1px solid #b87800;
+  color: #b87800;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-override:hover { background: rgba(184, 120, 0, 0.12); }
+/* Badge pulse animation */
+@keyframes protected-pulse {
+  0%   { opacity: 1; transform: scale(1); }
+  30%  { opacity: 1; transform: scale(1.08); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.protected-badge.pulse {
+  animation: protected-pulse 0.4s ease-out;
+}
+/* Override modal */
+#override-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+}
+#override-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+}
+#override-modal-box {
+  position: relative;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 24px;
+  max-width: 420px;
+  width: 90%;
+  z-index: 1;
+}
+#override-modal-box h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+  color: #e0a060;
+}
+#override-modal-box p {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: #ccc;
+  line-height: 1.5;
+}
+#override-modal-box label {
+  display: block;
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+#override-note-field {
+  width: 100%;
+  box-sizing: border-box;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #eee;
+  font-size: 13px;
+  padding: 6px 8px;
+  resize: vertical;
+  min-height: 48px;
+}
+#override-modal-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+}
+#override-modal-cancel {
+  background: #333;
+  border: 1px solid #555;
+  color: #ccc;
+  border-radius: 4px;
+  padding: 6px 18px;
+  font-size: 13px;
+  cursor: pointer;
+  font-weight: 600;
+}
+#override-modal-cancel:hover { background: #3a3a3a; }
+#override-modal-confirm {
+  background: transparent;
+  border: 1px solid #666;
+  color: #888;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 11px;
+  cursor: pointer;
+}
+#override-modal-confirm:hover { color: #aaa; border-color: #888; }
+
 .photo-card .meta {
   padding: 8px 10px;
 }
@@ -258,6 +376,9 @@
        id="card-{{ photo.id }}"
        data-id="{{ photo.id }}"
        data-flickr="{{ photo.flickr_id or '' }}"
+       data-protected="{{ '1' if photo.is_protected else '0' }}"
+       data-geofence-zone="{{ photo.geofence_zone or '' }}"
+       data-persons="{{ photo.apple_persons | tojson if photo.apple_persons else '[]' }}"
        tabindex="0"
        onclick="selectCard(this)"
        ondblclick="openDetail({{ photo.id }})">
@@ -279,6 +400,11 @@
       {% if photo.is_screenshot %}
       <span class="screenshot-badge">screenshot</span>
       {% endif %}
+      {% if photo.is_protected %}
+      <span class="protected-badge">
+        {{ photo.protected_reasons | join(' · ') }}
+      </span>
+      {% endif %}
     </div>
 
     <div class="meta">
@@ -294,10 +420,17 @@
       <span class="album-badge">&#128193; {{ photo.album_count }} album{{ 's' if photo.album_count != 1 }}</span>
       {% endif %}
       <div class="actions">
+        {% if photo.is_protected %}
+        <button class="btn-override"
+                onclick="event.stopPropagation(); openOverrideModal(this.closest('.photo-card'))">
+          ⚠️ Override →
+        </button>
+        {% else %}
         <button class="btn-pub"
                 onclick="event.stopPropagation(); quickDecide({{ photo.id }}, '{{ 'confirm_public' if state_filter == 'screenshot_public' else 'make_public' }}', this.closest('.photo-card'))">
           {% if state_filter == 'screenshot_public' %}✓ Confirm public{% else %}✓ Public{% endif %}
         </button>
+        {% endif %}
         <button class="{% if state_filter.startswith('screenshot_') %}btn-pub{% else %}btn-prv{% endif %}"
                 onclick="event.stopPropagation(); quickDecide({{ photo.id }}, 'keep_private', this.closest('.photo-card'))">
           {% if state_filter.startswith('screenshot_') %}✓ Confirm private{% else %}✗ Private{% endif %}
@@ -497,5 +630,64 @@ window.addEventListener('load', () => {
   const first = document.querySelector('.photo-card');
   if (first) selectCard(first);
 });
+
+// Private persons set for guardrail UI
+const PRIVATE_PERSONS = new Set({{ private_person_names | tojson }});
+
+let _overrideCard = null;
+
+function openOverrideModal(card) {
+  _overrideCard = card;
+  const reasons = card.dataset.geofenceZone
+    ? ['Geofence: ' + card.dataset.geofenceZone]
+    : [];
+  try {
+    const persons = JSON.parse(card.dataset.persons || '[]');
+    for (const p of persons) {
+      if (PRIVATE_PERSONS.has(p)) reasons.push('Private person: ' + p);
+    }
+  } catch (e) {}
+  document.getElementById('override-modal-reason').textContent =
+    'This photo is protected: ' + (reasons.join(', ') || 'unknown reason') + '. Are you sure you want to make it public?';
+  document.getElementById('override-note-field').value = '';
+  const modal = document.getElementById('override-modal');
+  modal.style.display = 'flex';
+  document.getElementById('override-note-field').focus();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('override-modal-cancel').addEventListener('click', () => {
+    document.getElementById('override-modal').style.display = 'none';
+    _overrideCard = null;
+  });
+  document.getElementById('override-modal-backdrop').addEventListener('click', () => {
+    document.getElementById('override-modal').style.display = 'none';
+    _overrideCard = null;
+  });
+  document.getElementById('override-modal-confirm').addEventListener('click', async () => {
+    if (!_overrideCard) return;
+    const id = +_overrideCard.dataset.id;
+    const note = document.getElementById('override-note-field').value.trim();
+    const decision = {{ state_filter | tojson }} === 'screenshot_public' ? 'confirm_public' : 'make_public';
+    document.getElementById('override-modal').style.display = 'none';
+    await quickDecide(id, decision, _overrideCard);
+    _overrideCard = null;
+  });
+});
 </script>
+
+<div id="override-modal" role="dialog" aria-modal="true" aria-labelledby="override-modal-title">
+  <div id="override-modal-backdrop"></div>
+  <div id="override-modal-box">
+    <h3 id="override-modal-title">⚠️ Protected photo</h3>
+    <p id="override-modal-reason"></p>
+    <label for="override-note-field">Reason for override (optional)</label>
+    <textarea id="override-note-field" rows="2"
+              placeholder="e.g. parking lot — nothing sensitive"></textarea>
+    <div id="override-modal-actions">
+      <button id="override-modal-cancel">Cancel</button>
+      <button id="override-modal-confirm">Make public anyway</button>
+    </div>
+  </div>
+</div>
 {% endblock %}
