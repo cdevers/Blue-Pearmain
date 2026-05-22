@@ -729,6 +729,7 @@ def api_decide() -> _JsonResp:
     notes = data.get("notes", "")
     push = data.get("push", False)
     tags = data.get("tags")  # optional updated tag list
+    override_note = data.get("override_note")  # None if absent; "" if blank override
 
     if not photo_id or decision not in (
         "make_public",
@@ -781,6 +782,49 @@ def api_decide() -> _JsonResp:
         trigger=f"decision:{decision}",
         actor="user",
     )
+
+    # Log guardrail override if override_note was provided.
+    # None means a normal (non-override) decision. "" means override with no note — still log.
+    if override_note is not None and decision in ("make_public", "confirm_public"):
+        _zone = photo.get("geofence_zone") or ""
+        _raw_persons = photo.get("apple_persons") or "[]"
+        if isinstance(_raw_persons, str):
+            try:
+                _persons_list = json.loads(_raw_persons)
+            except Exception:
+                _persons_list = []
+        else:
+            _persons_list = list(_raw_persons)
+        _all_policies = db().get_person_policies()
+        _private_lower = {k.lower() for k, v in _all_policies.items() if v == "always_private"}
+        _private_in_photo = [p for p in _persons_list if p.lower() in _private_lower]
+
+        _has_zone = bool(_zone)
+        _has_person = bool(_private_in_photo)
+        if _has_zone and _has_person:
+            _op = "geofence_and_policy_override"
+        elif _has_zone:
+            _op = "geofence_override"
+        else:
+            _op = "policy_override"
+
+        _trigger: dict[str, str] = {}
+        if _zone:
+            _trigger["zone"] = _zone
+        if _private_in_photo:
+            _trigger["person"] = ", ".join(_private_in_photo)
+        if override_note:
+            _trigger["note"] = override_note
+
+        db().log_operation(
+            photo_id=photo_id,
+            operation=_op,
+            target="privacy_state",
+            old_value=old["privacy_state"] if old else None,
+            new_value="approved_public",
+            trigger=json.dumps(_trigger),
+            actor="manual",
+        )
 
     # Push to Flickr in a background thread so the response returns immediately
     if push and photo.get("flickr_id"):

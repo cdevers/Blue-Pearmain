@@ -198,3 +198,111 @@ class TestRouteAnnotation:
         html = r.data.decode()
         assert "PRIVATE_PERSONS" in html
         assert "Jane Smith" in html
+
+
+class TestOverrideLogging:
+    @pytest.fixture()
+    def decide_client(self, tmp_path):
+        db = Database(tmp_path / "test.db")
+        db.conn.executescript("""
+            CREATE TABLE IF NOT EXISTS person_policies (
+                id          INTEGER PRIMARY KEY,
+                person_name TEXT NOT NULL UNIQUE,
+                policy      TEXT NOT NULL CHECK(policy IN ('always_private')),
+                created_at  TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS operation_log (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                occurred_at TEXT NOT NULL,
+                photo_id    INTEGER REFERENCES photos(id),
+                operation   TEXT NOT NULL,
+                target      TEXT,
+                old_value   TEXT,
+                new_value   TEXT,
+                trigger     TEXT,
+                actor       TEXT NOT NULL DEFAULT 'bp'
+            );
+        """)
+        db.conn.commit()
+        db.set_person_policy("Jane Smith", "always_private")
+        db.upsert_photo(
+            {
+                "uuid": "uuid-ov-1",
+                "original_filename": "IMG_OV1.JPG",
+                "privacy_state": "candidate_public",
+                "geofence_zone": "work",
+                "apple_persons": [],
+                "proposed_tags": [],
+            }
+        )
+        row = db.conn.execute("SELECT id FROM photos WHERE uuid = 'uuid-ov-1'").fetchone()
+        self._photo_id = row["id"]
+
+        app_module._db = db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test"
+        with app_module.app.test_client() as c:
+            yield c
+        app_module._db = None
+        db.close()
+
+    def test_override_note_writes_geofence_override_log_entry(self, decide_client):
+        import json as _json
+
+        r = decide_client.post(
+            "/api/decide",
+            json={
+                "photo_id": self._photo_id,
+                "decision": "make_public",
+                "push": False,
+                "override_note": "parking lot, nothing sensitive",
+            },
+        )
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data["ok"] is True
+
+        db_entries = app_module._db.get_operation_log(
+            photo_id=self._photo_id, operation="geofence_override"
+        )
+        assert len(db_entries) == 1
+        entry = db_entries[0]
+        assert entry["operation"] == "geofence_override"
+        assert entry["target"] == "privacy_state"
+        assert entry["new_value"] == "approved_public"
+        assert entry["actor"] == "manual"
+        trigger = _json.loads(entry["trigger"])
+        assert trigger["zone"] == "work"
+        assert trigger["note"] == "parking lot, nothing sensitive"
+
+    def test_empty_override_note_still_writes_log_entry(self, decide_client):
+        r = decide_client.post(
+            "/api/decide",
+            json={
+                "photo_id": self._photo_id,
+                "decision": "make_public",
+                "push": False,
+                "override_note": "",
+            },
+        )
+        assert r.get_json()["ok"] is True
+        db_entries = app_module._db.get_operation_log(
+            photo_id=self._photo_id, operation="geofence_override"
+        )
+        assert len(db_entries) == 1
+
+    def test_no_override_note_does_not_write_override_log_entry(self, decide_client):
+        """Normal make_public without override_note must NOT write a geofence_override entry."""
+        r = decide_client.post(
+            "/api/decide",
+            json={
+                "photo_id": self._photo_id,
+                "decision": "make_public",
+                "push": False,
+            },
+        )
+        assert r.get_json()["ok"] is True
+        db_entries = app_module._db.get_operation_log(
+            photo_id=self._photo_id, operation="geofence_override"
+        )
+        assert len(db_entries) == 0
