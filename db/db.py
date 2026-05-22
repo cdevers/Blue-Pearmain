@@ -640,7 +640,8 @@ class Database:
             f"""SELECT id, uuid, flickr_id, original_filename,
                        apple_unknown_faces, apple_named_faces, proposed_tags,
                        display_rotation, is_screenshot, updated_at,
-                       geofence_zone, apple_persons, privacy_reason
+                       geofence_zone, apple_persons, privacy_reason,
+                       width, height
                 FROM photos
                 WHERE privacy_state IN ({placeholders}){screenshot_filter}
                 ORDER BY date_taken DESC, id DESC
