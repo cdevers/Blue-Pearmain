@@ -418,6 +418,10 @@ class Database:
         if "is_video" not in existing:
             self.conn.execute("ALTER TABLE photos ADD COLUMN is_video INTEGER NOT NULL DEFAULT 0")
             self.conn.commit()
+        existing = {r[1] for r in self.conn.execute("PRAGMA table_info(photos)").fetchall()}
+        if "bp_rating" not in existing:
+            self.conn.execute("ALTER TABLE photos ADD COLUMN bp_rating INTEGER NOT NULL DEFAULT 0")
+            self.conn.commit()
         pa_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(photo_albums)").fetchall()}
         if "removed_at" not in pa_cols:
             self.conn.execute("ALTER TABLE photo_albums ADD COLUMN removed_at TEXT")
@@ -425,6 +429,33 @@ class Database:
         al_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(albums)").fetchall()}
         if "deleted_at" not in al_cols:
             self.conn.execute("ALTER TABLE albums ADD COLUMN deleted_at TEXT")
+            self.conn.commit()
+        tables = {
+            r[0]
+            for r in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "operation_log" not in tables:
+            self.conn.executescript("""
+                CREATE TABLE IF NOT EXISTS operation_log (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    occurred_at TEXT NOT NULL,
+                    photo_id    INTEGER REFERENCES photos(id),
+                    operation   TEXT NOT NULL,
+                    target      TEXT,
+                    old_value   TEXT,
+                    new_value   TEXT,
+                    trigger     TEXT,
+                    actor       TEXT NOT NULL DEFAULT 'bp'
+                );
+                CREATE INDEX IF NOT EXISTS idx_operation_log_photo
+                    ON operation_log(photo_id);
+                CREATE INDEX IF NOT EXISTS idx_operation_log_operation
+                    ON operation_log(operation);
+                CREATE INDEX IF NOT EXISTS idx_operation_log_occurred
+                    ON operation_log(occurred_at);
+            """)
             self.conn.commit()
 
     # -----------------------------------------------------------------------
@@ -522,6 +553,85 @@ class Database:
             (state, reason, _now_iso(), _now_iso(), photo_id),
         )
         self.conn.commit()
+
+    # -----------------------------------------------------------------------
+    # Star ratings
+    # -----------------------------------------------------------------------
+
+    def set_bp_rating(self, photo_id: int, rating: int) -> None:
+        """Set bp_rating directly (from reviewer UI). Logs to operation_log."""
+        row = self.conn.execute("SELECT bp_rating FROM photos WHERE id = ?", (photo_id,)).fetchone()
+        old_rating = row["bp_rating"] if row else 0
+        self.conn.execute("UPDATE photos SET bp_rating = ? WHERE id = ?", (rating, photo_id))
+        self.conn.commit()
+        self.log_operation(
+            photo_id, "set_rating", "bp_rating", str(old_rating), str(rating), "reviewer_ui"
+        )
+
+    def get_photo_uuid(self, photo_id: int) -> str | None:
+        """Return the Apple Photos UUID for the given DB row, or None."""
+        row = self.conn.execute("SELECT uuid FROM photos WHERE id = ?", (photo_id,)).fetchone()
+        return row["uuid"] if row else None
+
+    def apply_scanner_rating(self, photo_id: int, apple_favorite: int) -> None:
+        """Apply scanner sync policy for bp_rating. Logs changes to operation_log.
+
+        Sync table (runs on every poll):
+          favorite=True  + bp_rating=0   → set bp_rating=1   (seed from heart)
+          favorite=True  + bp_rating>0   → no change          (already rated)
+          favorite=False + bp_rating=0   → no change          (nothing to clear)
+          favorite=False + bp_rating>0   → set bp_rating=0   (user un-hearted)
+        """
+        row = self.conn.execute("SELECT bp_rating FROM photos WHERE id = ?", (photo_id,)).fetchone()
+        if row is None:
+            return
+        old_rating = row["bp_rating"]
+
+        if apple_favorite == 1 and old_rating == 0:
+            new_rating = 1
+        elif apple_favorite == 0 and old_rating > 0:
+            new_rating = 0
+        else:
+            return  # no change
+
+        self.conn.execute("UPDATE photos SET bp_rating = ? WHERE id = ?", (new_rating, photo_id))
+        self.conn.commit()
+
+        if new_rating == 1:
+            self.log_operation(
+                photo_id,
+                "seed_rating_from_photos",
+                "bp_rating",
+                str(old_rating),
+                str(new_rating),
+                "scanner",
+            )
+        else:
+            self.log_operation(
+                photo_id,
+                "clear_rating_from_photos",
+                "bp_rating",
+                str(old_rating),
+                str(new_rating),
+                "scanner",
+            )
+
+    def seed_flickr_rating(self, photo_id: int, flickr_rating: int) -> None:
+        """Seed bp_rating from Flickr machine tag, only if currently unrated.
+
+        BP is authoritative once a rating is set — Flickr tags are seed-only.
+        Never overwrites an existing non-zero bp_rating.
+        """
+        if flickr_rating <= 0:
+            return
+        row = self.conn.execute("SELECT bp_rating FROM photos WHERE id = ?", (photo_id,)).fetchone()
+        if row is None or row["bp_rating"] != 0:
+            return
+        self.conn.execute("UPDATE photos SET bp_rating = ? WHERE id = ?", (flickr_rating, photo_id))
+        self.conn.commit()
+        self.log_operation(
+            photo_id, "seed_rating_from_flickr", "bp_rating", "0", str(flickr_rating), "poller"
+        )
 
     def record_review(self, photo_id: int, decision: str, notes: str = ""):
         """Record a human review decision and update privacy state accordingly."""
@@ -645,7 +755,7 @@ class Database:
                        apple_unknown_faces, apple_named_faces, proposed_tags,
                        display_rotation, is_screenshot, updated_at,
                        geofence_zone, apple_persons, privacy_reason,
-                       width, height, is_video
+                       width, height, is_video, bp_rating
                 FROM photos
                 WHERE privacy_state IN ({placeholders}){screenshot_filter}
                 ORDER BY date_taken DESC, id DESC

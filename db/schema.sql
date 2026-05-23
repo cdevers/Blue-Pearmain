@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS photos (
     uuid_stale              INTEGER NOT NULL DEFAULT 0, -- 1 if Photos.app rejected UUID as invalid
     is_screenshot           INTEGER NOT NULL DEFAULT 0, -- 1 if osxphotos flagged this as a screenshot
     is_video                INTEGER NOT NULL DEFAULT 0, -- 1 if this is a video (MOV/MP4/M4V etc.)
+    bp_rating               INTEGER NOT NULL DEFAULT 0, -- 0=unrated, 1–5 star rating
     merged_into_id          INTEGER REFERENCES photos(id), -- soft-delete: points to record this donor was merged into
     updated_at              TEXT                    -- ISO8601, last time this row was written
 );
