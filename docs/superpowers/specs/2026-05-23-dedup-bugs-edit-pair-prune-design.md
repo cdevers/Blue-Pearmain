@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-23  
 **Status:** Approved — ready for implementation plan  
-**Related issues:** TBD (file before coding)
+**Related issues:** [#129](https://github.com/cdevers/Blue-Pearmain/issues/129)
 
 ---
 
