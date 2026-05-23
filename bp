@@ -684,7 +684,8 @@ def cmd_doctor(args):
             if pending:
                 for name, _ in pending:
                     check(WARN, f"Migration not applied: {name}")
-                print(f"       → Run: bp migrate --config {args.config}")
+                config_flag = f" --config {args.config}" if args.config != "config/config.yml" else ""
+                print(f"       → Run: bp{config_flag} migrate")
             else:
                 conn = sqlite3.connect(str(db_path))
                 applied = [r[0] for r in conn.execute(
