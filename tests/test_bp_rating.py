@@ -431,3 +431,96 @@ class TestPollerRatingTag(unittest.TestCase):
 
         client.add_tags.assert_not_called()
         client.remove_tag.assert_not_called()
+
+
+# ===========================================================================
+# Task 4 — Reconcile: singleton constraint enforcement
+# ===========================================================================
+
+
+class TestReconcileSingleton(unittest.TestCase):
+    """check_photo with --fix must deduplicate multiple bp:rating=* tags."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db = Database(Path(self.tmp) / "test.db")
+        # Seed person_policies table (migration 019 not in schema.sql)
+        self.db.conn.execute(
+            "CREATE TABLE IF NOT EXISTS person_policies "
+            "(id INTEGER PRIMARY KEY, person_name TEXT NOT NULL UNIQUE, "
+            "policy TEXT NOT NULL, created_at TEXT NOT NULL)"
+        )
+        self.db.conn.commit()
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "recon-uuid",
+                "flickr_id": "flickr-recon",
+                "original_filename": "IMG_R.JPG",
+                "privacy_state": "approved_public",
+                "apple_persons": [],
+                "proposed_tags": [],
+                "perms_pushed_flickr": 1,
+                "tags_pushed_flickr": 1,
+            }
+        )
+        self.db.set_bp_rating(self.photo_id, 3)
+
+    def tearDown(self):
+        self.db.close()
+        shutil.rmtree(self.tmp)
+
+    def _make_info_with_duplicate_rating_tags(self) -> dict:
+        """Flickr getInfo response with two conflicting bp:rating=* tags."""
+        return {
+            "photo": {
+                "visibility": {"ispublic": 1, "isfriend": 0, "isfamily": 0},
+                "tags": {
+                    "tag": [
+                        {"raw": "landscape", "id": "tag-land"},
+                        {"raw": "bp:rating=3", "id": "tag-rat-3"},
+                        {"raw": "bp:rating=5", "id": "tag-rat-5"},
+                    ]
+                },
+            }
+        }
+
+    def test_dedup_removes_lower_keeps_higher(self):
+        """With two bp:rating=* tags, fix mode removes all but the highest."""
+        from poller.reconcile import check_photo
+
+        client = MagicMock()
+        client.get_photo_info.return_value = self._make_info_with_duplicate_rating_tags()
+
+        row = dict(
+            self.db.conn.execute(
+                "SELECT id, flickr_id, privacy_state, pushed_tags, "
+                "perms_pushed_flickr, tags_pushed_flickr FROM photos WHERE id = ?",
+                (self.photo_id,),
+            ).fetchone()
+        )
+
+        check_photo(client, row, self.db, fix=True, verbose=False)
+        # The lower-valued tag (bp:rating=3) must have been removed
+        removed_ids = [call.args[0] for call in client.remove_tag.call_args_list]
+        self.assertIn("tag-rat-3", removed_ids)
+        self.assertNotIn("tag-rat-5", removed_ids)
+
+    def test_dedup_logs_rating_tag_dedup_to_journal(self):
+        """Singleton dedup logs rating_tag_dedup to operation_log."""
+        from poller.reconcile import check_photo
+
+        client = MagicMock()
+        client.get_photo_info.return_value = self._make_info_with_duplicate_rating_tags()
+
+        row = dict(
+            self.db.conn.execute(
+                "SELECT id, flickr_id, privacy_state, pushed_tags, "
+                "perms_pushed_flickr, tags_pushed_flickr FROM photos WHERE id = ?",
+                (self.photo_id,),
+            ).fetchone()
+        )
+
+        check_photo(client, row, self.db, fix=True, verbose=False)
+
+        logs = self.db.get_operation_log(photo_id=self.photo_id, operation="rating_tag_dedup")
+        self.assertGreater(len(logs), 0)

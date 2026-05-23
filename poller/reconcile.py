@@ -179,6 +179,50 @@ def check_photo(
                 except FlickrError as e:
                     result["errors"].append(f"tag fix failed: {e}")
 
+    # --- Rating singleton constraint: at most one bp:rating=* tag ---
+    tags_container = photo.get("tags", {})
+    bp_rating_tags: list[dict] = []
+    if isinstance(tags_container, dict):
+        for t in tags_container.get("tag", []):
+            raw = t.get("raw", "").lower()
+            if raw.startswith("bp:rating="):
+                bp_rating_tags.append(t)
+
+    if len(bp_rating_tags) > 1 and fix:
+        # Keep the highest-valued tag, remove the rest
+
+        def _tag_val(t: dict) -> int:
+            try:
+                return int(t.get("raw", "").split("=", 1)[1])
+            except (ValueError, IndexError):
+                return 0
+
+        bp_rating_tags_sorted = sorted(bp_rating_tags, key=_tag_val, reverse=True)
+        kept_tag = bp_rating_tags_sorted[0]
+        to_remove = bp_rating_tags_sorted[1:]
+
+        removed_ids = []
+        for t in to_remove:
+            try:
+                client.remove_tag(t["id"])
+                removed_ids.append(t["id"])
+            except FlickrError as e:
+                result["errors"].append(f"rating dedup remove failed: {e}")
+
+        if removed_ids:
+            db.log_operation(
+                photo_id=result["row_id"],
+                operation="rating_tag_dedup",
+                target="flickr_tags",
+                old_value=str([t.get("raw") for t in bp_rating_tags]),
+                new_value=kept_tag.get("raw"),
+                trigger="reconcile_fix",
+                actor="bp",
+            )
+            if result["status"] == "ok":
+                result["status"] = "tag_mismatch"
+            result["fixes"].append("rating_dedup")
+
     if verbose and result["status"] == "ok":
         log.debug(f"{flickr_id}: ok")
 
