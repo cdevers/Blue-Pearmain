@@ -293,3 +293,100 @@ class TestBpExportCommand(unittest.TestCase):
         self.assertNotIn("Traceback", result.stderr)
         self.assertNotIn("Traceback", result.stdout)
         self.assertNotEqual(result.returncode, None)
+
+
+class TestExportFormatVersion(unittest.TestCase):
+    """
+    Contract tests: assert that serialize_photo and serialize_zone return
+    exactly the documented v1 field set. If a field is added or removed,
+    this test breaks — the developer must then update docs/export-format.md
+    and decide whether to bump export_format_version.
+    """
+
+    _EXPECTED_PHOTO_KEYS = {
+        "id",
+        "flickr_id",
+        "apple_uuid",
+        "original_filename",
+        "title",
+        "description",
+        "tags",
+        "privacy_state",
+        "review_decision",
+        "reviewed_at",
+        "date_taken",
+        "location",
+        "geofenced",
+        "faces",
+        "albums",
+    }
+
+    _EXPECTED_ZONE_KEYS = {
+        "name",
+        "label",
+        "latitude",
+        "longitude",
+        "radius_m",
+        "policy",
+        "active",
+        "notes",
+    }
+
+    def test_serialize_photo_exact_keys(self):
+        """serialize_photo must return exactly the v1 documented fields — no more, no less."""
+        row = {
+            "id": 1,
+            "flickr_id": "123",
+            "uuid": "AAAA-BBBB",
+            "original_filename": "IMG_001.HEIC",
+            "flickr_title": "Title",
+            "flickr_description": "Desc",
+            "flickr_tags": '["tag1"]',
+            "photos_tags": None,
+            "privacy_state": "approved_public",
+            "review_decision": "make_public",
+            "reviewed_at": "2026-01-01T00:00:00",
+            "date_taken": "2025-06-15T12:00:00",
+            "latitude": 42.3,
+            "longitude": -71.1,
+            "place_city": "Boston",
+            "place_state": "Massachusetts",
+            "place_country": "United States",
+            "geofence_zone": None,
+            "apple_persons": '["Alice"]',
+        }
+        result = serialize_photo(row, album_names=["Vacation"])
+        self.assertEqual(
+            set(result.keys()),
+            self._EXPECTED_PHOTO_KEYS,
+            msg=(
+                f"serialize_photo key mismatch.\n"
+                f"  Extra keys:   {set(result.keys()) - self._EXPECTED_PHOTO_KEYS}\n"
+                f"  Missing keys: {self._EXPECTED_PHOTO_KEYS - set(result.keys())}\n"
+                f"If intentional: update docs/export-format.md and bump export_format_version."
+            ),
+        )
+
+    def test_serialize_zone_exact_keys(self):
+        """serialize_zone must return exactly the v1 documented fields — no more, no less."""
+        row = {
+            "name": "home",
+            "label": "Home",
+            "latitude": 42.3,
+            "longitude": -71.1,
+            "radius_m": 500.0,
+            "policy": "auto_private",
+            "active": 1,
+            "notes": "Primary residence",
+        }
+        result = serialize_zone(row)
+        self.assertEqual(
+            set(result.keys()),
+            self._EXPECTED_ZONE_KEYS,
+            msg=(
+                f"serialize_zone key mismatch.\n"
+                f"  Extra keys:   {set(result.keys()) - self._EXPECTED_ZONE_KEYS}\n"
+                f"  Missing keys: {self._EXPECTED_ZONE_KEYS - set(result.keys())}\n"
+                f"If intentional: update docs/export-format.md and bump export_format_version."
+            ),
+        )
