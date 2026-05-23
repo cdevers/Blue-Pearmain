@@ -68,6 +68,8 @@ python flickr/flickr_auth.py --config config/config.yml
 # 4. Verify your setup
 bp doctor                          # Checks config, DB, Photos library, photoscript
 bp doctor --check-flickr           # Also makes a live Flickr API call
+bp migrate                         # Apply all pending DB migrations in order
+bp migrate --dry-run               # Preview which migrations would run without applying them
 
 # 5. Install git hooks (keeps uv.lock in sync when pyproject.toml changes)
 make install-hooks
@@ -164,6 +166,7 @@ bp sync-metadata                   # Diff cached metadata, generate proposals
 bp sync-metadata --dry-run         # Detect differences without writing anything
 bp sync-metadata --conflicts-only  # Record conflicts only; skip Photos writes
 bp sync-metadata --force           # Process all photos, ignoring last-harmonized timestamp
+bp migrate [--dry-run]             # Apply all pending DB migrations in order
 bp checkpoint                      # Checkpoint and truncate the WAL file
 bp checkpoint --mode passive       # Checkpoint without truncating (safe with active readers)
 bp prune-proposals                 # Supersede spurious managed-tag proposals; delete resolved proposals older than 90 days

@@ -592,7 +592,6 @@ def cmd_doctor(args):
     Validate config, environment, and DB state before running the pipeline.
     Prints a pass/fail checklist and exits non-zero if any required check fails.
     """
-    import re
     import sqlite3
     import yaml
 
@@ -681,29 +680,19 @@ def cmd_doctor(args):
     # ── 5. Migrations ─────────────────────────────────────────────────────────
     if db_ok:
         try:
-            conn = sqlite3.connect(str(db_path))
-            conn.row_factory = sqlite3.Row
-            applied = {r["name"] for r in conn.execute("SELECT name FROM schema_migrations").fetchall()}
-
-            # Discover expected migrations by scanning migration files for MIGRATION_NAME
-            migrations_dir = ROOT / "db" / "migrations"
-            name_re = re.compile(r'^MIGRATION_NAME\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
-            expected = {}
-            for mf in sorted(migrations_dir.glob("migrate_*.py")):
-                text = mf.read_text()
-                m = name_re.search(text)
-                if m:
-                    expected[m.group(1)] = mf.name
-
-            missing = {name: fname for name, fname in expected.items() if name not in applied}
-            if missing:
-                for name, fname in sorted(missing.items()):
-                    check(WARN, f"Migration not applied: {name}",
-                          f"Run: python db/migrations/{fname} --config {args.config}")
+            pending = _pending_migrations(str(db_path), ROOT / "db" / "migrations")
+            if pending:
+                for name, _ in pending:
+                    check(WARN, f"Migration not applied: {name}")
+                print(f"       → Run: bp migrate --config {args.config}")
             else:
-                last = sorted(applied)[-1] if applied else "(none)"
+                conn = sqlite3.connect(str(db_path))
+                applied = [r[0] for r in conn.execute(
+                    "SELECT name FROM schema_migrations ORDER BY name"
+                ).fetchall()]
+                conn.close()
+                last = applied[-1] if applied else "(none)"
                 check(OK, f"Migrations: all applied (latest: {last})")
-            conn.close()
         except Exception as e:
             check(WARN, "Migrations: could not check", str(e))
 

@@ -231,3 +231,16 @@ class TestCmdMigrate(unittest.TestCase):
         ]
         conn.close()
         self.assertEqual(rows, ["migrate_001_a", "migrate_002_b"])
+
+
+# ---------------------------------------------------------------------------
+# Doctor migration hint
+# ---------------------------------------------------------------------------
+
+
+class TestDoctorMigrationHint(unittest.TestCase):
+    def test_doctor_hint_says_bp_migrate(self):
+        """Source code must contain 'bp migrate' as the fix hint, not 'python db/migrations'."""
+        bp_source = _BP_PATH.read_text()
+        self.assertNotIn("python db/migrations", bp_source)
+        self.assertIn("bp migrate", bp_source)
