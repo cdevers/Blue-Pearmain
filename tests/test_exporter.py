@@ -319,6 +319,7 @@ class TestExportFormatVersion(unittest.TestCase):
         "geofenced",
         "faces",
         "albums",
+        "bp_rating",
     }
 
     _EXPECTED_ZONE_KEYS = {

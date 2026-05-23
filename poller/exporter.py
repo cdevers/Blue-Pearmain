@@ -71,6 +71,7 @@ def serialize_photo(row: dict, album_names: list[str]) -> dict:
         "geofenced": bool(row.get("geofence_zone")),
         "faces": faces,
         "albums": album_names,
+        "bp_rating": row.get("bp_rating") or 0,
     }
 
 
@@ -126,7 +127,7 @@ def collect_export_data(db: "Database") -> dict:
                   flickr_tags, photos_tags, privacy_state, review_decision,
                   reviewed_at, date_taken, latitude, longitude, place_city,
                   place_state, place_country, geofence_zone, apple_persons,
-                  original_filename
+                  original_filename, bp_rating
            FROM photos ORDER BY id"""
     ).fetchall()
 

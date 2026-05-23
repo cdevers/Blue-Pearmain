@@ -55,6 +55,7 @@ Each line is a JSON object with the following fields:
 | `geofenced` | boolean | no | `true` if the photo's location falls within an active geofence zone |
 | `faces` | array of string | no | Named people detected by Apple Photos (excludes the `_UNKNOWN_` sentinel); empty array if none |
 | `albums` | array of string | no | Names of albums the photo belongs to; empty array if none |
+| `bp_rating` | integer | no | Star rating 0–5; 0 means unrated |
 
 ### `location` object
 
@@ -91,4 +92,5 @@ When `location` is not null:
 
 | Version | Date | Changes |
 |---|---|---|
+| 1 (additive) | 2026-05-23 | Added `bp_rating` integer field (0=unrated, 1–5 stars) (#123) |
 | 1 | 2026-05-23 | Initial format: 15 photo fields, 8 zone fields |
