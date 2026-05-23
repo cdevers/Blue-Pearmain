@@ -1,13 +1,13 @@
 # Favorites / Star Ratings Design — Issue #123
 
-**Date:** 2026-05-22
+**Date:** 2026-05-22 (revised 2026-05-23)
 **Issue:** https://github.com/cdevers/Blue-Pearmain/issues/123
 
 ---
 
 ## Goal
 
-Add a 0–5 star rating field (`bp_rating`) to the photos database, seeded from Apple Photos' heart/Favorites flag and the Flickr machine tag `bp:favorite=N`. Surface star controls in the reviewer UI, with keyboard shortcuts (0–5). Write rating changes back to Apple Photos' heart flag and to Flickr via machine tag, bidirectionally.
+Add a 0–5 star rating field (`bp_rating`) to the photos database, seeded from Apple Photos' heart/Favorites flag and the Flickr machine tag `bp:rating=N`. Surface star controls in the reviewer UI, with keyboard shortcuts (0–5). Write rating changes back to Apple Photos' heart flag and to Flickr via machine tag. Include rating drift in `bp reconcile --explain`, log rating changes to the operation journal, and include ratings in `bp export`.
 
 ---
 
@@ -16,15 +16,15 @@ Add a 0–5 star rating field (`bp_rating`) to the photos database, seeded from 
 `bp_rating` (0–5 integer) is the canonical rating stored in the BP database. It is seeded from, and kept in sync with, two external signals:
 
 - **Apple Photos** (`photo.favorite` boolean): heart = at least 1 star; no heart = 0 stars.
-- **Flickr** (`bp:favorite=N` machine tag): numerical tag written and read by BP's poller.
+- **Flickr** (`bp:rating=N` machine tag, N=1–5): numerical tag written and read by BP's poller. A rating of 0 (unrated) is represented by the *absence* of any `bp:rating=*` tag — never by `bp:rating=0`.
 
 ```
-Apple Photos (photo.favorite) ──scanner──► DB.bp_rating ◄──poller seed── Flickr (bp:favorite=N)
+Apple Photos (photo.favorite) ──scanner──► DB.bp_rating ◄──poller seed── Flickr (bp:rating=N tag)
                                                   │
                                          Reviewer UI (star widget)
                                                │          │
                                   photoscript  ▼          ▼  Flickr tags API
-                                Photos.favorite            bp:favorite=N tag
+                                Photos.favorite            bp:rating=N tag
 ```
 
 ### Sync Rules
@@ -40,8 +40,8 @@ Apple Photos (photo.favorite) ──scanner──► DB.bp_rating ◄──polle
 
 **Poller (Flickr → DB), seed only:**
 
-- If Flickr photo has `bp:favorite=N` tag and current `bp_rating == 0` → set `bp_rating = N`.
-- If `bp_rating > 0`, Flickr tag is ignored during read (BP is authoritative).
+- If Flickr photo has `bp:rating=N` tag (N ≥ 1) and current `bp_rating == 0` → set `bp_rating = N`.
+- If `bp_rating > 0`, Flickr tag is ignored during read (BP is authoritative once rated).
 
 **UI → Photos write-back (synchronous):**
 
@@ -51,11 +51,16 @@ Apple Photos (photo.favorite) ──scanner──► DB.bp_rating ◄──polle
 
 **UI → Flickr write-back (queued, on next poller run):**
 
-- Poller compares DB `bp_rating` to the current `bp:favorite=N` Flickr tag.
-- If they differ: remove old `bp:favorite=*` tag (by tag ID), add new `bp:favorite=N`.
-- If `bp_rating = 0`: remove the machine tag entirely (if present).
-- If `bp_rating > 0` and no tag: add `bp:favorite=N`.
+- Poller compares DB `bp_rating` to the current `bp:rating=*` Flickr tag.
+- If `bp_rating == 0`: remove the `bp:rating=*` tag entirely (if present). Never add `bp:rating=0`.
+- If `bp_rating > 0` and no tag: add `bp:rating=N`.
+- If `bp_rating > 0` and tag exists with wrong value: remove old, add new.
+- If already correct: no API call.
 - Uses add/remove operations, NOT `flickr.photos.setTags`, to preserve the user's other Flickr tags.
+
+### Singleton constraint
+
+Exactly **zero or one** `bp:rating=*` tag should exist on any Flickr photo at any time. If `bp reconcile` finds multiple `bp:rating=*` tags on a photo, it removes all but the highest-valued one and logs the fix to the operation journal.
 
 ---
 
@@ -111,13 +116,13 @@ This field is passed through to the DB upsert, where the CASE expression applies
 
 ### `poller/poller.py` (`_build_flickr_row`)
 
-Parse the `bp:favorite=N` machine tag from the photo's tag list:
+Parse the `bp:rating=N` machine tag from the photo's tag list:
 
 ```python
 bp_rating_from_flickr = 0
 for tag in photo.get("tags", {}).get("tag", []):
     raw = tag.get("raw", "")
-    if raw.startswith("bp:favorite="):
+    if raw.startswith("bp:rating="):
         try:
             bp_rating_from_flickr = int(raw.split("=", 1)[1])
         except ValueError:
@@ -139,12 +144,67 @@ END
 In the poller's sync loop, after updating a photo's metadata, compare `bp_rating` to the Flickr tags:
 
 1. Fetch current Flickr photo info (tags included, already fetched during sync).
-2. Find any existing `bp:favorite=*` tag (record its `id` attribute from the tags response).
+2. Find all existing `bp:rating=*` tags (record their `id` attributes).
 3. Compare to DB `bp_rating`:
-   - If `bp_rating == 0` and tag exists → call `flickr.photos.removeTag(tag_id=...)`.
-   - If `bp_rating > 0` and no tag → call `flickr.photos.addTags(photo_id=..., tags="bp:favorite=N")`.
-   - If `bp_rating > 0` and tag exists with wrong value → remove old, add new.
-   - If already correct → no API call.
+   - If `bp_rating == 0` and any tag exists → remove all `bp:rating=*` tags. Never add `bp:rating=0`.
+   - If `bp_rating > 0` and no tag → add `bp:rating=N`.
+   - If `bp_rating > 0` and exactly one tag with the correct value → no API call.
+   - If `bp_rating > 0` and tag(s) exist with wrong or duplicate values → remove all old `bp:rating=*` tags, add new `bp:rating=N`.
+
+---
+
+## Reconcile Integration
+
+### `bp reconcile --explain` output
+
+When a photo's `bp_rating` in the DB differs from the `bp:rating=*` tag on Flickr, `bp reconcile --explain` should report this as a drift item:
+
+```
+[drift] rating: DB has bp_rating=4, Flickr has bp:rating=2 — will update Flickr tag on next sync
+```
+
+### `bp reconcile --fix`
+
+The reconciler should detect and fix singleton violations (multiple `bp:rating=*` tags) automatically:
+
+- Remove all but the highest-valued `bp:rating=*` tag.
+- Log the fix to the operation journal with action `rating_tag_dedup`.
+
+---
+
+## Operation Journal
+
+Rating changes from all sources should be logged to the `operation_log` table:
+
+| Trigger | Action string | Details |
+|---|---|---|
+| UI sets rating via `/rate/<id>` | `set_rating` | `{"photo_id": N, "old_rating": X, "new_rating": Y}` |
+| Scanner seeds from Photos.favorite | `seed_rating_from_photos` | `{"photo_id": N, "bp_rating": 1}` |
+| Scanner clears on Photos un-heart | `clear_rating_from_photos` | `{"photo_id": N, "old_rating": X}` |
+| Poller seeds from Flickr tag | `seed_rating_from_flickr` | `{"photo_id": N, "bp_rating": N}` |
+| Reconcile deduplicates tags | `rating_tag_dedup` | `{"flickr_id": "...", "kept": N, "removed": [...]}` |
+
+---
+
+## Export Integration
+
+### `poller/exporter.py` — `serialize_photo`
+
+Add `bp_rating` to the photo export dict:
+
+```python
+"bp_rating": row.get("bp_rating", 0),
+```
+
+`bp_rating` is an integer 0–5. Value 0 means unrated.
+
+### `export_format_version`
+
+Adding `bp_rating` to the export is an additive, non-breaking change. Per the version policy in `docs/export-format.md`, this does **not** require bumping `export_format_version`. Update `docs/export-format.md` to document the new field.
+
+### Schema-validation test (`tests/test_exporter.py`)
+
+Add `"bp_rating"` to `_EXPECTED_PHOTO_KEYS` in `TestExportFormatVersion`.
 
 ---
 
@@ -288,20 +348,27 @@ document.addEventListener('keydown', e => {
 |------|--------|
 | `db/migrations/migrate_022_bp_rating.py` | New — adds `bp_rating` column |
 | `db/schema.sql` | Add `bp_rating` column for fresh installs |
-| `db/db.py` | `_ensure_schema()` guard for `bp_rating`; `review_queue()` SELECT; upsert CASE; new `set_bp_rating()`, `get_photo_uuid()` |
+| `db/db.py` | `_ensure_schema()` guard; `review_queue()` SELECT; upsert CASE; `set_bp_rating()`, `get_photo_uuid()` |
 | `poller/scanner.py` | Add `apple_favorite` to row |
-| `poller/poller.py` | Parse Flickr machine tag; write `bp:favorite=N` tag on sync |
+| `poller/poller.py` | Parse `bp:rating=N` tag; write-back with singleton enforcement |
+| `poller/reconcile.py` | Rating drift in `--explain`; singleton dedup in `--fix` |
+| `poller/exporter.py` | Add `bp_rating` to `serialize_photo()` |
 | `reviewer/app.py` | New `POST /rate/<id>` endpoint |
 | `reviewer/templates/review.html` | Star widget CSS, Jinja, JS; keyboard 0–5 handler |
-| `tests/test_bp_rating.py` | New — migration, scanner sync rules, poller seed, endpoint, UI |
+| `docs/export-format.md` | Document `bp_rating` field (additive; no version bump) |
+| `tests/test_bp_rating.py` | New — migration, sync rules, poller, singleton, endpoint, UI, journal |
+| `tests/test_exporter.py` | Add `bp_rating` to `_EXPECTED_PHOTO_KEYS` |
 
 ---
 
 ## Testing Plan
 
 - **Migration**: idempotent, column exists after run, default value is 0.
-- **Scanner sync rules**: all four cases in the table above, via unit tests with mock `photo.favorite` and current `bp_rating` values.
-- **Poller seed**: `bp:favorite=3` tag on Flickr photo with `bp_rating=0` → seeds to 3; with `bp_rating=2` → no change.
-- **`/rate/<id>` endpoint**: valid ratings 0–5 accepted; invalid (6, -1) rejected with 400; DB updated; photoscript write called (mocked).
+- **Scanner sync rules**: all four cases in the sync table, via unit tests with mock `photo.favorite` and current `bp_rating` values.
+- **Poller seed**: `bp:rating=3` tag on Flickr photo with `bp_rating=0` → seeds to 3; with `bp_rating=2` → no change.
+- **Flickr tag write-back**: `bp_rating=0` → tag removed (never `bp:rating=0` added); `bp_rating=4` → `bp:rating=4` tag added; duplicate tags → all removed, correct one added.
+- **Singleton constraint**: reconcile with two `bp:rating=*` tags → removes lower, keeps higher, logs to journal.
+- **`/rate/<id>` endpoint**: valid ratings 0–5 accepted; invalid (6, -1) rejected with 400; DB updated; photoscript write called (mocked); operation_log entry written.
+- **Reconcile --explain**: photo with `bp_rating=4` and `bp:rating=2` Flickr tag → drift reported.
+- **Export**: `serialize_photo()` includes `bp_rating`; `TestExportFormatVersion._EXPECTED_PHOTO_KEYS` updated.
 - **UI template**: star widget appears on cards; pre-fills from `bp_rating`; `setRating()` JS updates widget.
-- **Flickr tag write-back**: mock Flickr API to verify add/remove calls fire correctly when `bp_rating` changes.
