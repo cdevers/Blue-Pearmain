@@ -640,17 +640,19 @@ class TestRateEndpoint(unittest.TestCase):
     def test_valid_rating_accepted(self):
         """POST /rate/<id> with rating 0–5 returns 200 with ok=True."""
         import tempfile
+        import unittest.mock as mock
 
         with tempfile.TemporaryDirectory() as tmp:
             photo_id, db = self._setup_test_db(Path(tmp))
             import reviewer.app as app_module
 
-            with app_module.app.test_client() as client:
-                r = client.post(
-                    f"/rate/{photo_id}",
-                    json={"rating": 3},
-                    content_type="application/json",
-                )
+            with mock.patch("photoscript.Photo"):
+                with app_module.app.test_client() as client:
+                    r = client.post(
+                        f"/rate/{photo_id}",
+                        json={"rating": 3},
+                        content_type="application/json",
+                    )
             db.close()
             self.assertEqual(r.status_code, 200)
             data = r.get_json()
@@ -683,17 +685,19 @@ class TestRateEndpoint(unittest.TestCase):
     def test_rating_updates_db(self):
         """POST /rate/<id> stores the rating in the database."""
         import tempfile
+        import unittest.mock as mock
 
         with tempfile.TemporaryDirectory() as tmp:
             photo_id, db = self._setup_test_db(Path(tmp))
             import reviewer.app as app_module
 
-            with app_module.app.test_client() as client:
-                client.post(
-                    f"/rate/{photo_id}",
-                    json={"rating": 5},
-                    content_type="application/json",
-                )
+            with mock.patch("photoscript.Photo"):
+                with app_module.app.test_client() as client:
+                    client.post(
+                        f"/rate/{photo_id}",
+                        json={"rating": 5},
+                        content_type="application/json",
+                    )
 
             row = db.conn.execute(
                 "SELECT bp_rating FROM photos WHERE id = ?", (photo_id,)
@@ -704,17 +708,19 @@ class TestRateEndpoint(unittest.TestCase):
     def test_rating_logs_to_operation_log(self):
         """POST /rate/<id> writes a set_rating entry to operation_log."""
         import tempfile
+        import unittest.mock as mock
 
         with tempfile.TemporaryDirectory() as tmp:
             photo_id, db = self._setup_test_db(Path(tmp))
             import reviewer.app as app_module
 
-            with app_module.app.test_client() as client:
-                client.post(
-                    f"/rate/{photo_id}",
-                    json={"rating": 2},
-                    content_type="application/json",
-                )
+            with mock.patch("photoscript.Photo"):
+                with app_module.app.test_client() as client:
+                    client.post(
+                        f"/rate/{photo_id}",
+                        json={"rating": 2},
+                        content_type="application/json",
+                    )
 
             logs = db.get_operation_log(photo_id=photo_id, operation="set_rating")
             db.close()

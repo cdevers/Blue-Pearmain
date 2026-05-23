@@ -75,7 +75,9 @@ def _require_xhr_for_api() -> _JsonResp | None:
     # against a targeted attack. The reviewer UI is designed for trusted local networks only.
     if app.config.get("TESTING"):
         return None
-    if request.path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS"):
+    if (
+        request.path.startswith("/api/") or request.path.startswith("/rate/")
+    ) and request.method not in ("GET", "HEAD", "OPTIONS"):
         if request.headers.get("X-Requested-With") != "XMLHttpRequest":
             return jsonify({"ok": False, "error": "CSRF check failed"}), 403
     return None
@@ -1364,18 +1366,21 @@ def rate_photo(photo_id: int) -> _JsonResp:
     data = request.get_json(silent=True) or {}
     rating = data.get("rating")
     if rating is None:
-        return jsonify({"error": "missing rating"}), 400
+        return jsonify({"ok": False, "error": "missing rating"}), 400
     try:
         rating = int(rating)
     except (TypeError, ValueError):
-        return jsonify({"error": "invalid rating"}), 400
+        return jsonify({"ok": False, "error": "invalid rating"}), 400
     if not 0 <= rating <= 5:
-        return jsonify({"error": "rating must be 0–5"}), 400
+        return jsonify({"ok": False, "error": "rating must be 0–5"}), 400
+
+    uuid = db().get_photo_uuid(photo_id)
+    if uuid is None:
+        return jsonify({"ok": False, "error": "not found"}), 404
 
     db().set_bp_rating(photo_id, rating)
 
     # Write-back to Apple Photos (macOS only, fire-and-forget)
-    uuid = db().get_photo_uuid(photo_id)
     if uuid:
         try:
             import photoscript  # type: ignore[import]
