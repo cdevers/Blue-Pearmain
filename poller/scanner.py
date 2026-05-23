@@ -166,6 +166,7 @@ def photos_record_to_db(photo) -> dict:
     row["_is_screenshot"] = bool(getattr(photo, "screenshot", False))
     row["_is_selfie"] = bool(getattr(photo, "selfie", False))
     row["_is_live"] = bool(getattr(photo, "live_photo", False))
+    row["is_video"] = 1 if getattr(photo, "ismovie", False) else 0
 
     # Fingerprint for matching
     row["fingerprint"] = getattr(photo, "fingerprint", None) or ""

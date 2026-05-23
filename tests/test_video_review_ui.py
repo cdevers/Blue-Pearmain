@@ -117,3 +117,156 @@ class TestMigration021:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(photos)").fetchall()}
         conn.close()
         assert "is_video" in cols
+
+
+class TestScannerIsVideo:
+    def test_scanner_sets_is_video_for_movie(self):
+        """photo.ismovie = True → is_video = 1"""
+        from unittest.mock import MagicMock
+
+        from poller.scanner import photos_record_to_db  # noqa: PLC0415
+
+        photo = MagicMock()
+        photo.ismovie = True
+        photo.live_photo = False
+        photo.uuid = "test-uuid"
+        photo.original_filename = "VID_001.MOV"
+        photo.filename = "VID_001.MOV"
+        photo.date = None
+        photo.date_added = None
+        photo.media_analysis = None
+        photo.exif_info = None
+        photo.latitude = None
+        photo.place = None
+        photo.title = ""
+        photo.description = ""
+        photo.keywords = []
+        photo.labels = []
+        photo.persons = []
+        photo.score = None
+        photo.screenshot = False
+        photo.selfie = False
+        photo.fingerprint = ""
+        photo.width = 1920
+        photo.height = 1080
+        photo.favorite = False
+
+        row = photos_record_to_db(photo)
+        assert row.get("is_video") == 1
+
+    def test_scanner_sets_is_video_zero_for_still(self):
+        """photo.ismovie = False → is_video = 0"""
+        from unittest.mock import MagicMock
+
+        from poller.scanner import photos_record_to_db  # noqa: PLC0415
+
+        photo = MagicMock()
+        photo.ismovie = False
+        photo.live_photo = False
+        photo.uuid = "test-uuid-2"
+        photo.original_filename = "IMG_001.JPG"
+        photo.filename = "IMG_001.JPG"
+        photo.date = None
+        photo.date_added = None
+        photo.media_analysis = None
+        photo.exif_info = None
+        photo.latitude = None
+        photo.place = None
+        photo.title = ""
+        photo.description = ""
+        photo.keywords = []
+        photo.labels = []
+        photo.persons = []
+        photo.score = None
+        photo.screenshot = False
+        photo.selfie = False
+        photo.fingerprint = ""
+        photo.width = 4032
+        photo.height = 3024
+        photo.favorite = False
+
+        row = photos_record_to_db(photo)
+        assert row.get("is_video") == 0
+
+    def test_scanner_live_photo_is_not_video(self):
+        """Live Photo: ismovie=False, live_photo=True → is_video = 0"""
+        from unittest.mock import MagicMock
+
+        from poller.scanner import photos_record_to_db  # noqa: PLC0415
+
+        photo = MagicMock()
+        photo.ismovie = False
+        photo.live_photo = True
+        photo.uuid = "test-uuid-3"
+        photo.original_filename = "IMG_001.HEIC"
+        photo.filename = "IMG_001.HEIC"
+        photo.date = None
+        photo.date_added = None
+        photo.media_analysis = None
+        photo.exif_info = None
+        photo.latitude = None
+        photo.place = None
+        photo.title = ""
+        photo.description = ""
+        photo.keywords = []
+        photo.labels = []
+        photo.persons = []
+        photo.score = None
+        photo.screenshot = False
+        photo.selfie = False
+        photo.fingerprint = ""
+        photo.width = 4032
+        photo.height = 3024
+        photo.favorite = False
+
+        row = photos_record_to_db(photo)
+        assert row.get("is_video") == 0
+
+
+class TestPollerIsVideo:
+    def test_poller_sets_is_video_for_flickr_video(self):
+        """photo dict with media='video' → is_video = 1"""
+        from poller.poller import flickr_photo_to_db  # noqa: PLC0415
+
+        photo = {
+            "id": "12345",
+            "secret": "abc",
+            "server": "s1",
+            "farm": 1,
+            "title": "A video",
+            "media": "video",
+            "tags": "",
+        }
+        row = flickr_photo_to_db(photo, info=None)
+        assert row.get("is_video") == 1
+
+    def test_poller_sets_is_video_zero_for_photo(self):
+        """photo dict with media='photo' → is_video = 0"""
+        from poller.poller import flickr_photo_to_db  # noqa: PLC0415
+
+        photo = {
+            "id": "67890",
+            "secret": "def",
+            "server": "s2",
+            "farm": 2,
+            "title": "A photo",
+            "media": "photo",
+            "tags": "",
+        }
+        row = flickr_photo_to_db(photo, info=None)
+        assert row.get("is_video") == 0
+
+    def test_poller_sets_is_video_zero_when_media_absent(self):
+        """photo dict missing media key → is_video = 0"""
+        from poller.poller import flickr_photo_to_db  # noqa: PLC0415
+
+        photo = {
+            "id": "11111",
+            "secret": "ghi",
+            "server": "s3",
+            "farm": 3,
+            "title": "No media key",
+            "tags": "",
+        }
+        row = flickr_photo_to_db(photo, info=None)
+        assert row.get("is_video") == 0

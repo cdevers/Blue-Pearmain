@@ -172,6 +172,7 @@ def flickr_photo_to_db(photo: dict, info: dict | None = None) -> dict:
 
     # Original filename and format from extras
     row["original_format"] = photo.get("originalformat", "")
+    row["is_video"] = 1 if photo.get("media") == "video" else 0
 
     # Enrich with getInfo data if available
     if info:

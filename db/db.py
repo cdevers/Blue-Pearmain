@@ -414,6 +414,10 @@ class Database:
                 "ALTER TABLE photos ADD COLUMN display_rotation INTEGER NOT NULL DEFAULT 0"
             )
             self.conn.commit()
+        existing = {r[1] for r in self.conn.execute("PRAGMA table_info(photos)").fetchall()}
+        if "is_video" not in existing:
+            self.conn.execute("ALTER TABLE photos ADD COLUMN is_video INTEGER NOT NULL DEFAULT 0")
+            self.conn.commit()
         pa_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(photo_albums)").fetchall()}
         if "removed_at" not in pa_cols:
             self.conn.execute("ALTER TABLE photo_albums ADD COLUMN removed_at TEXT")
