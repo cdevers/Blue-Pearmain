@@ -602,3 +602,182 @@ class TestExplainRatingDrift(unittest.TestCase):
         explanations = run_explain(self.db, limit=50, flickr_username="testuser")
         rating_drifts = [e for e in explanations if e.get("rating")]
         self.assertEqual(len(rating_drifts), 0)
+
+
+# ===========================================================================
+# Task 7 — Reviewer UI: /rate endpoint + star widget
+# ===========================================================================
+
+
+class TestRateEndpoint(unittest.TestCase):
+    """POST /rate/<id> endpoint tests."""
+
+    def _setup_test_db(self, tmp_path: Path):
+        """Create a test DB with one photo and return photo_id."""
+        import reviewer.app as app_module
+
+        db = Database(tmp_path / "test.db")
+        db.conn.execute(
+            "CREATE TABLE IF NOT EXISTS person_policies "
+            "(id INTEGER PRIMARY KEY, person_name TEXT NOT NULL UNIQUE, "
+            "policy TEXT NOT NULL, created_at TEXT NOT NULL)"
+        )
+        db.conn.commit()
+        photo_id = db.upsert_photo(
+            {
+                "uuid": "rate-test-uuid",
+                "original_filename": "IMG_RATE.JPG",
+                "privacy_state": "candidate_public",
+                "apple_persons": [],
+                "proposed_tags": [],
+            }
+        )
+        app_module._db = db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+        return photo_id, db
+
+    def test_valid_rating_accepted(self):
+        """POST /rate/<id> with rating 0–5 returns 200 with ok=True."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            photo_id, db = self._setup_test_db(Path(tmp))
+            import reviewer.app as app_module
+
+            with app_module.app.test_client() as client:
+                r = client.post(
+                    f"/rate/{photo_id}",
+                    json={"rating": 3},
+                    content_type="application/json",
+                )
+            db.close()
+            self.assertEqual(r.status_code, 200)
+            data = r.get_json()
+            self.assertTrue(data["ok"])
+            self.assertEqual(data["bp_rating"], 3)
+
+    def test_invalid_rating_rejected(self):
+        """POST /rate/<id> with rating 6 or -1 returns 400."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            photo_id, db = self._setup_test_db(Path(tmp))
+            import reviewer.app as app_module
+
+            with app_module.app.test_client() as client:
+                r6 = client.post(
+                    f"/rate/{photo_id}",
+                    json={"rating": 6},
+                    content_type="application/json",
+                )
+                self.assertEqual(r6.status_code, 400)
+                r_neg = client.post(
+                    f"/rate/{photo_id}",
+                    json={"rating": -1},
+                    content_type="application/json",
+                )
+                self.assertEqual(r_neg.status_code, 400)
+            db.close()
+
+    def test_rating_updates_db(self):
+        """POST /rate/<id> stores the rating in the database."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            photo_id, db = self._setup_test_db(Path(tmp))
+            import reviewer.app as app_module
+
+            with app_module.app.test_client() as client:
+                client.post(
+                    f"/rate/{photo_id}",
+                    json={"rating": 5},
+                    content_type="application/json",
+                )
+
+            row = db.conn.execute(
+                "SELECT bp_rating FROM photos WHERE id = ?", (photo_id,)
+            ).fetchone()
+            db.close()
+            self.assertEqual(row["bp_rating"], 5)
+
+    def test_rating_logs_to_operation_log(self):
+        """POST /rate/<id> writes a set_rating entry to operation_log."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            photo_id, db = self._setup_test_db(Path(tmp))
+            import reviewer.app as app_module
+
+            with app_module.app.test_client() as client:
+                client.post(
+                    f"/rate/{photo_id}",
+                    json={"rating": 2},
+                    content_type="application/json",
+                )
+
+            logs = db.get_operation_log(photo_id=photo_id, operation="set_rating")
+            db.close()
+            self.assertEqual(len(logs), 1)
+            self.assertEqual(logs[0]["new_value"], "2")
+
+
+class TestStarWidgetHTML(unittest.TestCase):
+    """Star widget and keyboard shortcut JS must appear in review.html."""
+
+    def _get_review_html(self, tmp_path: Path) -> str:
+        import reviewer.app as app_module
+
+        db = Database(tmp_path / "test.db")
+        db.conn.execute(
+            "CREATE TABLE IF NOT EXISTS person_policies "
+            "(id INTEGER PRIMARY KEY, person_name TEXT NOT NULL UNIQUE, "
+            "policy TEXT NOT NULL, created_at TEXT NOT NULL)"
+        )
+        db.conn.commit()
+        db.upsert_photo(
+            {
+                "uuid": "star-uuid",
+                "original_filename": "IMG_STAR.JPG",
+                "privacy_state": "candidate_public",
+                "apple_persons": [],
+                "proposed_tags": [],
+            }
+        )
+        app_module._db = db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+        with app_module.app.test_client() as client:
+            r = client.get("/review?state=candidate_public")
+            html = r.data.decode()
+        db.close()
+        return html
+
+    def test_star_rating_div_present(self):
+        """review.html must contain star-rating div elements."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            html = self._get_review_html(Path(tmp))
+            self.assertIn("star-rating", html)
+
+    def test_star_widget_prefilled_from_bp_rating(self):
+        """Star widget data-rating attribute is present in review.html."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            html = self._get_review_html(Path(tmp))
+            self.assertIn("data-rating=", html)
+
+    def test_keyboard_shortcuts_0_to_5_in_js(self):
+        """The keyboard 0–5 shortcut handler must appear in review.html."""
+        template_path = Path(__file__).parent.parent / "reviewer" / "templates" / "review.html"
+        source = template_path.read_text()
+        self.assertIn("setRating", source)
+        self.assertIn("digit >= 0 && digit <= 5", source)
+
+    def test_star_css_present(self):
+        """The .star-rating CSS rule must appear in review.html."""
+        template_path = Path(__file__).parent.parent / "reviewer" / "templates" / "review.html"
+        source = template_path.read_text()
+        self.assertIn(".star-rating", source)

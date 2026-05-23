@@ -1358,6 +1358,36 @@ def api_poll() -> _JsonResp:
     return jsonify({"ok": True, "pid": proc.pid})
 
 
+@app.route("/rate/<int:photo_id>", methods=["POST"])
+def rate_photo(photo_id: int) -> _JsonResp:
+    """Set a star rating (0–5) on a photo. Writes back to Apple Photos via photoscript."""
+    data = request.get_json(silent=True) or {}
+    rating = data.get("rating")
+    if rating is None:
+        return jsonify({"error": "missing rating"}), 400
+    try:
+        rating = int(rating)
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid rating"}), 400
+    if not 0 <= rating <= 5:
+        return jsonify({"error": "rating must be 0–5"}), 400
+
+    db().set_bp_rating(photo_id, rating)
+
+    # Write-back to Apple Photos (macOS only, fire-and-forget)
+    uuid = db().get_photo_uuid(photo_id)
+    if uuid:
+        try:
+            import photoscript  # type: ignore[import]
+
+            photo = photoscript.Photo(uuid)
+            photo.favorite = rating >= 1
+        except Exception as exc:
+            log.warning("photoscript write failed for %s: %s", uuid, exc)
+
+    return jsonify({"ok": True, "bp_rating": rating})
+
+
 # ---------------------------------------------------------------------------
 # Thumbnail serving
 # ---------------------------------------------------------------------------
