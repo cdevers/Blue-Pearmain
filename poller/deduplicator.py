@@ -195,6 +195,10 @@ def _is_snapbridge_pair(photos: list[PhotoRow]) -> bool:
     same filename + timestamp (guaranteed by the caller), different fingerprints
     (different file content), and — when available — different pixel dimensions.
 
+    Requires both photos to have a DSC_-prefixed filename: Snapbridge is a
+    Nikon-specific feature and only applies to files named DSC_*.  This is a
+    pragmatic heuristic (see spec for caveats), not a semantic guarantee.
+
     Timing (date_added_photos) is intentionally NOT used here. Snapbridge
     previews sometimes arrive days or weeks after capture, and full-res card
     imports can be delayed by months. The reliable signals are fingerprint
@@ -206,6 +210,11 @@ def _is_snapbridge_pair(photos: list[PhotoRow]) -> bool:
     if len(photos) != 2:
         return False
     a, b = photos
+    # Snapbridge only applies to Nikon camera files (DSC_* filename convention)
+    if not all(
+        p.original_filename and p.original_filename.upper().startswith("DSC_") for p in photos
+    ):
+        return False
     if not a.fingerprint or not b.fingerprint:
         return False
     if a.fingerprint == b.fingerprint:

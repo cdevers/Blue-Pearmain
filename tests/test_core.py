@@ -9379,14 +9379,14 @@ class TestPruneProposals(unittest.TestCase):
 class TestDeduplicatorDimensionDivergence(unittest.TestCase):
     """GH #72: auto-dismiss uncertain groups where dimensions differ significantly."""
 
-    def _photo(self, id, fp, width, height, flickr_id=None, date_uploaded=None):
+    def _photo(self, id, fp, width, height, flickr_id=None, date_uploaded=None, filename=None):
         from poller.deduplicator import PhotoRow
 
         return PhotoRow(
             id=id,
             flickr_id=flickr_id,
             uuid=f"uuid-{id}",
-            original_filename="IMG_001.JPG",
+            original_filename=filename or "IMG_001.JPG",
             date_taken="2024-01-01T12:00:00",
             date_added_photos=None,
             date_uploaded_flickr=date_uploaded,
@@ -9449,9 +9449,10 @@ class TestDeduplicatorDimensionDivergence(unittest.TestCase):
         from poller.deduplicator import _classify_group
 
         # Different fingerprints + different dimensions + 2 photos = snapbridge
+        # (requires DSC_* filename since Snapbridge is Nikon-specific)
         photos = [
-            self._photo(1, "fp1", 6000, 4000),
-            self._photo(2, "fp2", 3000, 2000),
+            self._photo(1, "fp1", 6000, 4000, filename="DSC_0001.JPG"),
+            self._photo(2, "fp2", 3000, 2000, filename="DSC_0001.JPG"),
         ]
         self.assertEqual(_classify_group(photos).group_type, "snapbridge")
 

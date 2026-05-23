@@ -76,6 +76,17 @@ class TestIsSnapbridgePair(unittest.TestCase):
         photos = [make_photo(id=i, fingerprint=f"FP-{i}", width=100, height=100) for i in range(3)]
         self.assertFalse(_is_snapbridge_pair(photos))
 
+    def test_dsc_prefix_required(self):
+        # IMG_* files must not be classified as Snapbridge even if fingerprints
+        # differ and dimensions differ — Snapbridge is Nikon-only (DSC_* naming).
+        a = make_photo(
+            id=1, original_filename="IMG_3199.HEIC", fingerprint="FP-A", width=3260, height=2059
+        )
+        b = make_photo(
+            id=2, original_filename="IMG_3199.HEIC", fingerprint="FP-B", width=4032, height=3024
+        )
+        self.assertFalse(_is_snapbridge_pair([a, b]))
+
 
 # ---------------------------------------------------------------------------
 # _upload_gap_minutes
