@@ -5,13 +5,17 @@ Run from repo root:
     python -m pytest tests/test_migrate_cmd.py -v
 """
 
+import argparse
 import importlib.util
+import io
 import os
 import sqlite3
 import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
+
+import yaml as _yaml
 
 # Load the `bp` script as a module (it has no .py extension).
 # spec_from_file_location returns None for extension-less files on Python 3.14;
@@ -26,7 +30,7 @@ _bp_module.__file__ = str(_BP_PATH)
 _spec.loader.exec_module(_bp_module)
 
 _pending_migrations = _bp_module._pending_migrations  # type: ignore[attr-defined]
-# cmd_migrate is added in Task 2; accessed via getattr in TestCmdMigrate
+cmd_migrate = _bp_module.cmd_migrate  # type: ignore[attr-defined]
 cmd_doctor = _bp_module.cmd_doctor
 
 
@@ -126,3 +130,104 @@ class TestPendingMigrations(unittest.TestCase):
             self.assertEqual(len(result), 1)
         finally:
             os.unlink(fresh_path)
+
+
+# ---------------------------------------------------------------------------
+# cmd_migrate helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_config_file(db_path: str) -> str:
+    """Write a minimal config YAML pointing at db_path. Returns the config file path."""
+    fd, path = tempfile.mkstemp(suffix=".yml")
+    os.close(fd)
+    with open(path, "w") as f:
+        _yaml.dump({"database": {"path": db_path}}, f)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# cmd_migrate
+# ---------------------------------------------------------------------------
+
+
+class TestCmdMigrate(unittest.TestCase):
+    def setUp(self):
+        self.db_path = _make_db_with_migrations_table()
+        self.config_path = _make_config_file(self.db_path)
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.mig_dir = Path(self._tmpdir.name)
+
+    def tearDown(self):
+        os.unlink(self.db_path)
+        os.unlink(self.config_path)
+        self._tmpdir.cleanup()
+
+    def _args(self, dry_run: bool = False) -> argparse.Namespace:
+        a = argparse.Namespace()
+        a.config = self.config_path
+        a.dry_run = dry_run
+        a.verbose = False
+        return a
+
+    def _pending_in_tmpdir(self, db_path: str, _mdir: Path = None) -> list:  # type: ignore[assignment]
+        return _pending_migrations(db_path, self.mig_dir)
+
+    def test_no_pending_prints_message(self):
+        # No migration files in temp dir
+        buf = io.StringIO()
+        with unittest.mock.patch("sys.stdout", buf):
+            with unittest.mock.patch.object(
+                _bp_module, "_pending_migrations", self._pending_in_tmpdir
+            ):
+                cmd_migrate(self._args())
+        self.assertIn("already applied", buf.getvalue())
+
+    def test_applies_pending_migration(self):
+        _write_migration_file(self.mig_dir, "migrate_001_test.py", "migrate_001_test")
+
+        with unittest.mock.patch.object(_bp_module, "_pending_migrations", self._pending_in_tmpdir):
+            cmd_migrate(self._args())
+
+        # Migration name should now be recorded in schema_migrations
+        conn = sqlite3.connect(self.db_path)
+        row = conn.execute(
+            "SELECT name FROM schema_migrations WHERE name = ?", ("migrate_001_test",)
+        ).fetchone()
+        conn.close()
+        self.assertIsNotNone(row)
+
+    def test_dry_run_does_not_write(self):
+        _write_migration_file(self.mig_dir, "migrate_001_test.py", "migrate_001_test")
+
+        with unittest.mock.patch.object(_bp_module, "_pending_migrations", self._pending_in_tmpdir):
+            cmd_migrate(self._args(dry_run=True))
+
+        conn = sqlite3.connect(self.db_path)
+        row = conn.execute(
+            "SELECT name FROM schema_migrations WHERE name = ?", ("migrate_001_test",)
+        ).fetchone()
+        conn.close()
+        self.assertIsNone(row)
+
+    def test_multiple_migrations_applied_in_order(self):
+        _write_migration_file(self.mig_dir, "migrate_002_b.py", "migrate_002_b")
+        _write_migration_file(self.mig_dir, "migrate_001_a.py", "migrate_001_a")
+
+        original = _pending_migrations
+
+        def patched_pending(db_path: str, _mdir: Path) -> list:
+            return original(db_path, self.mig_dir)
+
+        with unittest.mock.patch.object(_bp_module, "_pending_migrations", patched_pending):
+            cmd_migrate(self._args())
+
+        conn = sqlite3.connect(self.db_path)
+        rows = [
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM schema_migrations ORDER BY applied_at"
+            ).fetchall()
+        ]
+        conn.close()
+        self.assertEqual(rows, ["migrate_001_a", "migrate_002_b"])

@@ -17,6 +17,7 @@ Usage:
     bp install-daemons [--dry-run]  Install launchd agents to ~/Library/LaunchAgents
     bp uninstall-daemons [--dry-run] Remove installed launchd agents
     bp ui                           Start the review UI (http://localhost:5173)
+    bp migrate [--dry-run]          Apply all pending DB migrations in order
     bp doctor [--check-flickr]      Validate config, environment, and DB state
 
 Global options:
@@ -743,6 +744,43 @@ def cmd_doctor(args):
         print()
 
 
+def cmd_migrate(args: argparse.Namespace) -> None:
+    """
+    Auto-discover and apply all pending DB migrations in order.
+    Safe to re-run — each migration is idempotent.
+    """
+    import importlib.util
+    import yaml
+
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+
+    db_path = str(Path(config["database"]["path"]).expanduser())
+    migrations_dir = ROOT / "db" / "migrations"
+
+    pending = _pending_migrations(db_path, migrations_dir)
+
+    if not pending:
+        print("All migrations already applied.")
+        return
+
+    for name, file_path in pending:
+        if getattr(args, "dry_run", False):
+            print(f"  [dry-run] Would apply: {name}")
+        else:
+            print(f"  Applying: {name}…")
+            spec = importlib.util.spec_from_file_location(name, file_path)
+            module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+            spec.loader.exec_module(module)  # type: ignore[union-attr]
+            module.run(db_path, dry_run=False)
+
+    count = len(pending)
+    if getattr(args, "dry_run", False):
+        print(f"\n{count} migration(s) would be applied.")
+    else:
+        print(f"\n{count} migration(s) applied.")
+
+
 def cmd_all(args):
     """
     Run the full periodic maintenance sequence:
@@ -958,6 +996,16 @@ def main():
     p_doc.add_argument("--check-flickr", action="store_true",
                        help="Make a live Flickr API call to verify credentials (requires network)")
 
+    # migrate
+    p_mig = sub.add_parser(
+        "migrate",
+        help="Apply all pending DB migrations in order (safe to re-run; each migration is idempotent).",
+    )
+    p_mig.add_argument(
+        "--dry-run", action="store_true",
+        help="Show what would be applied without modifying the DB",
+    )
+
     # status
     p_status = sub.add_parser(
         "status",
@@ -1051,6 +1099,7 @@ def main():
         "install-daemons":   cmd_install_daemons,
         "uninstall-daemons": cmd_uninstall_daemons,
         "doctor":            cmd_doctor,
+        "migrate":           cmd_migrate,
         "status":            cmd_status,
         "deduplicator":      cmd_deduplicator,
         "prune-proposals":   cmd_prune_proposals,
