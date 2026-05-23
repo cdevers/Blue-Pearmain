@@ -552,6 +552,40 @@ def cmd_export(args):
     print(f"  manifest.json  (export metadata)")
 
 
+# ---------------------------------------------------------------------------
+# Migration helpers
+# ---------------------------------------------------------------------------
+
+def _pending_migrations(
+    db_path: str,
+    migrations_dir: Path,
+) -> list[tuple[str, Path]]:
+    """
+    Return (migration_name, file_path) pairs for migrations not yet applied to
+    db_path, sorted by filename (migrate_NNN_... sorts numerically by NNN).
+    """
+    import re
+    import sqlite3
+
+    _name_re = re.compile(r'^MIGRATION_NAME\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
+
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        applied = {r["name"] for r in conn.execute("SELECT name FROM schema_migrations").fetchall()}
+        conn.close()
+    except sqlite3.OperationalError:
+        # schema_migrations table doesn't exist yet (fresh DB) — treat all as pending
+        applied = set()
+
+    result: list[tuple[str, Path]] = []
+    for mf in sorted(migrations_dir.glob("migrate_*.py")):
+        m = _name_re.search(mf.read_text())
+        if m and m.group(1) not in applied:
+            result.append((m.group(1), mf))
+    return result
+
+
 def cmd_doctor(args):
     """
     Validate config, environment, and DB state before running the pipeline.
