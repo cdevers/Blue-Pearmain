@@ -354,6 +354,19 @@ class FlickrClient:
             http_method="POST",
         )
 
+    def remove_tag(self, tag_id: str) -> None:
+        """Remove a single tag by its Flickr tag instance ID.
+
+        The tag_id comes from the 'id' attribute of a <tag> element in
+        flickr.photos.getInfo. Each tag instance has a unique ID.
+        Does NOT take photo_id — the tag_id identifies the instance globally.
+        """
+        self._call(
+            "flickr.photos.removeTag",
+            {"tag_id": tag_id},
+            http_method="POST",
+        )
+
     def set_tags(self, photo_id: str, tags: list[str]) -> dict:
         """Replace all tags on a photo (destructive — use add_tags to append)."""
         tag_str = " ".join(f'"{t}"' if " " in t else t for t in tags if t.strip())

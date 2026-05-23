@@ -175,6 +175,9 @@ def photos_record_to_db(photo) -> dict:
     row["width"] = getattr(photo, "width", None)
     row["height"] = getattr(photo, "height", None)
 
+    # Apple Photos heart/Favorites flag
+    row["apple_favorite"] = 1 if getattr(photo, "favorite", False) else 0
+
     return row
 
 
@@ -650,12 +653,17 @@ def scan(
                 and existing_by_uuid.get("photos_title") == photo_row.get("photos_title")
             )
             if analysis_unchanged and photos_cache_fresh:
+                if not dry_run:
+                    db.apply_scanner_rating(
+                        existing_by_uuid["id"], photo_row.get("apple_favorite", 0)
+                    )
                 continue
             enriched_row = build_enriched_row(
                 photo_row, existing_by_uuid, zones, self_name, person_policies=person_policies
             )
             if not dry_run:
                 db.upsert_photo(enriched_row)
+                db.apply_scanner_rating(existing_by_uuid["id"], photo_row.get("apple_favorite", 0))
             enriched += 1
             continue
 
@@ -673,6 +681,7 @@ def scan(
             if not dry_run:
                 row_id = db.upsert_photo(enriched_row)
                 sync_photo_albums(photo, row_id, db, dry_run)
+                db.apply_scanner_rating(row_id, photo_row.get("apple_favorite", 0))
 
             # Flag additional duplicate Flickr records
             for dup in candidates[1:]:
@@ -701,6 +710,7 @@ def scan(
             is_screenshot = photo_row.pop("_is_screenshot", False)
             photo_row.pop("_is_selfie", None)
             photo_row.pop("_is_live", None)
+            apple_favorite_photos_only = photo_row.pop("apple_favorite", 0)
             photo_row["is_screenshot"] = 1 if is_screenshot else 0
 
             if is_screenshot:
@@ -718,6 +728,7 @@ def scan(
             if not dry_run:
                 row_id = db.upsert_photo(photo_row)
                 sync_photo_albums(photo, row_id, db, dry_run)
+                db.apply_scanner_rating(row_id, apple_favorite_photos_only)
             inserted += 1
 
     if since is None:

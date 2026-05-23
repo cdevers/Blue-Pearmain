@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock
 
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -223,3 +224,71 @@ class TestDBFoundation(unittest.TestCase):
         )
         self.assertEqual(len(logs), 1)
         self.assertEqual(logs[0]["new_value"], "4")
+
+
+# ===========================================================================
+# Task 2 — FlickrClient remove_tag + Scanner apple_favorite
+# ===========================================================================
+
+
+class TestFlickrRemoveTag(unittest.TestCase):
+    """remove_tag must call flickr.photos.removeTag with the correct tag_id."""
+
+    def test_remove_tag_calls_correct_api(self):
+        """remove_tag calls flickr.photos.removeTag with tag_id param."""
+        from flickr.flickr_client import FlickrClient
+
+        client = FlickrClient.__new__(FlickrClient)
+        client._call = MagicMock(return_value={})
+        client.remove_tag("tag-id-abc123")
+        client._call.assert_called_once_with(
+            "flickr.photos.removeTag",
+            {"tag_id": "tag-id-abc123"},
+            http_method="POST",
+        )
+
+
+class TestScannerAppleFavorite(unittest.TestCase):
+    """photos_record_to_db must include apple_favorite from photo.favorite."""
+
+    def _make_mock_photo(self, favorite: bool) -> MagicMock:
+        photo = MagicMock()
+        photo.uuid = "scan-uuid-001"
+        photo.original_filename = "IMG_001.JPG"
+        photo.date = None
+        photo.date_added = None
+        photo.media_analysis = {}
+        photo.exif_info = None
+        photo.latitude = None
+        photo.place = None
+        photo.title = ""
+        photo.description = ""
+        photo.keywords = []
+        photo.labels = []
+        photo.persons = []
+        photo.score = None
+        photo.screenshot = False
+        photo.selfie = False
+        photo.live_photo = False
+        photo.ismovie = False
+        photo.fingerprint = ""
+        photo.width = 4032
+        photo.height = 3024
+        photo.favorite = favorite
+        return photo
+
+    def test_favorite_true_gives_apple_favorite_1(self):
+        """favorite=True → apple_favorite=1 in the row dict."""
+        from poller.scanner import photos_record_to_db
+
+        photo = self._make_mock_photo(favorite=True)
+        row = photos_record_to_db(photo)
+        self.assertEqual(row["apple_favorite"], 1)
+
+    def test_favorite_false_gives_apple_favorite_0(self):
+        """favorite=False → apple_favorite=0 in the row dict."""
+        from poller.scanner import photos_record_to_db
+
+        photo = self._make_mock_photo(favorite=False)
+        row = photos_record_to_db(photo)
+        self.assertEqual(row["apple_favorite"], 0)
