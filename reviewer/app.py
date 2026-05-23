@@ -475,8 +475,9 @@ def duplicates() -> str:
             ORDER BY
                 CASE dg.group_type
                     WHEN 'snapbridge'    THEN 0
-                    WHEN 'device_upload' THEN 1
-                    ELSE 2
+                    WHEN 'edit_pair'     THEN 1
+                    WHEN 'device_upload' THEN 2
+                    ELSE 3
                 END,
                 dg.id,
                 CASE p.duplicate_role
@@ -571,6 +572,12 @@ def duplicates() -> str:
             "snapbridge",
             "Snapbridge",
             "Low-res phone preview vs. full-res card import — keeper is the higher-resolution copy",
+        ),
+        (
+            "edit_pair",
+            "Edit pair",
+            "Same filename and timestamp, different content — typically an original and an edited, "
+            "cropped, or colour-corrected version. Use 'Not a duplicate' if you want to keep both.",
         ),
         (
             "device_upload",
