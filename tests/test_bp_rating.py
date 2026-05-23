@@ -646,7 +646,7 @@ class TestRateEndpoint(unittest.TestCase):
             photo_id, db = self._setup_test_db(Path(tmp))
             import reviewer.app as app_module
 
-            with mock.patch("photoscript.Photo"):
+            with mock.patch.dict(sys.modules, {"photoscript": mock.MagicMock()}):
                 with app_module.app.test_client() as client:
                     r = client.post(
                         f"/rate/{photo_id}",
@@ -691,7 +691,7 @@ class TestRateEndpoint(unittest.TestCase):
             photo_id, db = self._setup_test_db(Path(tmp))
             import reviewer.app as app_module
 
-            with mock.patch("photoscript.Photo"):
+            with mock.patch.dict(sys.modules, {"photoscript": mock.MagicMock()}):
                 with app_module.app.test_client() as client:
                     client.post(
                         f"/rate/{photo_id}",
@@ -714,7 +714,7 @@ class TestRateEndpoint(unittest.TestCase):
             photo_id, db = self._setup_test_db(Path(tmp))
             import reviewer.app as app_module
 
-            with mock.patch("photoscript.Photo"):
+            with mock.patch.dict(sys.modules, {"photoscript": mock.MagicMock()}):
                 with app_module.app.test_client() as client:
                     client.post(
                         f"/rate/{photo_id}",
@@ -737,7 +737,9 @@ class TestRateEndpoint(unittest.TestCase):
             import reviewer.app as app_module
 
             mock_instance = mock.MagicMock()
-            with mock.patch("photoscript.Photo", return_value=mock_instance):
+            mock_ps = mock.MagicMock()
+            mock_ps.Photo.return_value = mock_instance
+            with mock.patch.dict(sys.modules, {"photoscript": mock_ps}):
                 with app_module.app.test_client() as client:
                     r = client.post(
                         f"/rate/{photo_id}",
@@ -758,7 +760,9 @@ class TestRateEndpoint(unittest.TestCase):
             photo_id, db = self._setup_test_db(Path(tmp))
             import reviewer.app as app_module
 
-            with mock.patch("photoscript.Photo", side_effect=Exception("no access")):
+            mock_ps = mock.MagicMock()
+            mock_ps.Photo.side_effect = Exception("no access")
+            with mock.patch.dict(sys.modules, {"photoscript": mock_ps}):
                 with app_module.app.test_client() as client:
                     r = client.post(
                         f"/rate/{photo_id}",
@@ -779,7 +783,7 @@ class TestRateEndpoint(unittest.TestCase):
             _photo_id, db = self._setup_test_db(Path(tmp))
             import reviewer.app as app_module
 
-            with mock.patch("photoscript.Photo"):
+            with mock.patch.dict(sys.modules, {"photoscript": mock.MagicMock()}):
                 with app_module.app.test_client() as client:
                     r = client.post(
                         "/rate/99999",
@@ -812,7 +816,8 @@ class TestRateEndpoint(unittest.TestCase):
             app_module.app.config["TESTING"] = True
             app_module.app.config["SECRET_KEY"] = "test-secret"
 
-            with mock.patch("photoscript.Photo") as MockPhoto:
+            mock_ps = mock.MagicMock()
+            with mock.patch.dict(sys.modules, {"photoscript": mock_ps}):
                 with app_module.app.test_client() as client:
                     r = client.post(
                         f"/rate/{flickr_only_id}",
@@ -823,7 +828,7 @@ class TestRateEndpoint(unittest.TestCase):
             self.assertEqual(r.status_code, 200)
             self.assertTrue(r.get_json()["ok"])
             # photoscript must NOT be called for Flickr-only photos (no uuid)
-            MockPhoto.assert_not_called()
+            mock_ps.Photo.assert_not_called()
 
 
 class TestStarWidgetHTML(unittest.TestCase):
