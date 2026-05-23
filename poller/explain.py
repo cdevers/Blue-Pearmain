@@ -124,6 +124,43 @@ def explain_photo_perms(row: dict) -> dict | None:
     }
 
 
+def explain_photo_rating(row: dict) -> dict | None:
+    """
+    Return a rating explanation dict, or None if there is no drift.
+
+    Compares DB bp_rating against the bp:rating=N tag in flickr_tags.
+    Returns None if they agree (including both being 0/absent).
+
+    Keys:
+        db_rating      — integer 0–5 from DB
+        flickr_rating  — integer 0–5 parsed from Flickr tags (0 = absent)
+        reason         — human-readable drift description
+    """
+    db_rating = row.get("bp_rating") or 0
+
+    flickr_tags = _json_loads_safe(row.get("flickr_tags"))
+    flickr_rating = 0
+    for tag in flickr_tags:
+        raw = str(tag).lower().strip()
+        if raw.startswith("bp:rating="):
+            try:
+                flickr_rating = int(raw.split("=", 1)[1])
+            except (ValueError, IndexError):
+                pass
+
+    if db_rating == flickr_rating:
+        return None
+
+    return {
+        "db_rating": db_rating,
+        "flickr_rating": flickr_rating,
+        "reason": (
+            f"DB has bp_rating={db_rating}, Flickr tag has "
+            f"bp:rating={flickr_rating} — will update Flickr tag on next sync"
+        ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Formatting
 # ---------------------------------------------------------------------------
@@ -164,6 +201,14 @@ def format_explain_text(explanations: list[dict], flickr_username: str) -> str:
             lines.append(f"    reason:             {t['reason']}")
             lines.append("")
 
+        if exp.get("rating"):
+            rt = exp["rating"]
+            lines.append("  rating")
+            lines.append(f"    DB bp_rating:    {rt['db_rating']}")
+            lines.append(f"    Flickr tag:      {rt['flickr_rating'] or '(none)'}")
+            lines.append(f"    reason:          {rt['reason']}")
+            lines.append("")
+
         lines.append("─" * 60)
         lines.append("")
 
@@ -186,13 +231,14 @@ def run_explain(db: "Database", limit: int, flickr_username: str) -> list[dict]:
         """SELECT id, flickr_id, flickr_title,
                   flickr_tags, photos_tags, pushed_tags,
                   privacy_state, review_decision, reviewed_at,
-                  perms_pushed_flickr, tags_pushed_flickr
+                  perms_pushed_flickr, tags_pushed_flickr, bp_rating
            FROM photos
            WHERE flickr_id IS NOT NULL
              AND (flickr_deleted IS NULL OR flickr_deleted = 0)
              AND (
                tags_pushed_flickr = 1
                OR (review_decision IS NOT NULL AND perms_pushed_flickr = 0)
+               OR bp_rating != 0
              )
            ORDER BY reviewed_at DESC
            LIMIT ?""",
@@ -204,8 +250,9 @@ def run_explain(db: "Database", limit: int, flickr_username: str) -> list[dict]:
         r = dict(row)
         perms_exp = explain_photo_perms(r)
         tags_exp = explain_photo_tags(r)
+        rating_exp = explain_photo_rating(r)
 
-        if perms_exp or tags_exp:
+        if perms_exp or tags_exp or rating_exp:
             results.append(
                 {
                     "photo_id": r["id"],
@@ -213,6 +260,7 @@ def run_explain(db: "Database", limit: int, flickr_username: str) -> list[dict]:
                     "title": r.get("flickr_title") or "",
                     "perms": perms_exp,
                     "tags": tags_exp,
+                    "rating": rating_exp,
                 }
             )
 

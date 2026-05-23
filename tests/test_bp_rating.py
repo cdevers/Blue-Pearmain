@@ -8,6 +8,7 @@ Run from repo root:
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import shutil
 import sqlite3
@@ -524,3 +525,80 @@ class TestReconcileSingleton(unittest.TestCase):
 
         logs = self.db.get_operation_log(photo_id=self.photo_id, operation="rating_tag_dedup")
         self.assertGreater(len(logs), 0)
+
+
+# ===========================================================================
+# Task 5 — Explain: rating drift
+# ===========================================================================
+
+
+class TestExplainRatingDrift(unittest.TestCase):
+    """run_explain must detect and report bp_rating vs Flickr tag drift."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db = Database(Path(self.tmp) / "test.db")
+        # Seed person_policies table
+        self.db.conn.execute(
+            "CREATE TABLE IF NOT EXISTS person_policies "
+            "(id INTEGER PRIMARY KEY, person_name TEXT NOT NULL UNIQUE, "
+            "policy TEXT NOT NULL, created_at TEXT NOT NULL)"
+        )
+        self.db.conn.commit()
+
+    def tearDown(self):
+        self.db.close()
+        shutil.rmtree(self.tmp)
+
+    def test_rating_drift_reported_in_explain(self):
+        """Photo with bp_rating=4 and Flickr tag bp:rating=2 → drift in explain."""
+        photo_id = self.db.upsert_photo(
+            {
+                "uuid": "explain-uuid",
+                "flickr_id": "flickr-explain",
+                "original_filename": "IMG_E.JPG",
+                "privacy_state": "approved_public",
+                "apple_persons": [],
+                "proposed_tags": [],
+                "perms_pushed_flickr": 1,
+                "tags_pushed_flickr": 1,
+                "flickr_tags": json.dumps(["landscape", "bp:rating=2"]),
+            }
+        )
+        self.db.set_bp_rating(photo_id, 4)
+
+        from poller.explain import run_explain, format_explain_text
+
+        explanations = run_explain(self.db, limit=50, flickr_username="testuser")
+        # Call format_explain_text to verify it doesn't raise on rating drift
+        format_explain_text(explanations, flickr_username="testuser")
+
+        # At least one entry should mention the rating drift
+        rating_entries = [e for e in explanations if e.get("rating")]
+        self.assertGreater(len(rating_entries), 0, "Expected rating drift entry")
+        drift_entry = rating_entries[0]["rating"]
+        self.assertEqual(drift_entry["db_rating"], 4)
+        self.assertEqual(drift_entry["flickr_rating"], 2)
+
+    def test_no_drift_when_rating_matches(self):
+        """Photo with bp_rating=3 and bp:rating=3 Flickr tag → no drift."""
+        photo_id = self.db.upsert_photo(
+            {
+                "uuid": "explain-match-uuid",
+                "flickr_id": "flickr-match",
+                "original_filename": "IMG_M.JPG",
+                "privacy_state": "approved_public",
+                "apple_persons": [],
+                "proposed_tags": [],
+                "perms_pushed_flickr": 1,
+                "tags_pushed_flickr": 1,
+                "flickr_tags": json.dumps(["bp:rating=3"]),
+            }
+        )
+        self.db.set_bp_rating(photo_id, 3)
+
+        from poller.explain import run_explain
+
+        explanations = run_explain(self.db, limit=50, flickr_username="testuser")
+        rating_drifts = [e for e in explanations if e.get("rating")]
+        self.assertEqual(len(rating_drifts), 0)
