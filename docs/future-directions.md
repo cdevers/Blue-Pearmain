@@ -72,6 +72,18 @@ A `bp export` command that serialises the full BP state — per-photo metadata, 
 
 ---
 
+## Priority 5 — Duplicate detection maintenance
+
+*Keeping the duplicate review queue accurate without manual intervention.*
+
+The deduplicator is currently a manually-invoked script. As the scanner adds new Photos records over time, they can silently accumulate as "orphaned" photos — sharing a key with an existing duplicate group but not linked to it. A periodic deduplicator run (weekly, or after each scan cycle) would self-heal this automatically.
+
+### Deduplicator in poller cycle (`size:S`)
+
+Run `deduplicator --write` as part of the poller's regular cycle (or as a separate weekly launchd job). This ensures orphaned siblings are linked to their groups promptly, and stale `photo_count` values stay accurate. The `--prune` pass could also be folded in so zombie groups are cleaned up automatically.
+
+---
+
 ## What we are intentionally *not* building
 
 These directions were considered and declined. Recording the reasoning here prevents re-litigating them later.
