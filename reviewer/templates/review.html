@@ -135,6 +135,18 @@
   object-fit: contain;
 }
 
+/* Portrait panoramic tile — double-tall, contain layout */
+.photo-card.pano-portrait {
+  grid-row: span 2;
+}
+.photo-card.pano-portrait .thumb {
+  aspect-ratio: 1/3;
+  background: #1a1a1a;
+}
+.photo-card.pano-portrait .thumb img {
+  object-fit: contain;
+}
+
 /* Person name chips — rendered below thumbnail in pano tiles */
 .person-chips {
   display: flex;
@@ -435,8 +447,11 @@
 {% if photos %}
 <div class="grid" id="photo-grid">
   {% for photo in photos %}
-  {% set is_pano = photo.width and photo.height and (photo.width / photo.height) > 2.0 %}
-  <div class="photo-card{% if is_pano %} pano{% endif %}"
+  {% set eff_w = photo.height if photo.display_rotation in (90, 270) else photo.width %}
+  {% set eff_h = photo.width  if photo.display_rotation in (90, 270) else photo.height %}
+  {% set is_landscape_pano = eff_w and eff_h and (eff_w / eff_h) > 2.0 %}
+  {% set is_portrait_pano  = eff_w and eff_h and (eff_h / eff_w) > 2.0 %}
+  <div class="photo-card{% if is_landscape_pano %} pano{% elif is_portrait_pano %} pano-portrait{% endif %}"
        id="card-{{ photo.id }}"
        data-id="{{ photo.id }}"
        data-flickr="{{ photo.flickr_id or '' }}"
@@ -486,7 +501,7 @@
           <span style="color:#444">no tags yet</span>
         {% endif %}
       </div>
-      {% if is_pano and photo.apple_persons %}
+      {% if (is_landscape_pano or is_portrait_pano) and photo.apple_persons %}
       <div class="person-chips">
         {% for name in photo.apple_persons %}
           {% if name == '_UNKNOWN_' %}
