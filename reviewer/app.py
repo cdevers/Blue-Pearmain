@@ -1374,13 +1374,15 @@ def rate_photo(photo_id: int) -> _JsonResp:
     if not 0 <= rating <= 5:
         return jsonify({"ok": False, "error": "rating must be 0–5"}), 400
 
-    uuid = db().get_photo_uuid(photo_id)
-    if uuid is None:
+    # Check photo exists (uuid may be None for Flickr-only records not yet matched to Photos)
+    _row = db().conn.execute("SELECT uuid FROM photos WHERE id = ?", (photo_id,)).fetchone()
+    if _row is None:
         return jsonify({"ok": False, "error": "not found"}), 404
+    uuid = _row["uuid"]
 
     db().set_bp_rating(photo_id, rating)
 
-    # Write-back to Apple Photos (macOS only, fire-and-forget)
+    # Write-back to Apple Photos (macOS only, fire-and-forget; skipped for Flickr-only photos)
     if uuid:
         try:
             import photoscript  # type: ignore[import]

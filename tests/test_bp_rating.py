@@ -770,6 +770,61 @@ class TestRateEndpoint(unittest.TestCase):
             data = r.get_json()
             self.assertTrue(data["ok"])
 
+    def test_rating_unknown_photo_returns_404(self):
+        """Rating a non-existent photo_id returns 404, not 200."""
+        import tempfile
+        import unittest.mock as mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            _photo_id, db = self._setup_test_db(Path(tmp))
+            import reviewer.app as app_module
+
+            with mock.patch("photoscript.Photo"):
+                with app_module.app.test_client() as client:
+                    r = client.post(
+                        "/rate/99999",
+                        json={"rating": 3},
+                        content_type="application/json",
+                    )
+            db.close()
+            self.assertEqual(r.status_code, 404)
+            self.assertFalse(r.get_json()["ok"])
+
+    def test_rating_flickr_only_photo_succeeds(self):
+        """Rating a photo with uuid=None (Flickr-only) returns 200 and skips photoscript."""
+        import tempfile
+        import unittest.mock as mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(Path(tmp) / "test.db")
+            # Insert a Flickr-only photo (no uuid)
+            db.conn.execute(
+                "INSERT INTO photos (uuid, flickr_id, original_filename, privacy_state, bp_rating) "
+                "VALUES (NULL, 'flickr-123', 'FLICKR.JPG', 'candidate_public', 0)"
+            )
+            db.conn.commit()
+            flickr_only_id = db.conn.execute(
+                "SELECT id FROM photos WHERE flickr_id='flickr-123'"
+            ).fetchone()["id"]
+            import reviewer.app as app_module
+
+            app_module._db = db
+            app_module.app.config["TESTING"] = True
+            app_module.app.config["SECRET_KEY"] = "test-secret"
+
+            with mock.patch("photoscript.Photo") as MockPhoto:
+                with app_module.app.test_client() as client:
+                    r = client.post(
+                        f"/rate/{flickr_only_id}",
+                        json={"rating": 4},
+                        content_type="application/json",
+                    )
+            db.close()
+            self.assertEqual(r.status_code, 200)
+            self.assertTrue(r.get_json()["ok"])
+            # photoscript must NOT be called for Flickr-only photos (no uuid)
+            MockPhoto.assert_not_called()
+
 
 class TestStarWidgetHTML(unittest.TestCase):
     """Star widget and keyboard shortcut JS must appear in review.html."""
