@@ -883,7 +883,7 @@ function initStarWidgets() {
 }
 
 async function setRating(id, rating, container) {
-  const r = await fetch(`/rate/${id}`, {
+  const r = await apiFetch(`/rate/${id}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ rating }),

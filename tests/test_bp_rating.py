@@ -721,6 +721,49 @@ class TestRateEndpoint(unittest.TestCase):
             self.assertEqual(len(logs), 1)
             self.assertEqual(logs[0]["new_value"], "2")
 
+    def test_photoscript_write_back_called(self):
+        """photoscript.Photo(uuid).favorite is set to True when rating >= 1."""
+        import tempfile
+        import unittest.mock as mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            photo_id, db = self._setup_test_db(Path(tmp))
+            import reviewer.app as app_module
+
+            mock_instance = mock.MagicMock()
+            with mock.patch("photoscript.Photo", return_value=mock_instance):
+                with app_module.app.test_client() as client:
+                    r = client.post(
+                        f"/rate/{photo_id}",
+                        json={"rating": 3},
+                        content_type="application/json",
+                    )
+            db.close()
+            self.assertEqual(r.status_code, 200)
+            # favorite should have been set to True (rating >= 1)
+            self.assertTrue(mock_instance.favorite)
+
+    def test_photoscript_exception_swallowed(self):
+        """Endpoint returns 200 even when photoscript raises."""
+        import tempfile
+        import unittest.mock as mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            photo_id, db = self._setup_test_db(Path(tmp))
+            import reviewer.app as app_module
+
+            with mock.patch("photoscript.Photo", side_effect=Exception("no access")):
+                with app_module.app.test_client() as client:
+                    r = client.post(
+                        f"/rate/{photo_id}",
+                        json={"rating": 2},
+                        content_type="application/json",
+                    )
+            db.close()
+            self.assertEqual(r.status_code, 200)
+            data = r.get_json()
+            self.assertTrue(data["ok"])
+
 
 class TestStarWidgetHTML(unittest.TestCase):
     """Star widget and keyboard shortcut JS must appear in review.html."""
