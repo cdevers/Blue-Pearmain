@@ -93,6 +93,97 @@ EXTRA_FIELDS = (
 )
 
 
+def _parse_bp_rating_from_tags(
+    tags: list,
+) -> tuple[int, list[str]]:
+    """Parse bp:rating=N machine tag(s) from a tag list.
+
+    Accepts two formats:
+      - list of strings (from normal poll response extras)
+      - list of dicts with 'raw' and 'id' keys (from flickr.photos.getInfo)
+
+    Returns (highest_rating, [tag_ids_of_all_bp_rating_tags]).
+    rating=0 means absent. tag_ids is [] when tags are plain strings.
+    """
+    max_rating = 0
+    tag_ids: list[str] = []
+
+    for tag in tags:
+        if isinstance(tag, dict):
+            raw = tag.get("raw", "")
+            tid = tag.get("id", "")
+        else:
+            raw = str(tag)
+            tid = ""
+
+        if raw.lower().startswith("bp:rating="):
+            try:
+                val = int(raw.split("=", 1)[1])
+                if val > max_rating:
+                    max_rating = val
+                if tid:
+                    tag_ids.append(tid)
+            except (ValueError, IndexError):
+                pass
+
+    return max_rating, tag_ids
+
+
+def _sync_rating_tag(
+    client: FlickrClient,
+    db: Database,
+    flickr_id: str,
+    photo_id: int,
+    tag_items: list[dict],
+) -> None:
+    """Sync DB bp_rating to Flickr bp:rating=N machine tag.
+
+    tag_items must be the list of tag dicts from flickr.photos.getInfo
+    (each with 'raw' and 'id' keys). Called only when getInfo was fetched.
+
+    Rules (bp:rating=0 is NEVER written — absence means unrated):
+      bp_rating=0, no tag    → no-op
+      bp_rating=0, tag exists → remove all bp:rating=* tags
+      bp_rating>0, no tag    → add bp:rating=N
+      bp_rating>0, correct, singleton → no-op
+      bp_rating>0, wrong or duplicates → remove all old, add new
+    """
+    row = db.conn.execute("SELECT bp_rating FROM photos WHERE id = ?", (photo_id,)).fetchone()
+    if row is None:
+        return
+    db_rating = row["bp_rating"]
+
+    flickr_rating, existing_tag_ids = _parse_bp_rating_from_tags(tag_items)
+
+    if db_rating == 0 and not existing_tag_ids:
+        return  # nothing to do
+
+    if db_rating == 0 and existing_tag_ids:
+        # Remove stale tags — never add bp:rating=0
+        for tid in existing_tag_ids:
+            try:
+                client.remove_tag(tid)
+            except Exception:
+                pass
+        return
+
+    if db_rating > 0 and db_rating == flickr_rating and len(existing_tag_ids) == 1:
+        return  # already correct singleton
+
+    # Remove any wrong/duplicate tags
+    for tid in existing_tag_ids:
+        try:
+            client.remove_tag(tid)
+        except Exception:
+            pass
+
+    # Add correct tag
+    try:
+        client.add_tags(flickr_id, [f"bp:rating={db_rating}"])
+    except Exception:
+        pass
+
+
 def flickr_photo_to_db(photo: dict, info: dict | None = None) -> dict:
     """
     Convert a Flickr API photo record (from search/recentlyUpdated) plus
@@ -214,6 +305,10 @@ def _enrich_from_info(row: dict, info: dict):
     if isinstance(tags_container, dict):
         tag_items = tags_container.get("tag", [])
         row["flickr_tags"] = [t.get("raw", t.get("_content", "")) for t in tag_items]
+        # Extract bp:rating=N for seed/write-back (transient — not stored in DB)
+        bp_r, _bp_ids = _parse_bp_rating_from_tags(tag_items)
+        row["_flickr_bp_rating"] = bp_r
+        row["_flickr_bp_rating_tag_items"] = tag_items
 
     # Dates
     dates = photo.get("dates", {})
@@ -480,6 +575,10 @@ def poll(
                 row["flickr_tags_hash"] = _compute_tags_hash(tags)
                 row["meta_synced_flickr_at"] = _now_iso()
 
+                # Extract transient rating fields before dropping
+                _flickr_bp_rating = row.pop("_flickr_bp_rating", 0)
+                _flickr_bp_rating_tag_items = row.pop("_flickr_bp_rating_tag_items", [])
+
                 # Drop transient fields that have no DB column
                 for _key in (
                     "thumbnail_url_l",
@@ -498,7 +597,13 @@ def poll(
                 existing = db.get_photo_by_flickr_id(flickr_id)
                 if existing:
                     # Update metadata but preserve any review decisions
-                    db.upsert_photo(row)
+                    photo_row_id = db.upsert_photo(row)
+                    if _flickr_bp_rating:
+                        db.seed_flickr_rating(photo_row_id, _flickr_bp_rating)
+                    if _flickr_bp_rating_tag_items:
+                        _sync_rating_tag(
+                            client, db, flickr_id, photo_row_id, _flickr_bp_rating_tag_items
+                        )
                     updated += 1
                 else:
                     # New Flickr upload — check if there's a matching Photos-only
@@ -520,7 +625,13 @@ def poll(
                             client, flickr_id, matched, db, dry_run=False
                         )
                     else:
-                        db.upsert_photo(row)
+                        photo_row_id = db.upsert_photo(row)
+                        if _flickr_bp_rating:
+                            db.seed_flickr_rating(photo_row_id, _flickr_bp_rating)
+                        if _flickr_bp_rating_tag_items:
+                            _sync_rating_tag(
+                                client, db, flickr_id, photo_row_id, _flickr_bp_rating_tag_items
+                            )
                     new += 1
 
                 # Queue thumbnail download

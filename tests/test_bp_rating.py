@@ -292,3 +292,142 @@ class TestScannerAppleFavorite(unittest.TestCase):
         photo = self._make_mock_photo(favorite=False)
         row = photos_record_to_db(photo)
         self.assertEqual(row["apple_favorite"], 0)
+
+
+# ===========================================================================
+# Task 3 — Poller: Flickr seed + tag write-back
+# ===========================================================================
+
+
+class TestPollerRatingTag(unittest.TestCase):
+    """Tests for bp:rating=N tag parsing and write-back in the poller."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db = Database(Path(self.tmp) / "test.db")
+        self.photo_id = self.db.upsert_photo(
+            {
+                "uuid": "poller-uuid",
+                "flickr_id": "flickr-001",
+                "original_filename": "IMG_P.JPG",
+                "privacy_state": "candidate_public",
+                "apple_persons": [],
+                "proposed_tags": [],
+            }
+        )
+
+    def tearDown(self):
+        self.db.close()
+        shutil.rmtree(self.tmp)
+
+    # --- _parse_bp_rating_from_tags ---
+
+    def test_parse_bp_rating_from_tag_string(self):
+        """_parse_bp_rating_from_tags extracts N from 'bp:rating=N' tag."""
+        from poller.poller import _parse_bp_rating_from_tags
+
+        tags = ["landscape", "bp:rating=4", "nature"]
+        rating, tag_ids = _parse_bp_rating_from_tags(tags)
+        self.assertEqual(rating, 4)
+        self.assertEqual(tag_ids, [])  # no id dict supplied
+
+    def test_parse_bp_rating_absent_returns_zero(self):
+        """_parse_bp_rating_from_tags returns 0 when no bp:rating tag."""
+        from poller.poller import _parse_bp_rating_from_tags
+
+        rating, tag_ids = _parse_bp_rating_from_tags(["landscape", "nature"])
+        self.assertEqual(rating, 0)
+        self.assertEqual(tag_ids, [])
+
+    def test_parse_bp_rating_with_tag_dicts(self):
+        """_parse_bp_rating_from_tags returns tag_ids from getInfo tag dicts."""
+        from poller.poller import _parse_bp_rating_from_tags
+
+        tag_items = [
+            {"raw": "landscape", "id": "id-001"},
+            {"raw": "bp:rating=3", "id": "id-002"},
+            {"raw": "nature", "id": "id-003"},
+        ]
+        rating, tag_ids = _parse_bp_rating_from_tags(tag_items)
+        self.assertEqual(rating, 3)
+        self.assertEqual(tag_ids, ["id-002"])
+
+    def test_parse_bp_rating_multiple_tags_keeps_all_ids(self):
+        """Multiple bp:rating=* tags → return all their IDs (for dedup)."""
+        from poller.poller import _parse_bp_rating_from_tags
+
+        tag_items = [
+            {"raw": "bp:rating=3", "id": "id-001"},
+            {"raw": "bp:rating=5", "id": "id-002"},
+        ]
+        rating, tag_ids = _parse_bp_rating_from_tags(tag_items)
+        # Returns the highest value (for dedup consistency)
+        self.assertEqual(rating, 5)
+        self.assertIn("id-001", tag_ids)
+        self.assertIn("id-002", tag_ids)
+
+    # --- _sync_rating_tag (write-back) ---
+
+    def test_sync_rating_adds_tag_when_missing(self):
+        """bp_rating=4, no existing tag → add_tags called with bp:rating=4."""
+        from poller.poller import _sync_rating_tag
+
+        client = MagicMock()
+        self.db.set_bp_rating(self.photo_id, 4)
+
+        tag_items = [{"raw": "landscape", "id": "id-001"}]
+        _sync_rating_tag(client, self.db, "flickr-001", self.photo_id, tag_items)
+
+        client.add_tags.assert_called_once_with("flickr-001", ["bp:rating=4"])
+        client.remove_tag.assert_not_called()
+
+    def test_sync_rating_removes_tag_when_zero(self):
+        """bp_rating=0, tag exists → remove_tag called; never add bp:rating=0."""
+        from poller.poller import _sync_rating_tag
+
+        client = MagicMock()
+        # bp_rating is 0 (default)
+
+        tag_items = [{"raw": "bp:rating=3", "id": "tag-id-999"}]
+        _sync_rating_tag(client, self.db, "flickr-001", self.photo_id, tag_items)
+
+        client.remove_tag.assert_called_once_with("tag-id-999")
+        client.add_tags.assert_not_called()
+
+    def test_sync_rating_no_call_when_already_correct(self):
+        """bp_rating=3, bp:rating=3 tag already present → no API call."""
+        from poller.poller import _sync_rating_tag
+
+        client = MagicMock()
+        self.db.set_bp_rating(self.photo_id, 3)
+
+        tag_items = [{"raw": "bp:rating=3", "id": "tag-id-999"}]
+        _sync_rating_tag(client, self.db, "flickr-001", self.photo_id, tag_items)
+
+        client.add_tags.assert_not_called()
+        client.remove_tag.assert_not_called()
+
+    def test_sync_rating_replaces_wrong_tag(self):
+        """bp_rating=4, bp:rating=2 tag on Flickr → remove old, add new."""
+        from poller.poller import _sync_rating_tag
+
+        client = MagicMock()
+        self.db.set_bp_rating(self.photo_id, 4)
+
+        tag_items = [{"raw": "bp:rating=2", "id": "old-tag-id"}]
+        _sync_rating_tag(client, self.db, "flickr-001", self.photo_id, tag_items)
+
+        client.remove_tag.assert_called_once_with("old-tag-id")
+        client.add_tags.assert_called_once_with("flickr-001", ["bp:rating=4"])
+
+    def test_sync_rating_never_adds_zero_tag(self):
+        """bp_rating=0, no existing tag → no API call at all."""
+        from poller.poller import _sync_rating_tag
+
+        client = MagicMock()
+        # bp_rating is 0 (default), no tag items
+
+        _sync_rating_tag(client, self.db, "flickr-001", self.photo_id, [])
+
+        client.add_tags.assert_not_called()
+        client.remove_tag.assert_not_called()
