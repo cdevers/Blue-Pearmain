@@ -1132,5 +1132,55 @@ class TestDeleteDiscardsQuery(unittest.TestCase):
         self.assertEqual(rows[0]["flickr_id"], "48922000000")
 
 
+# ---------------------------------------------------------------------------
+# _write_groups — preserve resolved=1 on re-run
+# ---------------------------------------------------------------------------
+
+
+class TestWriteGroupsPreservesResolved(unittest.TestCase):
+    def test_re_run_does_not_reset_resolved_group(self):
+        from poller.deduplicator import _write_groups, DuplicateGroup
+
+        conn = _make_dedup_db()
+        # Simulate a group that the user has already resolved
+        conn.execute(
+            "INSERT INTO duplicate_groups"
+            " (id, match_key, group_type, photo_count, resolved, notes)"
+            " VALUES (1, 'DSC_0001.JPG|2024-09-28T14:12:43', 'uncertain', 2, 1,"
+            " 'upload gap=unknown')"
+        )
+        conn.execute(
+            "INSERT INTO photos"
+            " (id, flickr_id, uuid, duplicate_group_id, duplicate_role)"
+            " VALUES (10, '11111', 'UUID-A', 1, 'review')"
+        )
+        conn.execute(
+            "INSERT INTO photos"
+            " (id, flickr_id, uuid, duplicate_group_id, duplicate_role)"
+            " VALUES (20, '22222', 'UUID-B', 1, 'review')"
+        )
+        conn.commit()
+
+        p1 = make_photo(id=10, flickr_id="11111", uuid="UUID-A")
+        p2 = make_photo(id=20, flickr_id="22222", uuid="UUID-B")
+        group = DuplicateGroup(
+            match_key="DSC_0001.JPG|2024-09-28T14:12:43",
+            group_type="uncertain",
+            photos=[p1, p2],
+            keeper=None,
+            discards=[],
+            review=[p1, p2],
+            notes="upload gap=unknown",
+        )
+
+        _write_groups(conn, [group])
+
+        row = conn.execute(
+            "SELECT resolved FROM duplicate_groups"
+            " WHERE match_key = 'DSC_0001.JPG|2024-09-28T14:12:43'"
+        ).fetchone()
+        self.assertEqual(row["resolved"], 1, "resolved=1 must be preserved when --write re-runs")
+
+
 if __name__ == "__main__":
     unittest.main()

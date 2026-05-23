@@ -686,7 +686,10 @@ def _write_groups(conn: sqlite3.Connection, groups: list[DuplicateGroup]) -> dic
                 group_type  = excluded.group_type,
                 photo_count = excluded.photo_count,
                 notes       = excluded.notes,
-                resolved    = excluded.resolved,
+                resolved    = CASE WHEN duplicate_groups.resolved = 1
+                                   THEN 1
+                                   ELSE excluded.resolved
+                              END,
                 updated_at  = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
         """,
             (
