@@ -577,7 +577,7 @@ def poll(
 
                 # Extract transient rating fields before dropping
                 _flickr_bp_rating = row.pop("_flickr_bp_rating", 0)
-                _flickr_bp_rating_tag_items = row.pop("_flickr_bp_rating_tag_items", [])
+                _flickr_bp_rating_tag_items = row.pop("_flickr_bp_rating_tag_items", None)
 
                 # Drop transient fields that have no DB column
                 for _key in (
@@ -600,7 +600,7 @@ def poll(
                     photo_row_id = db.upsert_photo(row)
                     if _flickr_bp_rating:
                         db.seed_flickr_rating(photo_row_id, _flickr_bp_rating)
-                    if _flickr_bp_rating_tag_items:
+                    if _flickr_bp_rating_tag_items is not None:
                         _sync_rating_tag(
                             client, db, flickr_id, photo_row_id, _flickr_bp_rating_tag_items
                         )
@@ -620,7 +620,13 @@ def poll(
                         row["privacy_state"] = "approved_public"
                         row["privacy_reason"] = "matched approved Photos record"
                         row["uuid"] = matched["uuid"]
-                        db.upsert_photo(row)
+                        auto_push_row_id = db.upsert_photo(row)
+                        if _flickr_bp_rating:
+                            db.seed_flickr_rating(auto_push_row_id, _flickr_bp_rating)
+                        if _flickr_bp_rating_tag_items is not None:
+                            _sync_rating_tag(
+                                client, db, flickr_id, auto_push_row_id, _flickr_bp_rating_tag_items
+                            )
                         push_errors += _push_to_flickr(
                             client, flickr_id, matched, db, dry_run=False
                         )
@@ -628,7 +634,7 @@ def poll(
                         photo_row_id = db.upsert_photo(row)
                         if _flickr_bp_rating:
                             db.seed_flickr_rating(photo_row_id, _flickr_bp_rating)
-                        if _flickr_bp_rating_tag_items:
+                        if _flickr_bp_rating_tag_items is not None:
                             _sync_rating_tag(
                                 client, db, flickr_id, photo_row_id, _flickr_bp_rating_tag_items
                             )
