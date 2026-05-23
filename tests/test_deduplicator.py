@@ -1182,5 +1182,216 @@ class TestWriteGroupsPreservesResolved(unittest.TestCase):
         self.assertEqual(row["resolved"], 1, "resolved=1 must be preserved when --write re-runs")
 
 
+# ---------------------------------------------------------------------------
+# _prune_stale_groups
+# ---------------------------------------------------------------------------
+
+
+class TestPruneStaleGroups(unittest.TestCase):
+    """Tests for _prune_stale_groups().
+
+    Uses _make_dedup_db() which has the duplicate_groups + photos schema.
+    _prune_stale_groups only looks at unresolved groups (resolved=0).
+    """
+
+    def test_zombie_group_zero_linked_is_deleted(self):
+        from poller.deduplicator import _prune_stale_groups
+
+        conn = _make_dedup_db()
+        conn.execute(
+            "INSERT INTO duplicate_groups (id, match_key, group_type, photo_count, resolved)"
+            " VALUES (1, 'DSC_0001.JPG|2024-01-01', 'uncertain', 2, 0)"
+        )
+        conn.commit()
+
+        counts = _prune_stale_groups(conn, dry_run=False)
+
+        self.assertEqual(counts["groups_deleted"], 1)
+        self.assertEqual(counts["links_cleared"], 0)
+        row = conn.execute("SELECT id FROM duplicate_groups WHERE id = 1").fetchone()
+        self.assertIsNone(row)
+
+    def test_zombie_group_one_linked_is_deleted_and_link_cleared(self):
+        from poller.deduplicator import _prune_stale_groups
+
+        conn = _make_dedup_db()
+        conn.execute(
+            "INSERT INTO duplicate_groups (id, match_key, group_type, photo_count, resolved)"
+            " VALUES (1, 'DSC_0001.JPG|2024-01-01', 'uncertain', 2, 0)"
+        )
+        conn.execute(
+            "INSERT INTO photos"
+            " (id, flickr_id, duplicate_group_id, duplicate_role)"
+            " VALUES (10, '11111', 1, 'review')"
+        )
+        conn.commit()
+
+        counts = _prune_stale_groups(conn, dry_run=False)
+
+        self.assertEqual(counts["groups_deleted"], 1)
+        self.assertEqual(counts["links_cleared"], 1)
+        row = conn.execute("SELECT id FROM duplicate_groups WHERE id = 1").fetchone()
+        self.assertIsNone(row)
+        photo = conn.execute("SELECT duplicate_group_id FROM photos WHERE id = 10").fetchone()
+        self.assertIsNone(photo["duplicate_group_id"])
+
+    def test_stale_count_repaired_for_healthy_group(self):
+        from poller.deduplicator import _prune_stale_groups
+
+        conn = _make_dedup_db()
+        conn.execute(
+            "INSERT INTO duplicate_groups (id, match_key, group_type, photo_count, resolved)"
+            " VALUES (1, 'DSC_0001.JPG|2024-01-01', 'device_upload', 3, 0)"
+        )
+        conn.execute(
+            "INSERT INTO photos (id, flickr_id, duplicate_group_id, duplicate_role)"
+            " VALUES (10, '11111', 1, 'keeper')"
+        )
+        conn.execute(
+            "INSERT INTO photos (id, flickr_id, duplicate_group_id, duplicate_role)"
+            " VALUES (20, '22222', 1, 'discard')"
+        )
+        conn.commit()
+
+        counts = _prune_stale_groups(conn, dry_run=False)
+
+        self.assertEqual(counts["counts_repaired"], 1)
+        row = conn.execute("SELECT photo_count FROM duplicate_groups WHERE id = 1").fetchone()
+        self.assertEqual(row["photo_count"], 2)
+
+    def test_dry_run_reports_eligible_without_writing(self):
+        from poller.deduplicator import _prune_stale_groups
+
+        conn = _make_dedup_db()
+        conn.execute(
+            "INSERT INTO duplicate_groups (id, match_key, group_type, photo_count, resolved)"
+            " VALUES (1, 'DSC_0001.JPG|2024-01-01', 'uncertain', 2, 0)"
+        )
+        conn.commit()
+
+        counts = _prune_stale_groups(conn, dry_run=True)
+
+        self.assertEqual(counts["groups_deleted"], 1)  # eligible count
+        row = conn.execute("SELECT id FROM duplicate_groups WHERE id = 1").fetchone()
+        self.assertIsNotNone(row)  # not actually deleted
+
+    def test_resolved_groups_are_not_touched(self):
+        from poller.deduplicator import _prune_stale_groups
+
+        conn = _make_dedup_db()
+        conn.execute(
+            "INSERT INTO duplicate_groups (id, match_key, group_type, photo_count, resolved)"
+            " VALUES (1, 'DSC_0001.JPG|2024-01-01', 'uncertain', 2, 1)"  # resolved=1
+        )
+        conn.commit()
+
+        counts = _prune_stale_groups(conn, dry_run=False)
+
+        self.assertEqual(counts["groups_deleted"], 0)
+        self.assertEqual(counts["counts_repaired"], 0)
+        row = conn.execute("SELECT id FROM duplicate_groups WHERE id = 1").fetchone()
+        self.assertIsNotNone(row)
+
+    def test_invariant_no_zombie_groups_after_prune(self):
+        from poller.deduplicator import _prune_stale_groups
+
+        conn = _make_dedup_db()
+        # zombie (0 linked)
+        conn.execute(
+            "INSERT INTO duplicate_groups (id, match_key, group_type, photo_count, resolved)"
+            " VALUES (1, 'DSC_0001.JPG|2024-01-01', 'uncertain', 2, 0)"
+        )
+        # healthy (2 linked)
+        conn.execute(
+            "INSERT INTO duplicate_groups (id, match_key, group_type, photo_count, resolved)"
+            " VALUES (2, 'DSC_0002.JPG|2024-01-02', 'device_upload', 2, 0)"
+        )
+        conn.execute(
+            "INSERT INTO photos (id, flickr_id, duplicate_group_id, duplicate_role)"
+            " VALUES (10, '11111', 2, 'keeper')"
+        )
+        conn.execute(
+            "INSERT INTO photos (id, flickr_id, duplicate_group_id, duplicate_role)"
+            " VALUES (20, '22222', 2, 'discard')"
+        )
+        conn.commit()
+
+        _prune_stale_groups(conn, dry_run=False)
+
+        rows = conn.execute("""
+            SELECT dg.id, COUNT(p.id) AS linked
+            FROM duplicate_groups dg
+            LEFT JOIN photos p ON p.duplicate_group_id = dg.id
+            WHERE dg.resolved = 0
+            GROUP BY dg.id
+            HAVING linked < 2
+        """).fetchall()
+        self.assertEqual(
+            len(rows), 0, "No unresolved group should have < 2 linked photos after prune"
+        )
+
+    def test_invariant_photo_count_matches_linked_after_prune(self):
+        from poller.deduplicator import _prune_stale_groups
+
+        conn = _make_dedup_db()
+        conn.execute(
+            "INSERT INTO duplicate_groups (id, match_key, group_type, photo_count, resolved)"
+            " VALUES (1, 'DSC_0001.JPG|2024-01-01', 'device_upload', 3, 0)"
+        )
+        conn.execute(
+            "INSERT INTO photos (id, flickr_id, duplicate_group_id, duplicate_role)"
+            " VALUES (10, '11111', 1, 'keeper')"
+        )
+        conn.execute(
+            "INSERT INTO photos (id, flickr_id, duplicate_group_id, duplicate_role)"
+            " VALUES (20, '22222', 1, 'discard')"
+        )
+        conn.commit()
+
+        _prune_stale_groups(conn, dry_run=False)
+
+        mismatched = conn.execute("""
+            SELECT dg.id, dg.photo_count, COUNT(p.id) AS linked
+            FROM duplicate_groups dg
+            LEFT JOIN photos p ON p.duplicate_group_id = dg.id
+            WHERE dg.resolved = 0
+            GROUP BY dg.id
+            HAVING dg.photo_count != linked
+        """).fetchall()
+        self.assertEqual(
+            len(mismatched), 0, "photo_count must equal actual linked count after prune"
+        )
+
+    def test_invariant_no_dangling_duplicate_group_id_after_prune(self):
+        from poller.deduplicator import _prune_stale_groups
+
+        conn = _make_dedup_db()
+        conn.execute(
+            "INSERT INTO duplicate_groups (id, match_key, group_type, photo_count, resolved)"
+            " VALUES (1, 'DSC_0001.JPG|2024-01-01', 'uncertain', 2, 0)"
+        )
+        conn.execute(
+            "INSERT INTO photos (id, flickr_id, duplicate_group_id, duplicate_role)"
+            " VALUES (10, '11111', 1, 'review')"
+        )
+        conn.commit()
+
+        _prune_stale_groups(conn, dry_run=False)
+
+        dangling = conn.execute("""
+            SELECT p.id FROM photos p
+            WHERE p.duplicate_group_id IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM duplicate_groups dg
+                WHERE dg.id = p.duplicate_group_id
+              )
+        """).fetchall()
+        self.assertEqual(
+            len(dangling),
+            0,
+            "No photo should have a duplicate_group_id pointing to a deleted group",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
