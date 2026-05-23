@@ -226,6 +226,30 @@ def _is_snapbridge_pair(photos: list[PhotoRow]) -> bool:
     return False
 
 
+def _is_edit_pair(photos: list[PhotoRow]) -> bool:
+    """
+    True if exactly two non-DSC_ photos share filename+timestamp with different
+    fingerprints and different pixel dimensions — likely an original + edited,
+    cropped, or colour-corrected version.
+
+    DSC_* files are handled exclusively by _is_snapbridge_pair.
+    If dimensions are not yet populated, returns False (stays uncertain).
+    """
+    if len(photos) != 2:
+        return False
+    a, b = photos
+    # DSC_* pairs belong to _is_snapbridge_pair
+    if any(p.original_filename and p.original_filename.upper().startswith("DSC_") for p in photos):
+        return False
+    if not a.fingerprint or not b.fingerprint:
+        return False
+    if a.fingerprint == b.fingerprint:
+        return False
+    if a.pixels is not None and b.pixels is not None:
+        return a.pixels != b.pixels
+    return False
+
+
 def _classify_group(photos: list[PhotoRow]) -> DuplicateGroup:
     filename = photos[0].original_filename
     date_taken = photos[0].date_taken
@@ -244,6 +268,20 @@ def _classify_group(photos: list[PhotoRow]) -> DuplicateGroup:
             f"({discards[0].uuid or discards[0].flickr_id})"
         )
         return DuplicateGroup(match_key, "snapbridge", photos, keeper, discards, [], notes)
+
+    if _is_edit_pair(photos):
+        # Keeper = higher resolution (suggestion only — all photos go to review).
+        # Typical action for the user is "Not a duplicate" to keep both.
+        ranked = sorted(photos, key=lambda p: p.pixels or 0, reverse=True)
+        keeper = ranked[0]
+        notes = (
+            f"Edit pair: {ranked[0].width}×{ranked[0].height}px "
+            f"({ranked[0].uuid or ranked[0].flickr_id}) vs "
+            f"{ranked[1].width}×{ranked[1].height}px "
+            f"({ranked[1].uuid or ranked[1].flickr_id}) — "
+            f"likely original + edited version; use 'Not a duplicate' to keep both"
+        )
+        return DuplicateGroup(match_key, "edit_pair", photos, keeper, [], photos, notes)
 
     # Check for device_upload pattern: same/unknown fingerprint, staggered Flickr uploads
     gap = _upload_gap_minutes(photos)
@@ -630,6 +668,7 @@ def _write_groups(conn: sqlite3.Connection, groups: list[DuplicateGroup]) -> dic
     """Write duplicate_groups rows and update photos. Returns type counts."""
     counts: dict[str, int] = {
         "snapbridge": 0,
+        "edit_pair": 0,
         "device_upload": 0,
         "uncertain": 0,
         "not_duplicate": 0,
@@ -872,7 +911,7 @@ def _print_report(groups: list[DuplicateGroup]) -> None:
         print(f"  {gtype:<15} {len(glist):>5} groups")
 
     print()
-    for gtype in ("snapbridge", "device_upload", "uncertain"):
+    for gtype in ("snapbridge", "edit_pair", "device_upload", "uncertain"):
         glist = by_type.get(gtype, [])
         if not glist:
             continue

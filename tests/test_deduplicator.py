@@ -89,6 +89,37 @@ class TestIsSnapbridgePair(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# _is_edit_pair
+# ---------------------------------------------------------------------------
+
+
+class TestIsEditPair(unittest.TestCase):
+    def test_iphone_pair_different_fingerprints_different_dims(self):
+        from poller.deduplicator import _is_edit_pair
+
+        # Original IMG_*.HEIC + colour-corrected crop — should be edit_pair
+        a = make_photo(
+            id=1, original_filename="IMG_3199.HEIC", fingerprint="FP-ORIG", width=3260, height=2059
+        )
+        b = make_photo(
+            id=2, original_filename="IMG_3199.HEIC", fingerprint="FP-EDIT", width=4032, height=3024
+        )
+        self.assertTrue(_is_edit_pair([a, b]))
+
+    def test_dsc_files_excluded(self):
+        from poller.deduplicator import _is_edit_pair
+
+        # DSC_* files belong to _is_snapbridge_pair, not _is_edit_pair
+        a = make_photo(
+            id=1, original_filename="DSC_0001.JPG", fingerprint="FP-LO", width=1620, height=1080
+        )
+        b = make_photo(
+            id=2, original_filename="DSC_0001.JPG", fingerprint="FP-HI", width=6048, height=4024
+        )
+        self.assertFalse(_is_edit_pair([a, b]))
+
+
+# ---------------------------------------------------------------------------
 # _upload_gap_minutes
 # ---------------------------------------------------------------------------
 
@@ -192,6 +223,47 @@ class TestClassifyGroup(unittest.TestCase):
         group = _classify_group([lo, hi])
         self.assertEqual(group.group_type, "uncertain")
         self.assertIsNone(group.keeper)
+
+
+# ---------------------------------------------------------------------------
+# _classify_group — edit_pair cases
+# ---------------------------------------------------------------------------
+
+
+class TestClassifyGroupEditPair(unittest.TestCase):
+    def _iphone_edit_pair(self):
+        original = make_photo(
+            id=1,
+            original_filename="IMG_3199.HEIC",
+            uuid="UUID-ORIG",
+            fingerprint="FP-ORIG",
+            width=3260,
+            height=2059,
+        )
+        edited = make_photo(
+            id=2,
+            original_filename="IMG_3199.HEIC",
+            uuid="UUID-EDIT",
+            fingerprint="FP-EDIT",
+            width=4032,
+            height=3024,
+        )
+        return [original, edited]
+
+    def test_edit_pair_classification(self):
+        group = _classify_group(self._iphone_edit_pair())
+        self.assertEqual(group.group_type, "edit_pair")
+
+    def test_edit_pair_all_photos_in_review_not_discards(self):
+        group = _classify_group(self._iphone_edit_pair())
+        self.assertEqual(len(group.discards), 0)
+        self.assertEqual(len(group.review), 2)
+
+    def test_edit_pair_keeper_is_higher_res(self):
+        group = _classify_group(self._iphone_edit_pair())
+        self.assertIsNotNone(group.keeper)
+        # edited (4032×3024 = 12,192,768 px) > original (3260×2059 = 6,712,340 px)
+        self.assertEqual(group.keeper.width, 4032)
 
 
 # ---------------------------------------------------------------------------
