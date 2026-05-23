@@ -319,6 +319,8 @@ All review decisions push tags to Flickr — tags are useful for search even on 
 
 **Panoramic photos** (width/height ratio > 2.0) are displayed as double-wide tiles in the review grid, with `object-fit: contain` so the full width is visible. Named persons are shown as chip labels below the thumbnail on panoramic tiles.
 
+**Videos** (`.MOV`, `.MP4`, `.M4V`) are flagged with a centred ▶ play-button overlay on the thumbnail and a `video` label in the meta row, so the operator knows they are reviewing a moving image before deciding.
+
 **Album membership** is displayed on the single-photo detail page, under an "Albums → Photosets" section that shows each album name and whether it has been synced to Flickr. The review grid shows a small album badge (e.g. "📁 2 albums") on any photo that belongs to at least one album. Action button labels on the detail page include "+ photosets" to make this push explicit.
 
 ### Undo
@@ -563,7 +565,7 @@ make test              # runs: python -m pytest tests/ -q
 make lint              # runs: mypy + ruff check + ruff format --check
 ```
 
-990 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, Friends/Family visibility, reconcile convergence (pushed_tags ledger), tag write-back to Photos.app, reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration), Flickr re-upload duplicate enforcement (mark/delete discards), sync-albums removal phase, macOS daemon notifications, tag protection rules, reconcile --explain, operational status reporting, per-person privacy policies, operation journal (append-only log of all BP mutations), and panoramic review UI layout. See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
+1008 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, Friends/Family visibility, reconcile convergence (pushed_tags ledger), tag write-back to Photos.app, reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration), Flickr re-upload duplicate enforcement (mark/delete discards), sync-albums removal phase, macOS daemon notifications, tag protection rules, reconcile --explain, operational status reporting, per-person privacy policies, operation journal (append-only log of all BP mutations), panoramic review UI layout, and video badge/label indicators in the review grid. See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
 
 CI runs the same suite on every push to `main` and on pull requests.
 

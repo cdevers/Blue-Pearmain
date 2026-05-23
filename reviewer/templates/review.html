@@ -158,6 +158,33 @@
   color: #e0a060;
 }
 
+/* Video overlay — centred play button on thumbnail */
+.photo-card .thumb .video-badge {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 28px;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+  line-height: 1;
+}
+
+/* Meta row label — video type indicator */
+.video-label {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #aaa;
+  background: #2a2a2a;
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-top: 3px;
+}
+
 /* Badge pulse animation */
 @keyframes protected-pulse {
   0%   { opacity: 1; transform: scale(1); }
@@ -437,6 +464,9 @@
       {% if photo.is_screenshot %}
       <span class="screenshot-badge">screenshot</span>
       {% endif %}
+      {% if photo.is_video %}
+      <span class="video-badge">▶</span>
+      {% endif %}
       {% if photo.is_protected %}
       <span class="protected-badge">
         {{ photo.protected_reasons | join(' · ') }}
@@ -446,6 +476,9 @@
 
     <div class="meta">
       <div class="filename">{{ photo.original_filename or photo.flickr_id or '?' }}</div>
+      {% if photo.is_video %}
+      <span class="video-label">video</span>
+      {% endif %}
       <div class="tag-row" id="tags-{{ photo.id }}">
         {% if photo.proposed_tags %}
           {{ photo.proposed_tags | join(', ') }}

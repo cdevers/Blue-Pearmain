@@ -13,6 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import reviewer.app as app_module
 from db.db import Database
 from db.migrations.migrate_021_is_video import run as migrate_is_video
 
@@ -270,3 +271,105 @@ class TestPollerIsVideo:
         }
         row = flickr_photo_to_db(photo, info=None)
         assert row.get("is_video") == 0
+
+
+@pytest.fixture()
+def db_fixture(tmp_path):
+    """DB with migration applied and seeded video + still photos."""
+    db = Database(tmp_path / "test.db")
+    migrate_is_video(str(tmp_path / "test.db"))
+
+    db.upsert_photo(
+        {
+            "uuid": "uuid-vid-1",
+            "original_filename": "VID_001.MOV",
+            "privacy_state": "candidate_public",
+            "is_video": 1,
+            "apple_persons": [],
+            "proposed_tags": [],
+        }
+    )
+    db.upsert_photo(
+        {
+            "uuid": "uuid-still-1",
+            "original_filename": "IMG_001.JPG",
+            "privacy_state": "candidate_public",
+            "is_video": 0,
+            "apple_persons": [],
+            "proposed_tags": [],
+        }
+    )
+    return db
+
+
+class TestReviewQueueIsVideo:
+    def test_review_queue_returns_is_video_field(self, db_fixture):
+        photos = db_fixture.review_queue(states=["candidate_public"])
+        assert len(photos) == 2
+        by_uuid = {p["uuid"]: p for p in photos}
+        assert by_uuid["uuid-vid-1"]["is_video"] == 1
+        assert by_uuid["uuid-still-1"]["is_video"] == 0
+        db_fixture.close()
+
+
+@pytest.fixture()
+def flask_client_video(tmp_path):
+    """Flask test client with one video and one still photo."""
+    db = Database(tmp_path / "test.db")
+    migrate_is_video(str(tmp_path / "test.db"))
+
+    db.upsert_photo(
+        {
+            "uuid": "uuid-vid-flask",
+            "original_filename": "VID_FLASK.MOV",
+            "privacy_state": "candidate_public",
+            "is_video": 1,
+            "apple_persons": [],
+            "proposed_tags": [],
+        }
+    )
+    db.upsert_photo(
+        {
+            "uuid": "uuid-still-flask",
+            "original_filename": "IMG_FLASK.JPG",
+            "privacy_state": "candidate_public",
+            "is_video": 0,
+            "apple_persons": [],
+            "proposed_tags": [],
+        }
+    )
+
+    app_module._db = db
+    app_module.app.config["TESTING"] = True
+    app_module.app.config["SECRET_KEY"] = "test"
+    with app_module.app.test_client() as c:
+        yield c
+    app_module._db = None
+    db.close()
+
+
+class TestVideoTemplate:
+    def test_video_badge_rendered_for_video_tile(self, flask_client_video):
+        r = flask_client_video.get("/review?state=candidate_public")
+        html = r.data.decode()
+        assert "video-badge" in html
+        assert "▶" in html
+
+    def test_video_label_rendered_for_video_tile(self, flask_client_video):
+        r = flask_client_video.get("/review?state=candidate_public")
+        html = r.data.decode()
+        assert "video-label" in html
+        assert ">video<" in html
+
+    def test_video_badge_only_on_video_tile(self, flask_client_video):
+        r = flask_client_video.get("/review?state=candidate_public")
+        html = r.data.decode()
+        # One occurrence in CSS definition + one in the rendered video tile = 2 total;
+        # the still photo tile must not add a third.
+        assert html.count("video-badge") == 2
+
+    def test_video_label_only_on_video_tile(self, flask_client_video):
+        r = flask_client_video.get("/review?state=candidate_public")
+        html = r.data.decode()
+        # One occurrence in CSS definition + one in the rendered video tile = 2 total.
+        assert html.count("video-label") == 2
