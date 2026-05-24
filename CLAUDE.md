@@ -36,7 +36,7 @@ For each meaningful change (bug fix, feature, refactor):
 
 ## Development environment
 
-- **Database:** `data/curator.db` (SQLite). `bp.db` in the repo root is an empty placeholder — ignore it.
+- **Database:** `data/curator.db` (SQLite).
 - **Test runner:** `python -m pytest tests/ -q` from the repo root.
 - **Dev server:** `python reviewer/app.py --config config/config.yml` or `bp ui`.
 - **Python path:** scripts in `poller/` add both `Path(__file__).parent.parent` (project root) and `Path(__file__).parent` (the `poller/` directory itself) to `sys.path`. Sibling modules import as `from scanner import ...`, not `from poller.scanner import ...`.
@@ -52,7 +52,6 @@ The macOS Terminal process sometimes loses Full Disk Access silently. Symptoms: 
 ## Known pre-existing issues
 
 - `test_migration_002_idempotent` and `test_migration_table_exists_after_migrate_002` were removed (stale path bug; migration already applied to all installations).
-- `bp.db` in the repo root is intentionally empty — the live database is `data/curator.db`.
 
 ---
 
