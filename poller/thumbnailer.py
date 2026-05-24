@@ -50,21 +50,37 @@ def setup_logging(verbose: bool) -> None:
 
 def derivative_path(uuid: str, library_path: str) -> str | None:
     """
-    Return the path to Photos' pre-generated JPEG derivative for this UUID,
-    or None if not present.
+    Return the path to a Photos pre-generated JPEG derivative for this UUID,
+    or None if no derivative is found on disk.
+
+    Tries three candidate locations in order:
+      1. resources/derivatives/masters/{shard}/{uuid}_4_5005_c.jpeg
+         — standard card-import derivative
+      2. resources/derivatives/{shard}/{uuid}_1_105_c.jpeg
+         — smaller derivative used for some import paths
+      3. scopes/momentshared/resources/derivatives/masters/{shard}/{uuid}_4_5005_c.jpeg
+         — Shared Moments scope
     """
     if not uuid:
         return None
     shard = uuid[0].lower()
-    p = (
-        Path(library_path)
+    lib = Path(library_path)
+    candidates = [
+        lib / "resources" / "derivatives" / "masters" / shard / f"{uuid}_4_5005_c.jpeg",
+        lib / "resources" / "derivatives" / shard / f"{uuid}_1_105_c.jpeg",
+        lib
+        / "scopes"
+        / "momentshared"
         / "resources"
         / "derivatives"
         / "masters"
         / shard
-        / f"{uuid}_4_5005_c.jpeg"
-    )
-    return str(p) if p.exists() else None
+        / f"{uuid}_4_5005_c.jpeg",
+    ]
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    return None
 
 
 def flickr_url(flickr_id: str, secret: str, server: str) -> str | None:
