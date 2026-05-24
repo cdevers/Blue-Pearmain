@@ -267,8 +267,10 @@ def _is_local_duplicate(photos: list[PhotoRow]) -> bool:
     """
     if len(photos) < 2:
         return False
-    if any(p.fingerprint is None for p in photos):
-        return False  # any null fingerprint disqualifies the group
+    if len(photos) < 2:
+        return False
+    if any(not p.fingerprint for p in photos):
+        return False  # null or empty fingerprint — group is ineligible
     fingerprints = {p.fingerprint for p in photos}
     return len(fingerprints) == 1
 
@@ -307,7 +309,7 @@ def _classify_group(photos: list[PhotoRow]) -> DuplicateGroup:
         return DuplicateGroup(match_key, "edit_pair", photos, keeper, [], photos, notes)
 
     if _is_local_duplicate(photos):
-        fp = next(p.fingerprint for p in photos if p.fingerprint) or ""
+        fp = next((p.fingerprint for p in photos if p.fingerprint), "") or ""
         notes = (
             f"Local duplicate: {len(photos)} copies share fingerprint {fp[:12]}… "
             f"— same image imported multiple times into Apple Photos"
