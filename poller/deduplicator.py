@@ -250,6 +250,29 @@ def _is_edit_pair(photos: list[PhotoRow]) -> bool:
     return False
 
 
+def _is_local_duplicate(photos: list[PhotoRow]) -> bool:
+    """
+    True if all photos in the group share the same non-null fingerprint.
+
+    This pattern indicates the same image was imported into Apple Photos
+    multiple times (e.g., card import + iCloud sync, each producing a
+    separate UUID record for identical file content). One copy is typically
+    matched to a Flickr record; the others were never uploaded.
+
+    **Semantic commitment:** fingerprint equality is treated as authoritative
+    evidence of content identity. Two Photos records with the same fingerprint
+    are the same image regardless of UUID, filename, or timestamp. Groups with
+    any null or differing fingerprint are not classified here — they route to
+    device_upload, not_duplicate, or uncertain instead.
+    """
+    if len(photos) < 2:
+        return False
+    if any(p.fingerprint is None for p in photos):
+        return False  # any null fingerprint disqualifies the group
+    fingerprints = {p.fingerprint for p in photos}
+    return len(fingerprints) == 1
+
+
 def _classify_group(photos: list[PhotoRow]) -> DuplicateGroup:
     filename = photos[0].original_filename
     date_taken = photos[0].date_taken
@@ -282,6 +305,14 @@ def _classify_group(photos: list[PhotoRow]) -> DuplicateGroup:
             f"likely original + edited version; use 'Not a duplicate' to keep both"
         )
         return DuplicateGroup(match_key, "edit_pair", photos, keeper, [], photos, notes)
+
+    if _is_local_duplicate(photos):
+        fp = next(p.fingerprint for p in photos if p.fingerprint) or ""
+        notes = (
+            f"Local duplicate: {len(photos)} copies share fingerprint {fp[:12]}… "
+            f"— same image imported multiple times into Apple Photos"
+        )
+        return DuplicateGroup(match_key, "local_duplicate", photos, None, [], photos, notes)
 
     # Check for device_upload pattern: same/unknown fingerprint, staggered Flickr uploads
     gap = _upload_gap_minutes(photos)
@@ -669,6 +700,7 @@ def _write_groups(conn: sqlite3.Connection, groups: list[DuplicateGroup]) -> dic
     counts: dict[str, int] = {
         "snapbridge": 0,
         "edit_pair": 0,
+        "local_duplicate": 0,
         "device_upload": 0,
         "uncertain": 0,
         "not_duplicate": 0,
@@ -1006,7 +1038,7 @@ def _print_report(groups: list[DuplicateGroup]) -> None:
         print(f"  {gtype:<15} {len(glist):>5} groups")
 
     print()
-    for gtype in ("snapbridge", "edit_pair", "device_upload", "uncertain"):
+    for gtype in ("snapbridge", "edit_pair", "local_duplicate", "device_upload", "uncertain"):
         glist = by_type.get(gtype, [])
         if not glist:
             continue

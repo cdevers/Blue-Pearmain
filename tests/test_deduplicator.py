@@ -1393,5 +1393,105 @@ class TestPruneStaleGroups(unittest.TestCase):
         )
 
 
+# ---------------------------------------------------------------------------
+# _is_local_duplicate
+# ---------------------------------------------------------------------------
+
+
+class TestIsLocalDuplicate(unittest.TestCase):
+    def test_same_fingerprint_two_photos(self):
+        from poller.deduplicator import _is_local_duplicate
+
+        a = make_photo(id=1, fingerprint="FP-SAME")
+        b = make_photo(id=2, fingerprint="FP-SAME")
+        self.assertTrue(_is_local_duplicate([a, b]))
+
+    def test_different_fingerprints(self):
+        from poller.deduplicator import _is_local_duplicate
+
+        a = make_photo(id=1, fingerprint="FP-A")
+        b = make_photo(id=2, fingerprint="FP-B")
+        self.assertFalse(_is_local_duplicate([a, b]))
+
+    def test_missing_fingerprint(self):
+        from poller.deduplicator import _is_local_duplicate
+
+        a = make_photo(id=1, fingerprint="FP-A")
+        b = make_photo(id=2, fingerprint=None)
+        self.assertFalse(_is_local_duplicate([a, b]))
+
+    def test_single_photo(self):
+        from poller.deduplicator import _is_local_duplicate
+
+        a = make_photo(id=1, fingerprint="FP-A")
+        self.assertFalse(_is_local_duplicate([a]))
+
+
+# ---------------------------------------------------------------------------
+# _classify_group — local_duplicate cases
+# ---------------------------------------------------------------------------
+
+
+class TestClassifyGroupLocalDuplicate(unittest.TestCase):
+    def _pair(self):
+        a = make_photo(
+            id=1,
+            original_filename="DSC_0001.JPG",
+            uuid="UUID-A",
+            fingerprint="FP-SAME",
+            width=6048,
+            height=4024,
+        )
+        b = make_photo(
+            id=2,
+            original_filename="DSC_0001.JPG",
+            uuid="UUID-B",
+            fingerprint="FP-SAME",
+            width=6048,
+            height=4024,
+        )
+        return [a, b]
+
+    def test_local_duplicate_classification(self):
+        group = _classify_group(self._pair())
+        self.assertEqual(group.group_type, "local_duplicate")
+
+    def test_local_duplicate_all_photos_in_review_not_discards(self):
+        group = _classify_group(self._pair())
+        self.assertEqual(len(group.discards), 0)
+        self.assertEqual(len(group.review), 2)
+
+
+class TestLocalDuplicateWaterfallInvariant(unittest.TestCase):
+    def test_local_duplicate_beats_device_upload(self):
+        """
+        Same-fingerprint group with upload timestamps > 5 min apart must classify
+        as local_duplicate, not device_upload. Verifies waterfall ordering.
+        """
+        a = make_photo(
+            id=1,
+            original_filename="IMG_0001.HEIC",
+            flickr_id="111",
+            fingerprint="FP-SAME",
+            width=3024,
+            height=4032,
+            date_taken="2024-01-01T00:00:00+00:00",
+            date_uploaded_flickr="2024-01-01T00:00:00+00:00",
+        )
+        b = make_photo(
+            id=2,
+            original_filename="IMG_0001.HEIC",
+            flickr_id="222",
+            fingerprint="FP-SAME",
+            width=3024,
+            height=4032,
+            date_taken="2024-01-01T00:00:00+00:00",
+            date_uploaded_flickr="2024-01-01T02:00:00+00:00",  # 2-hour upload gap
+        )
+        group = _classify_group([a, b])
+        self.assertEqual(group.group_type, "local_duplicate")
+        self.assertNotEqual(group.group_type, "device_upload")
+
+
 if __name__ == "__main__":
     unittest.main()

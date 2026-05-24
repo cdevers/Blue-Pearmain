@@ -9420,30 +9420,33 @@ class TestDeduplicatorDimensionDivergence(unittest.TestCase):
 
     # --- _classify_group: not_duplicate ---
 
-    def test_classify_uncertain_when_dimensions_identical(self):
+    def test_classify_local_duplicate_when_dimensions_identical(self):
         from poller.deduplicator import _classify_group
 
         photos = [
             self._photo(1, "fp1", 6000, 4000),
             self._photo(2, "fp1", 6000, 4000),  # same fingerprint, same dims
         ]
-        self.assertEqual(_classify_group(photos).group_type, "uncertain")
+        # Same fingerprint = same image content; local_duplicate takes precedence
+        self.assertEqual(_classify_group(photos).group_type, "local_duplicate")
 
     def test_classify_not_duplicate_when_dimensions_diverge(self):
         from poller.deduplicator import _classify_group
 
-        # Same fingerprint (so not snapbridge), but very different dimensions
+        # No fingerprints, very different dimensions — routes to not_duplicate via ratio check
+        # (same fingerprint → local_duplicate; different fingerprints + different dims → edit_pair)
         photos = [
-            self._photo(1, "fp1", 6000, 4000),  # 24M px
-            self._photo(2, "fp1", 3000, 2000),  # 6M px — ratio 4.0 >> 1.1
+            self._photo(1, None, 6000, 4000),  # 24M px, no fingerprint
+            self._photo(2, None, 3000, 2000),  # 6M px — ratio 4.0 >> 1.1
         ]
         self.assertEqual(_classify_group(photos).group_type, "not_duplicate")
 
-    def test_classify_uncertain_when_dimensions_missing(self):
+    def test_classify_local_duplicate_when_dimensions_missing(self):
         from poller.deduplicator import _classify_group
 
+        # Same fingerprint with no dimension data → local_duplicate (fingerprint is authoritative)
         photos = [self._photo(1, "fp1", None, None), self._photo(2, "fp1", None, None)]
-        self.assertEqual(_classify_group(photos).group_type, "uncertain")
+        self.assertEqual(_classify_group(photos).group_type, "local_duplicate")
 
     def test_classify_snapbridge_not_reclassified_as_not_duplicate(self):
         from poller.deduplicator import _classify_group
@@ -9459,9 +9462,10 @@ class TestDeduplicatorDimensionDivergence(unittest.TestCase):
     def test_not_duplicate_group_has_no_keeper_or_discards(self):
         from poller.deduplicator import _classify_group
 
+        # No fingerprints, divergent dimensions → not_duplicate; no keeper or discards
         photos = [
-            self._photo(1, "fp1", 6000, 4000),
-            self._photo(2, "fp1", 3000, 2000),
+            self._photo(1, None, 6000, 4000),
+            self._photo(2, None, 3000, 2000),
         ]
         g = _classify_group(photos)
         self.assertEqual(g.group_type, "not_duplicate")
@@ -9472,9 +9476,10 @@ class TestDeduplicatorDimensionDivergence(unittest.TestCase):
         from poller.deduplicator import _classify_group, _pixels_ratio, NOT_DUPLICATE_PIXEL_RATIO
 
         # 6000×4000 = 24M; 4899×4672 ≈ 22.9M → ratio ~1.047, just below 1.1
+        # No fingerprints so local_duplicate doesn't fire; ratio below threshold → uncertain
         photos = [
-            self._photo(1, "fp1", 6000, 4000),
-            self._photo(2, "fp1", 4899, 4672),
+            self._photo(1, None, 6000, 4000),
+            self._photo(2, None, 4899, 4672),
         ]
         ratio = _pixels_ratio(photos)
         self.assertLess(ratio, NOT_DUPLICATE_PIXEL_RATIO)
