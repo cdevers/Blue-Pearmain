@@ -960,6 +960,26 @@ def _prune_stale_groups(conn: sqlite3.Connection, dry_run: bool = True) -> dict[
                     (linked, gid),
                 )
 
+    # Safety net: clear any photos whose duplicate_group_id points to a group
+    # that no longer exists (can arise when a group is deleted outside prune,
+    # or when photo_count matched linked_count but the group was later removed).
+    dangling = conn.execute("""
+        SELECT p.id FROM photos p
+        WHERE p.duplicate_group_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM duplicate_groups dg WHERE dg.id = p.duplicate_group_id
+          )
+    """).fetchall()
+    if dangling:
+        links_cleared += len(dangling)
+        if not dry_run:
+            for row in dangling:
+                conn.execute(
+                    "UPDATE photos SET duplicate_group_id = NULL, duplicate_role = NULL"
+                    " WHERE id = ?",
+                    (row["id"],),
+                )
+
     if not dry_run:
         conn.commit()
 
