@@ -141,6 +141,7 @@
 .badge-reupload           { background: #6f42c1; color: #fff; }
 .badge-reupload_uncertain { background: #fd7e14; color: #fff; }
 .badge-edit_pair          { background: #4a2800; color: #f5a623; }
+.badge-local_duplicate    { background: #1e1030; color: #c084fc; }
 
 .empty-state {
   text-align: center;
@@ -305,7 +306,7 @@
       </div>
 
       <div class="dup-actions">
-        {% if section.type in ('snapbridge', 'edit_pair', 'device_upload', 'reupload') %}
+        {% if section.type in ('snapbridge', 'edit_pair', 'local_duplicate', 'device_upload', 'reupload') %}
         <button class="btn btn-primary"
                 onclick="resolveGroup({{ group.id }}, this)">
           ✓ Confirm resolution

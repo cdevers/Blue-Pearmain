@@ -474,10 +474,11 @@ def duplicates() -> str:
             WHERE dg.resolved = 0
             ORDER BY
                 CASE dg.group_type
-                    WHEN 'snapbridge'    THEN 0
-                    WHEN 'edit_pair'     THEN 1
-                    WHEN 'device_upload' THEN 2
-                    ELSE 3
+                    WHEN 'snapbridge'      THEN 0
+                    WHEN 'edit_pair'       THEN 1
+                    WHEN 'local_duplicate' THEN 2
+                    WHEN 'device_upload'   THEN 3
+                    ELSE 4
                 END,
                 dg.id,
                 CASE p.duplicate_role
@@ -578,6 +579,13 @@ def duplicates() -> str:
             "Edit pair",
             "Same filename and timestamp, different content — typically an original and an edited, "
             "cropped, or colour-corrected version. Use 'Not a duplicate' if you want to keep both.",
+        ),
+        (
+            "local_duplicate",
+            "Local duplicate",
+            "Same image imported multiple times into your Photos library. "
+            "One copy is already on Flickr; the others were never uploaded. "
+            "Use 'Not a duplicate' to dismiss from review.",
         ),
         (
             "device_upload",
@@ -1406,20 +1414,31 @@ def rate_photo(photo_id: int) -> _JsonResp:
 # Thumbnail serving
 # ---------------------------------------------------------------------------
 
+# Sentinel written to thumbnail_path when no derivative exists on disk.
+# Prevents repeated filesystem probing for permanently-missing derivatives.
+# Clear this value manually to force re-probing (e.g. after Photos regenerates
+# derivatives for an import).
+_SENTINEL_NO_DERIVATIVE = "__none__"
+
 
 @app.route("/thumb/<int:photo_id>")
 def thumb(photo_id: int) -> ResponseReturnValue:
     """
     Serve a thumbnail. Priority order:
-      1. Local file (Photos derivative or downloaded Flickr thumb)
-      2. Stored URL (redirect to Flickr CDN)
-      3. Flickr URL constructed on the fly from flickr_id/secret/server
-      4. Placeholder SVG
+      1. Stored URL (redirect to CDN)
+      2. Local file (thumbnail_path on disk)
+      3. Live derivative lookup (uuid → Photos library):
+         - Hit: writes real path to DB, serves file.
+         - Miss: writes '__none__' sentinel to DB so future requests
+           skip filesystem probing without probing all three paths again.
+      4. Flickr URL constructed on the fly from flickr_id/secret/server
+      5. Placeholder SVG
     """
     row = (
         db()
         .conn.execute(
-            "SELECT thumbnail_path, flickr_id, flickr_secret, flickr_server FROM photos WHERE id = ?",
+            "SELECT thumbnail_path, flickr_id, flickr_secret, flickr_server, uuid"
+            " FROM photos WHERE id = ?",
             (photo_id,),
         )
         .fetchone()
@@ -1434,13 +1453,40 @@ def thumb(photo_id: int) -> ResponseReturnValue:
     if path.startswith("http"):
         return redirect(path)
 
-    # 2. Local file
-    if path:
+    # 2. Local file (skip sentinel value)
+    if path and path != _SENTINEL_NO_DERIVATIVE:
         p = Path(path)
         if p.exists():
             return send_file(str(p), mimetype="image/jpeg")
 
-    # 3. Construct Flickr URL on the fly if we have the pieces
+    # 3. Live derivative lookup from Photos library.
+    #    Skipped when path == _SENTINEL_NO_DERIVATIVE (known miss).
+    uuid = row["uuid"] or ""
+    if uuid and path != _SENTINEL_NO_DERIVATIVE:
+        try:
+            library_path = str(Path(_config.get("photos_library", {}).get("path", "")).expanduser())
+            if library_path and library_path != ".":
+                from poller.thumbnailer import derivative_path as _derivative_path
+
+                deriv = _derivative_path(uuid, library_path)
+                if deriv:
+                    db().conn.execute(
+                        "UPDATE photos SET thumbnail_path = ? WHERE id = ?",
+                        (deriv, photo_id),
+                    )
+                    db().conn.commit()
+                    return send_file(deriv, mimetype="image/jpeg")
+                else:
+                    # Write sentinel: no derivative found; skip probing next time.
+                    db().conn.execute(
+                        "UPDATE photos SET thumbnail_path = ? WHERE id = ?",
+                        (_SENTINEL_NO_DERIVATIVE, photo_id),
+                    )
+                    db().conn.commit()
+        except OSError:
+            pass  # Photos library inaccessible; fall through to Flickr/placeholder
+
+    # 4. Construct Flickr URL on the fly if we have the pieces
     flickr_id = row["flickr_id"] or ""
     secret = row["flickr_secret"] or ""
     server = row["flickr_server"] or ""
@@ -1448,8 +1494,8 @@ def thumb(photo_id: int) -> ResponseReturnValue:
         url = f"https://live.staticflickr.com/{server}/{flickr_id}_{secret}_b.jpg"
         return redirect(url)
 
-    # 4. Placeholder
-    label = "not downloaded" if path else "no preview"
+    # 5. Placeholder
+    label = "no preview"
     return _placeholder_svg(label)
 
 
