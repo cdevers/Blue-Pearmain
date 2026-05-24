@@ -474,10 +474,11 @@ def duplicates() -> str:
             WHERE dg.resolved = 0
             ORDER BY
                 CASE dg.group_type
-                    WHEN 'snapbridge'    THEN 0
-                    WHEN 'edit_pair'     THEN 1
-                    WHEN 'device_upload' THEN 2
-                    ELSE 3
+                    WHEN 'snapbridge'      THEN 0
+                    WHEN 'edit_pair'       THEN 1
+                    WHEN 'local_duplicate' THEN 2
+                    WHEN 'device_upload'   THEN 3
+                    ELSE 4
                 END,
                 dg.id,
                 CASE p.duplicate_role
@@ -578,6 +579,13 @@ def duplicates() -> str:
             "Edit pair",
             "Same filename and timestamp, different content — typically an original and an edited, "
             "cropped, or colour-corrected version. Use 'Not a duplicate' if you want to keep both.",
+        ),
+        (
+            "local_duplicate",
+            "Local duplicate",
+            "Same image imported multiple times into your Photos library. "
+            "One copy is already on Flickr; the others were never uploaded. "
+            "Use 'Not a duplicate' to dismiss from review.",
         ),
         (
             "device_upload",
