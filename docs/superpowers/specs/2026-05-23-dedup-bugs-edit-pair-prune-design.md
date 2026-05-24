@@ -1,7 +1,7 @@
 # Duplicate Detection Bug Fixes — `edit_pair` category and stale group cleanup
 
 **Date:** 2026-05-23  
-**Status:** Approved — ready for implementation plan  
+**Status:** ✓ Done — implemented in commits on 2026-05-23  
 **Related issues:** [#129](https://github.com/cdevers/Blue-Pearmain/issues/129)
 
 ---

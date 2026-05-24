@@ -56,7 +56,12 @@ python -m pytest tests/ -q
 
 ## Deduplication
 
-- Duplicate detection logic: Snapbridge, device-upload, and uncertain classification
+- Duplicate detection logic: Snapbridge (DSC_* prefix required), edit_pair (non-DSC_* original+edit), device-upload, and uncertain classification
+- `_is_snapbridge_pair` DSC_ filename guard: IMG_* pairs are not Snapbridge even with different fingerprints/dimensions
+- `_is_edit_pair`: non-DSC_* pairs with differing fingerprints and pixel counts → `edit_pair`; all photos placed in review (no auto-discard)
+- `_write_groups` preserve-resolved invariant: re-running `--write` does not reset `resolved=1` groups
+- `_prune_stale_groups`: zombie groups (0–1 linked photos) deleted + dangling FKs cleared; stale `photo_count` repaired; dry-run by default; safety-net sweep for dangling `duplicate_group_id` refs
+- Post-prune invariants: no unresolved group with < 2 linked photos; `photo_count` matches actual linked count; no photo with dangling `duplicate_group_id`
 - Duplicates UI merge action: merging Flickr-only donor records into Photos-linked recipients to reconcile split records
 
 ## Orphan linking
