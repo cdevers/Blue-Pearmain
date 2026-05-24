@@ -758,7 +758,7 @@ Replace with:
 ```bash
 python -m pytest tests/ -q
 ```
-Expected: 1100 passed (unchanged — UI edits add no tests).
+Expected: 1102 passed (unchanged — UI edits add no tests).
 
 - [ ] **Step 5.6: Commit**
 
@@ -835,7 +835,7 @@ to:
 git add README.md docs/testing.md docs/superpowers/specs/2026-05-23-local-duplicate-thumbnails-design.md
 git commit -m "docs: update test count and coverage for #130
 
-1100 tests. Adds local_duplicate classifier and thumbnail derivative
+1102 tests. Adds local_duplicate classifier and thumbnail derivative
 path coverage to docs/testing.md.
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
