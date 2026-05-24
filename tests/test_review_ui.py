@@ -1439,3 +1439,102 @@ class TestReuploadDuplicatesUI:
         c, _, _ = client_with_reupload_uncertain_group
         resp = c.get("/duplicates")
         assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Thumb route — live derivative fallback
+# ---------------------------------------------------------------------------
+
+
+def _make_thumb_test_db(tmp_path, uuid):
+    """Helper: create an isolated DB with one Photos-only record."""
+    test_db = Database(Path(tmp_path) / "thumb_test.db")
+    test_db.upsert_photo(
+        {
+            "uuid": uuid,
+            "original_filename": "IMG_0001.JPG",
+            "privacy_state": "candidate_public",
+            "apple_persons": [],
+            "apple_labels": [],
+        }
+    )
+    photo_id = test_db.conn.execute("SELECT id FROM photos WHERE uuid = ?", (uuid,)).fetchone()[
+        "id"
+    ]
+    return test_db, photo_id
+
+
+def test_thumb_live_fallback_writes_thumbnail_path(tmp_path):
+    """
+    Photo with uuid but no thumbnail_path: if a derivative file exists in the
+    Photos library, /thumb/<id> serves it and writes thumbnail_path to the DB.
+    """
+    import reviewer.app as _app
+
+    uuid = "FFFF1234-0000-0000-0000-000000000000"
+    shard = "f"
+
+    # Create a minimal JPEG derivative on disk
+    deriv_dir = tmp_path / "resources" / "derivatives" / "masters" / shard
+    deriv_dir.mkdir(parents=True)
+    deriv = deriv_dir / f"{uuid}_4_5005_c.jpeg"
+    # Minimal valid JPEG bytes (SOI marker + EOI marker)
+    deriv.write_bytes(b"\xff\xd8\xff\xd9")
+
+    test_db, photo_id = _make_thumb_test_db(tmp_path, uuid)
+
+    old_db = _app._db
+    old_config = _app._config.copy()
+    _app._db = test_db
+    _app._config = {"photos_library": {"path": str(tmp_path)}}
+    _app.app.config["TESTING"] = True
+    _app.app.config["SECRET_KEY"] = "test-secret"
+
+    try:
+        with _app.app.test_client() as c:
+            resp = c.get(f"/thumb/{photo_id}")
+        assert resp.status_code == 200
+        assert resp.content_type == "image/jpeg"
+        # thumbnail_path written back to DB
+        row = test_db.conn.execute(
+            "SELECT thumbnail_path FROM photos WHERE id = ?", (photo_id,)
+        ).fetchone()
+        assert row["thumbnail_path"] == str(deriv)
+    finally:
+        _app._db = old_db
+        _app._config = old_config
+
+
+def test_thumb_live_fallback_writes_sentinel_on_miss(tmp_path):
+    """
+    Photo with uuid but no thumbnail_path and no derivative on disk:
+    /thumb/<id> writes the '__none__' sentinel so future requests skip
+    the filesystem probe entirely.
+    """
+    import reviewer.app as _app
+
+    uuid = "EEEE1234-0000-0000-0000-000000000000"
+
+    # No derivative created on disk — tmp_path is an empty Photos library.
+    test_db, photo_id = _make_thumb_test_db(tmp_path, uuid)
+
+    old_db = _app._db
+    old_config = _app._config.copy()
+    _app._db = test_db
+    _app._config = {"photos_library": {"path": str(tmp_path)}}
+    _app.app.config["TESTING"] = True
+    _app.app.config["SECRET_KEY"] = "test-secret"
+
+    try:
+        with _app.app.test_client() as c:
+            resp = c.get(f"/thumb/{photo_id}")
+        # Falls through to placeholder SVG (no derivative, no Flickr metadata)
+        assert resp.status_code == 200
+        # Sentinel written to DB so future requests skip probing
+        row = test_db.conn.execute(
+            "SELECT thumbnail_path FROM photos WHERE id = ?", (photo_id,)
+        ).fetchone()
+        assert row["thumbnail_path"] == "__none__"
+    finally:
+        _app._db = old_db
+        _app._config = old_config
