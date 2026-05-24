@@ -6,7 +6,7 @@ Run the suite:
 python -m pytest tests/ -q
 ```
 
-639 tests. Coverage is grouped below by area.
+1102 tests. Coverage is grouped below by area.
 
 ---
 
@@ -63,6 +63,7 @@ python -m pytest tests/ -q
 - `_prune_stale_groups`: zombie groups (0–1 linked photos) deleted + dangling FKs cleared; stale `photo_count` repaired; dry-run by default; safety-net sweep for dangling `duplicate_group_id` refs
 - Post-prune invariants: no unresolved group with < 2 linked photos; `photo_count` matches actual linked count; no photo with dangling `duplicate_group_id`
 - Duplicates UI merge action: merging Flickr-only donor records into Photos-linked recipients to reconcile split records
+- `local_duplicate` classifier: same-fingerprint groups (same image imported into Apple Photos multiple times, null/empty fingerprints excluded); all photos placed in review, no keeper assigned; waterfall invariant (local_duplicate fires before device_upload)
 
 ## Orphan linking
 
@@ -75,6 +76,11 @@ python -m pytest tests/ -q
 - Sync-album-collections: folder tree reading, Collection creation, `editSets` API calls, dry-run mode, `--remove` with confirmation
 - Name-sync baseline tracking: `flickr_name` column, `set_album_flickr_name`, `set_folder_flickr_name`
 - Sync-names-from-flickr: rename detection, Photos-wins conflict policy, dry-run, AppleScript rename, folder/collection renames
+
+## Thumbnail serving
+
+- `derivative_path`: tries three candidate paths in order — `resources/derivatives/masters/{shard}/`, `resources/derivatives/{shard}/`, and `scopes/momentshared/resources/derivatives/masters/{shard}/`; returns first that exists on disk, or None
+- `/thumb/<id>` live fallback: Photos-only records with no `thumbnail_path` resolved at request time via `derivative_path`; real path written back to DB on hit; `"__none__"` sentinel written on miss so future requests skip filesystem probing; OSError guard prevents library-inaccessibility crashes
 
 ## Review UI
 

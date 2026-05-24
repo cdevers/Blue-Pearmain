@@ -1,7 +1,7 @@
 # Local Photos thumbnails + `local_duplicate` classifier
 
 **Date:** 2026-05-23  
-**Status:** Approved — ready for implementation plan  
+**Status:** ✓ Done — implemented in commits on 2026-05-23  
 **Related issue:** [#130](https://github.com/cdevers/Blue-Pearmain/issues/130)
 
 ---
