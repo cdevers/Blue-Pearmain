@@ -1019,6 +1019,7 @@ class Database:
     def get_album_membership_for_photos(self, photo_ids: list[int]) -> dict[int, set[int]]:
         """
         Return {album_id: {photo_id, ...}} for all active memberships among the given photo_ids.
+        Albums with no active membership among photo_ids are absent from the result.
         Used to show current membership state in the Add-to-album panel.
         Empty list input returns empty dict.
         """

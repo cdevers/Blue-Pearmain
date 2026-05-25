@@ -122,8 +122,8 @@ class TestGetAlbumMembershipForPhotos(unittest.TestCase):
         self.db.upsert_photo_album(self.p1, self.a1)
         self.db.upsert_photo_album(self.p2, self.a1)
         result = self.db.get_album_membership_for_photos([self.p1])
-        if self.a1 in result:
-            self.assertNotIn(self.p2, result[self.a1])
+        self.assertIn(self.a1, result)  # p1 is a member, so album must appear
+        self.assertNotIn(self.p2, result[self.a1])  # p2 was not queried
 
 
 class TestBulkUpsertPhotoAlbums(unittest.TestCase):
