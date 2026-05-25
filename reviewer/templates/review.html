@@ -780,7 +780,7 @@ async function quickDecide(id, decision, card) {
   // Push tags for make_public/keep_private/friends/family; skip gets nothing
   const ok = await decide(id, decision, decision !== 'skip');
   if (!ok) return;
-  if (decision === 'make_public') card.classList.add('decided-pub');
+  if (decision === 'make_public' || decision === 'confirm_public') card.classList.add('decided-pub');
   else if (decision === 'keep_private') card.classList.add('decided-prv');
   else if (['make_friends','make_family','make_friends_family'].includes(decision))
     card.classList.add('decided-pub');
@@ -944,6 +944,10 @@ async function decideWithOverride(id, note, card) {
     const cards = [...document.querySelectorAll('.photo-card')];
     const idx = cards.indexOf(card);
     if (idx >= 0 && idx < cards.length - 1) selectCard(cards[idx + 1]);
+    // Advance mobile single-card view if active
+    if (window.innerWidth <= 640 && typeof showMobileCard === 'function') {
+      showMobileCard(idx + 1);
+    }
   } else {
     toast('Error: ' + (data.error || 'unknown'), 'err');
   }
