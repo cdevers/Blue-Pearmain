@@ -151,6 +151,24 @@ class TestAlbumRename:
         )
         assert resp.status_code == 404
 
+    def test_rename_twice_before_sync(self, client_and_albums):
+        """Rename a second time before sync runs — DB holds the latest name."""
+        c, a1, _, db = client_and_albums
+        c.patch(
+            f"/api/albums/{a1}",
+            data=json.dumps({"name": "First Rename"}),
+            content_type="application/json",
+        )
+        c.patch(
+            f"/api/albums/{a1}",
+            data=json.dumps({"name": "Second Rename"}),
+            content_type="application/json",
+        )
+        row = db.conn.execute("SELECT name, flickr_name FROM albums WHERE id = ?", (a1,)).fetchone()
+        assert row["name"] == "Second Rename"
+        # flickr_name unchanged — still reflects last Flickr push, not the pending rename
+        assert row["flickr_name"] != "Second Rename" or row["flickr_name"] is None
+
 
 class TestAlbumDelete:
     def test_delete_valid(self, client_and_albums):
@@ -175,11 +193,13 @@ class TestAlbumDelete:
         assert resp.status_code == 404
         assert resp.get_json()["ok"] is False
 
-    def test_delete_already_deleted_returns_404(self, client_and_albums):
+    def test_delete_already_deleted_is_idempotent(self, client_and_albums):
+        """DELETE on an already-deleted album is a no-op, not an error."""
         c, a1, _, db = client_and_albums
         db.mark_album_deleted(a1)
         resp = c.delete(f"/api/albums/{a1}")
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -198,9 +218,12 @@ Find the `get_all_albums_with_counts` method (around line 1005). Add `rename_alb
     def rename_album(self, album_id: int, name: str) -> None:
         """Update the album's display name and timestamp.
 
-        The next bp sync-albums run calls sync_album_titles() which pushes
-        albums.name to the Flickr photoset title for all albums with a
-        flickr_set_id — no extra flag needed.
+        flickr_name is intentionally NOT updated here — it holds the last
+        name successfully pushed to Flickr. After this call, name != flickr_name
+        signals a pending rename to any tooling that inspects both columns.
+        sync_album_titles() (called by bp sync-albums) pushes albums.name to
+        the Flickr photoset title and then calls set_album_flickr_name() to
+        bring flickr_name back in sync.
         """
         self.conn.execute(
             "UPDATE albums SET name = ?, updated_at = ? WHERE id = ?",
@@ -243,13 +266,16 @@ def api_album_rename(album_id: int) -> _JsonResp:
 
 @app.route("/api/albums/<int:album_id>", methods=["DELETE"])
 def api_album_delete(album_id: int) -> _JsonResp:
+    # Check the album row exists at all (regardless of deleted_at)
     row = db().conn.execute(
-        "SELECT id, name FROM albums WHERE id = ? AND deleted_at IS NULL", (album_id,)
+        "SELECT id, deleted_at FROM albums WHERE id = ?", (album_id,)
     ).fetchone()
     if not row:
         return jsonify({"ok": False, "error": "album not found"}), 404
 
-    db().mark_album_deleted(album_id)
+    # Idempotent: already-deleted albums are a no-op, not an error
+    if row["deleted_at"] is None:
+        db().mark_album_deleted(album_id)
     return jsonify({"ok": True})
 ```
 
@@ -259,7 +285,7 @@ def api_album_delete(album_id: int) -> _JsonResp:
 cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_album_management_api.py -v
 ```
 
-Expected: all 10 tests PASS.
+Expected: all 11 tests PASS.
 
 - [ ] **Step 6: Run full suite**
 
@@ -267,7 +293,7 @@ Expected: all 10 tests PASS.
 cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/ -q
 ```
 
-Expected: all tests pass (1195 + 10 new = 1205 passing).
+Expected: all tests pass (1195 + 11 new = 1206 passing).
 
 - [ ] **Step 7: Run lint**
 
