@@ -65,7 +65,7 @@
     </thead>
     <tbody>
       {% for album in albums %}
-      <tr data-album-id="{{ album.id }}" data-album-name="{{ album.name | e }}">
+      <tr data-album-id="{{ album.id }}" data-album-name="{{ album.name }}">
         <td class="album-name-cell">
           <span class="album-name-display">{{ album.name }}</span>
           <span class="album-name-edit" style="display:none">
@@ -134,14 +134,16 @@ async function saveRename(el) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
     });
-    const data = await r.json();
+    let data = {};
+    try { data = await r.json(); } catch (_) {}
     if (r.ok) {
       row.dataset.albumName = data.name;
       row.querySelector('.album-name-display').textContent = data.name;
+      saveBtn.disabled = false;
       cancelRename(el);
       toast('Album renamed', 'ok');
     } else {
-      toast('Error: ' + (data.error || 'unknown'), 'err');
+      toast('Error: ' + (data.error || `HTTP ${r.status}`), 'err');
       saveBtn.disabled = false;
     }
   } catch (e) {
@@ -169,12 +171,14 @@ async function confirmDelete(btn) {
   btn.disabled = true;
   try {
     const r = await fetch(`/api/albums/${albumId}`, { method: 'DELETE' });
-    const data = await r.json();
+    let data = {};
+    try { data = await r.json(); } catch (_) {}
     if (r.ok) {
       row.remove();
+      if (!document.querySelector('.albums-table tbody tr')) { location.reload(); }
       toast('Album deleted — Flickr photoset will be removed on next sync', 'ok');
     } else {
-      toast('Error: ' + (data.error || 'unknown'), 'err');
+      toast('Error: ' + (data.error || `HTTP ${r.status}`), 'err');
       cancelDelete(btn);
     }
   } catch (e) {
