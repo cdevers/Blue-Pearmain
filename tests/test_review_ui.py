@@ -260,8 +260,8 @@ class TestPhotoDetailBackLink:
         html = resp.data.decode()
         assert "Back to Library" in html
         assert "/library?album_id=3" in html
-        # Should NOT contain the review-queue back link when ?back= is set
-        assert "url_for" not in html  # rendered HTML never contains template syntax
+        # Should NOT contain the review-queue back-link anchor when ?back= is set
+        assert 'class="back-link">← Back<' not in html  # review-queue back link should NOT appear
 
     def test_no_back_param_renders_review_link(self, client_with_albums):
         """No ?back= → back link still points to the review queue."""
