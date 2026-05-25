@@ -181,6 +181,72 @@
     #toast.ok   { border-color: var(--green); color: #66bb6a; }
     #toast.err  { border-color: var(--red);   color: #e57373; }
 
+    /* ── Mobile nav ─────────────────────────────────────── */
+    /* Hamburger hidden by default (desktop shows flat nav) */
+    #nav-hamburger { display: none; }
+
+    @media (max-width: 640px) {
+      /* Hide all nav links and keyboard hints on mobile */
+      nav a { display: none; }
+      .nav-key { display: none; }
+
+      /* Show hamburger button */
+      #nav-hamburger {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text);
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
+        flex-shrink: 0;
+        margin-left: 4px;
+      }
+      #nav-hamburger:hover { background: var(--surface); border-color: #3a3a3a; }
+
+      /* Nav needs relative positioning for the drawer overlay */
+      nav { position: relative; }
+
+      /* Dropdown drawer */
+      #mobile-nav-drawer {
+        display: none;
+        position: absolute;
+        top: 48px;     /* matches nav height */
+        left: 0;
+        right: 0;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        z-index: 200;
+      }
+      #mobile-nav-drawer.open { display: block; }
+
+      #mobile-nav-drawer a {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 20px;
+        color: var(--muted);
+        font-size: 15px;
+        border-bottom: 1px solid var(--border);
+        text-decoration: none;
+      }
+      #mobile-nav-drawer a:last-child { border-bottom: none; }
+      #mobile-nav-drawer a.active    { color: var(--text); font-weight: 600; }
+      #mobile-nav-drawer a:hover     { color: var(--text); text-decoration: none; }
+
+      /* Reduce base container padding on mobile */
+      .container { padding: 12px; }
+
+      /* Global tap target size for all .btn elements (applies to every page) */
+      .btn { min-height: 44px; }
+    }
+
     {% block extra_style %}{% endblock %}
   </style>
 </head>
@@ -197,6 +263,35 @@
   <a href="{{ url_for('proposals') }}" {% if request.endpoint == 'proposals' %}class="active"{% endif %}><kbd class="nav-key">7</kbd>Proposals <span id="nav-proposal-count" class="nav-badge" style="display:none"></span></a>
   <span class="spacer"></span>
   <span class="stats-pill" id="nav-stats">Loading…</span>
+  <button id="nav-hamburger" aria-label="Open navigation" aria-expanded="false">☰</button>
+
+  <!-- Mobile nav drawer (shown on ≤640px via hamburger) -->
+  <div id="mobile-nav-drawer">
+    <a href="{{ url_for('dashboard') }}" {% if request.endpoint == 'dashboard' %}class="active"{% endif %}>
+      Dashboard
+    </a>
+    <a href="{{ url_for('review', state='candidate_public') }}" {% if request.endpoint == 'review' %}class="active"{% endif %}>
+      Review
+    </a>
+    <a href="{{ url_for('faces') }}" {% if request.endpoint == 'faces' %}class="active"{% endif %}>
+      Faces
+    </a>
+    <a href="{{ url_for('zones') }}" {% if request.endpoint == 'zones' %}class="active"{% endif %}>
+      Zones
+    </a>
+    <a href="{{ url_for('duplicates') }}" {% if request.endpoint == 'duplicates' %}class="active"{% endif %}>
+      <span>Duplicates</span>
+      <span id="drawer-dup-count" class="nav-badge" style="display:none"></span>
+    </a>
+    <a href="{{ url_for('conflicts') }}" {% if request.endpoint == 'conflicts' %}class="active"{% endif %}>
+      <span>Conflicts</span>
+      <span id="drawer-conflict-count" class="nav-badge" style="display:none"></span>
+    </a>
+    <a href="{{ url_for('proposals') }}" {% if request.endpoint == 'proposals' %}class="active"{% endif %}>
+      <span>Proposals</span>
+      <span id="drawer-proposal-count" class="nav-badge" style="display:none"></span>
+    </a>
+  </div>
 </nav>
 
 <div id="toast"></div>
@@ -248,20 +343,45 @@ async function refreshStats() {
   const el = document.getElementById('nav-stats');
   const review = (s.by_state?.needs_review || 0) + (s.by_state?.candidate_public || 0);
   el.textContent = `${review.toLocaleString()} to review`;
-  const dupBadge = document.getElementById('nav-dup-count');
-  const dupCount = s.unresolved_duplicates || 0;
-  dupBadge.textContent = dupCount;
-  dupBadge.style.display = dupCount > 0 ? '' : 'none';
-  const conflictBadge = document.getElementById('nav-conflict-count');
-  const conflictCount = s.metadata_conflicts?.total || 0;
-  conflictBadge.textContent = conflictCount;
-  conflictBadge.style.display = conflictCount > 0 ? '' : 'none';
-  const propBadge = document.getElementById('nav-proposal-count');
-  const propCount = s.proposals?.total || 0;
-  propBadge.textContent = propCount;
-  propBadge.style.display = propCount > 0 ? '' : 'none';
+  function setBadge(navId, drawerId, count) {
+    const nav = document.getElementById(navId);
+    const drawer = document.getElementById(drawerId);
+    if (nav) { nav.textContent = count; nav.style.display = count > 0 ? '' : 'none'; }
+    if (drawer) { drawer.textContent = count; drawer.style.display = count > 0 ? '' : 'none'; }
+  }
+  setBadge('nav-dup-count',      'drawer-dup-count',      s.unresolved_duplicates || 0);
+  setBadge('nav-conflict-count', 'drawer-conflict-count', s.metadata_conflicts?.total || 0);
+  setBadge('nav-proposal-count', 'drawer-proposal-count', s.proposals?.total || 0);
 }
 refreshStats();
+
+// Mobile hamburger drawer
+(function() {
+  const btn = document.getElementById('nav-hamburger');
+  const drawer = document.getElementById('mobile-nav-drawer');
+  if (!btn || !drawer) return;
+
+  btn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    const open = drawer.classList.toggle('open');
+    btn.textContent = open ? '✕' : '☰';
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+
+  // Close on outside tap
+  document.addEventListener('click', function() {
+    drawer.classList.remove('open');
+    btn.textContent = '☰';
+    btn.setAttribute('aria-expanded', 'false');
+  });
+
+  // Close on nav link tap (navigation fires anyway, but close cleanly)
+  drawer.querySelectorAll('a').forEach(a => {
+    a.addEventListener('click', function() {
+      drawer.classList.remove('open');
+    });
+  });
+})();
 
 // Global keyboard shortcuts: 1-6 navigate tabs, R reloads
 (function() {
