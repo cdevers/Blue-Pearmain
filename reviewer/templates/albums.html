@@ -19,6 +19,35 @@
 .albums-table a { color: var(--accent); text-decoration: none; font-size: 12px; }
 .albums-table a:hover { text-decoration: underline; }
 .albums-empty { color: var(--muted); padding: 40px 0; text-align: center; font-size: 14px; }
+
+/* ── Rename / delete controls ─────────────────────────── */
+.btn-icon {
+  background: none; border: none; cursor: pointer;
+  color: var(--muted); font-size: 14px; padding: 2px 4px; border-radius: 3px;
+}
+.btn-icon:hover { color: var(--text); }
+.btn-icon.btn-destructive:hover { color: #ff7a7a; }
+.rename-input {
+  font-size: 13px; padding: 2px 6px;
+  border: 1px solid var(--border); border-radius: 3px;
+  background: var(--surface); color: var(--text);
+  width: 200px;
+}
+.btn-save {
+  padding: 2px 8px; border-radius: 3px; font-size: 12px;
+  background: var(--accent); color: #fff; border: none; cursor: pointer;
+}
+.btn-cancel-sm {
+  padding: 2px 8px; border-radius: 3px; font-size: 12px;
+  background: none; border: 1px solid var(--border); color: var(--muted); cursor: pointer;
+}
+.confirm-yes {
+  padding: 2px 8px; border-radius: 3px; font-size: 12px;
+  background: #aa2222; color: #fff; border: none; cursor: pointer;
+}
+.album-actions-normal { display: flex; align-items: center; gap: 8px; }
+.album-actions-confirm { display: none; align-items: center; gap: 8px; }
+.album-actions-confirm span { color: var(--muted); font-size: 12px; }
 </style>
 {% endblock %}
 
@@ -36,10 +65,28 @@
     </thead>
     <tbody>
       {% for album in albums %}
-      <tr>
-        <td>{{ album.name }}</td>
+      <tr data-album-id="{{ album.id }}" data-album-name="{{ album.name | e }}">
+        <td class="album-name-cell">
+          <span class="album-name-display">{{ album.name }}</span>
+          <span class="album-name-edit" style="display:none">
+            <input type="text" class="rename-input">
+            <button class="btn-save" onclick="saveRename(this)">Save</button>
+            <button class="btn-cancel-sm" onclick="cancelRename(this)">Cancel</button>
+          </span>
+        </td>
         <td class="count">{{ album.photo_count }}</td>
-        <td><a href="{{ url_for('library', album_id=album.id) }}">View in library →</a></td>
+        <td>
+          <span class="album-actions-normal">
+            <button class="btn-icon" onclick="startRename(this)" title="Rename album">✏</button>
+            <a href="{{ url_for('library', album_id=album.id) }}">View in library →</a>
+            <button class="btn-icon btn-destructive" onclick="startDelete(this)" title="Delete album">🗑</button>
+          </span>
+          <span class="album-actions-confirm">
+            <span>Delete?</span>
+            <button class="confirm-yes" onclick="confirmDelete(this)">Confirm</button>
+            <button class="btn-cancel-sm" onclick="cancelDelete(this)">Cancel</button>
+          </span>
+        </td>
       </tr>
       {% endfor %}
     </tbody>
@@ -48,4 +95,92 @@
   <p class="albums-empty">No albums yet. Albums are imported from Apple Photos automatically.</p>
   {% endif %}
 </div>
+
+<script>
+// ── Album rename ──────────────────────────────────────────────────────
+function startRename(btn) {
+  const row = btn.closest('tr');
+  const input = row.querySelector('.rename-input');
+  input.value = row.dataset.albumName;
+  input.onkeydown = function(e) {
+    if (e.key === 'Enter')  { e.preventDefault(); saveRename(input); }
+    if (e.key === 'Escape') { cancelRename(input); }
+  };
+  row.querySelector('.album-name-display').style.display = 'none';
+  row.querySelector('.album-name-edit').style.display = '';
+  row.querySelector('.album-actions-normal').style.display = 'none';
+  input.focus();
+  input.select();
+}
+
+function cancelRename(el) {
+  const row = el.closest('tr');
+  row.querySelector('.album-name-edit').style.display = 'none';
+  row.querySelector('.album-name-display').style.display = '';
+  row.querySelector('.album-actions-normal').style.display = 'flex';
+}
+
+async function saveRename(el) {
+  const row = el.closest('tr');
+  const albumId = parseInt(row.dataset.albumId);
+  const input = row.querySelector('.rename-input');
+  const name = input.value.trim();
+  if (!name) { toast('Album name cannot be empty', 'err'); return; }
+  const saveBtn = row.querySelector('.btn-save');
+  saveBtn.disabled = true;
+  try {
+    const r = await fetch(`/api/albums/${albumId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const data = await r.json();
+    if (r.ok) {
+      row.dataset.albumName = data.name;
+      row.querySelector('.album-name-display').textContent = data.name;
+      cancelRename(el);
+      toast('Album renamed', 'ok');
+    } else {
+      toast('Error: ' + (data.error || 'unknown'), 'err');
+      saveBtn.disabled = false;
+    }
+  } catch (e) {
+    toast('Network error — try again', 'err');
+    saveBtn.disabled = false;
+  }
+}
+
+// ── Album delete ──────────────────────────────────────────────────────
+function startDelete(btn) {
+  const row = btn.closest('tr');
+  row.querySelector('.album-actions-normal').style.display = 'none';
+  row.querySelector('.album-actions-confirm').style.display = 'flex';
+}
+
+function cancelDelete(btn) {
+  const row = btn.closest('tr');
+  row.querySelector('.album-actions-confirm').style.display = 'none';
+  row.querySelector('.album-actions-normal').style.display = 'flex';
+}
+
+async function confirmDelete(btn) {
+  const row = btn.closest('tr');
+  const albumId = parseInt(row.dataset.albumId);
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/albums/${albumId}`, { method: 'DELETE' });
+    const data = await r.json();
+    if (r.ok) {
+      row.remove();
+      toast('Album deleted — Flickr photoset will be removed on next sync', 'ok');
+    } else {
+      toast('Error: ' + (data.error || 'unknown'), 'err');
+      cancelDelete(btn);
+    }
+  } catch (e) {
+    toast('Network error — try again', 'err');
+    cancelDelete(btn);
+  }
+}
+</script>
 {% endblock %}
