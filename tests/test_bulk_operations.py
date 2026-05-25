@@ -560,3 +560,118 @@ class TestLibraryRoute:
     def test_library_pagination(self, lib_client):
         resp = lib_client.get("/library?page=1&per_page=2")
         assert resp.status_code == 200
+
+
+# ===========================================================================
+# Task 5 — POST /api/bulk-edit
+# ===========================================================================
+
+
+@pytest.fixture(scope="module")
+def bulk_client():
+    with tempfile.TemporaryDirectory() as tmp:
+        test_db = Database(Path(tmp) / "test.db")
+        for i in range(1, 4):
+            test_db.upsert_photo(
+                {
+                    "uuid": f"be-uuid-{i}",
+                    "flickr_id": f"be-flickr-{i}",
+                    "original_filename": f"BE_{i:04d}.JPG",
+                    "privacy_state": "already_public",
+                    "flickr_title": "Existing" if i == 1 else "",
+                    "flickr_description": "",
+                    "flickr_tags": json.dumps(["paris"] if i == 1 else []),
+                    "photos_tags": json.dumps([]),
+                    "apple_persons": [],
+                    "proposed_tags": [],
+                }
+            )
+        app_module._db = test_db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+        with app_module.app.test_client() as c:
+            yield c, test_db
+        app_module._db = None
+
+
+class TestBulkEditEndpoint:
+    def _post(self, client, payload):
+        return client.post(
+            "/api/bulk-edit",
+            json=payload,
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+
+    def test_bulk_edit_set_title_returns_ok(self, bulk_client):
+        c, db = bulk_client
+        ids = [r["id"] for r in db.library_photos()]
+        resp = self._post(c, {"field": "title", "value": "Test", "photo_ids": ids})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert "proposals_created" in data
+        assert "batch_id" in data
+
+    def test_bulk_edit_dry_run_returns_counts_not_proposals(self, bulk_client):
+        c, db = bulk_client
+        ids = [r["id"] for r in db.library_photos()]
+        resp = self._post(
+            c,
+            {
+                "field": "title",
+                "value": "Dry",
+                "photo_ids": ids,
+                "dry_run": True,
+                "skip_existing": True,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert "would_update" in data
+        assert "would_skip" in data
+        assert data.get("batch_id") is None
+
+    def test_bulk_edit_tags_add(self, bulk_client):
+        c, db = bulk_client
+        ids = [r["id"] for r in db.library_photos()]
+        db.conn.execute("DELETE FROM metadata_proposals")
+        db.conn.execute("DELETE FROM bulk_batches")
+        db.conn.commit()
+        resp = self._post(c, {"field": "tags_add", "tags": ["mfa-boston"], "photo_ids": ids})
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert data["proposals_created"] >= 1
+
+    def test_bulk_edit_filter_based_selection(self, bulk_client):
+        c, db = bulk_client
+        db.conn.execute("DELETE FROM metadata_proposals")
+        db.conn.execute("DELETE FROM bulk_batches")
+        db.conn.commit()
+        resp = self._post(
+            c,
+            {
+                "field": "tags_add",
+                "tags": ["london"],
+                "filter": {
+                    "status": "public",
+                    "date_from": None,
+                    "date_to": None,
+                    "album_id": None,
+                    "tag": None,
+                    "untitled": False,
+                },
+            },
+        )
+        data = resp.get_json()
+        assert data["ok"] is True
+
+    def test_bulk_edit_missing_field_returns_400(self, bulk_client):
+        c, _ = bulk_client
+        resp = self._post(c, {"value": "X", "photo_ids": [1]})
+        assert resp.status_code == 400
+
+    def test_bulk_edit_tags_requires_tags_list(self, bulk_client):
+        c, _ = bulk_client
+        resp = self._post(c, {"field": "tags_add", "photo_ids": [1]})
+        assert resp.status_code == 400

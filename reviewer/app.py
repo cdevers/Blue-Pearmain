@@ -44,7 +44,7 @@ from flask import (
 from flask.typing import ResponseReturnValue
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from db.db import Database
+from db.db import Database, _json_loads_safe as _parse_json_list
 from flickr.flickr_client import FlickrClient, FlickrError, FLICKR_ERR_NOT_FOUND
 
 log = logging.getLogger("blue-pearmain.reviewer")
@@ -1056,6 +1056,161 @@ def api_zone_delete(zone_id: int) -> _JsonResp:
     db().conn.execute("UPDATE geofence_zones SET active = 0 WHERE id = ?", (zone_id,))
     db().conn.commit()
     return jsonify({"ok": True})
+
+
+@app.route("/api/bulk-edit", methods=["POST"])
+def api_bulk_edit() -> _JsonResp:
+    """
+    Bulk-edit metadata across a set of photos.
+
+    Payload (JSON):
+      field        str   — 'title' | 'description' | 'tags_add' | 'tags_remove'
+      dry_run      bool  — if true, return counts without creating proposals
+      skip_existing bool — for title/description: skip photos that already have a value
+      value        str   — new text (for title/description)
+      tags         list  — tags to add/remove (for tag ops)
+      photo_ids    list  — explicit selection (mutually exclusive with filter)
+      filter       dict  — {date_from, date_to, album_id, tag, status, untitled}
+
+    Returns:
+      {ok, proposals_created, batch_id}               (commit)
+      {ok, would_update, would_skip, batch_id:null}   (dry_run)
+    """
+    data = request.get_json() or {}
+
+    field = data.get("field")
+    if field not in ("title", "description", "tags_add", "tags_remove"):
+        return jsonify(
+            {"ok": False, "error": "field must be title/description/tags_add/tags_remove"}
+        ), 400
+
+    is_tag_op = field in ("tags_add", "tags_remove")
+    value: str | None = data.get("value") if not is_tag_op else None
+    tags: list | None = data.get("tags") if is_tag_op else None
+
+    if is_tag_op and not isinstance(tags, list):
+        return jsonify({"ok": False, "error": "tags must be a list for tag operations"}), 400
+
+    dry_run = bool(data.get("dry_run", False))
+    skip_existing = bool(data.get("skip_existing", True))
+
+    # Resolve photo IDs
+    _filter = data.get("filter")
+    photo_ids: list[int]
+    filter_json: str | None = None
+
+    if _filter is not None:
+        filter_json = json.dumps(_filter)
+        photo_ids = db().library_photo_ids(
+            date_from=_filter.get("date_from"),
+            date_to=_filter.get("date_to"),
+            album_id=_filter.get("album_id"),
+            tag=_filter.get("tag"),
+            status=_filter.get("status"),
+            untitled_only=bool(_filter.get("untitled")),
+        )
+    elif isinstance(data.get("photo_ids"), list):
+        photo_ids = [int(i) for i in data["photo_ids"]]
+    else:
+        return jsonify({"ok": False, "error": "provide photo_ids or filter"}), 400
+
+    if not photo_ids:
+        return jsonify(
+            {
+                "ok": True,
+                "proposals_created": 0,
+                "batch_id": None,
+                "would_update": 0,
+                "would_skip": 0,
+            }
+        )
+
+    _db = db()
+
+    # For dry_run: compute counts without writing
+    if dry_run:
+        placeholders = ",".join("?" * len(photo_ids))
+        rows = _db.conn.execute(
+            f"""SELECT id, flickr_id, flickr_title, flickr_description,
+                       flickr_tags, photos_title
+                FROM photos
+                WHERE id IN ({placeholders}) AND flickr_id IS NOT NULL AND flickr_deleted = 0""",
+            photo_ids,
+        ).fetchall()
+
+        would_update = would_skip = 0
+        for row in rows:
+            if field == "title":
+                existing = (row["flickr_title"] or "").strip()
+                if skip_existing and existing:
+                    would_skip += 1
+                else:
+                    would_update += 1
+            elif field == "description":
+                existing = (row["flickr_description"] or "").strip()
+                if skip_existing and existing:
+                    would_skip += 1
+                else:
+                    would_update += 1
+            elif field == "tags_add":
+                current = _parse_json_list(row["flickr_tags"])
+                missing = [t for t in (tags or []) if t not in current]
+                if missing:
+                    would_update += 1
+                else:
+                    would_skip += 1
+            elif field == "tags_remove":
+                current = _parse_json_list(row["flickr_tags"])
+                present = [t for t in (tags or []) if t in current]
+                if present:
+                    would_update += 1
+                else:
+                    would_skip += 1
+
+        return jsonify(
+            {"ok": True, "would_update": would_update, "would_skip": would_skip, "batch_id": None}
+        )
+
+    # Commit path
+    operation_map = {
+        "title": "set_title",
+        "description": "set_description",
+        "tags_add": "tags_add",
+        "tags_remove": "tags_remove",
+    }
+    db_field_map: dict[str, str | None] = {
+        "title": "title",
+        "description": "description",
+        "tags_add": None,
+        "tags_remove": None,
+    }
+
+    # batch creation and proposal insertion are two separate SQLite commits.
+    # Clean up any orphan batch record if proposal insertion throws.
+    batch_id = _db.create_bulk_batch(
+        operation=operation_map[field],
+        field=db_field_map[field],
+        value=value,
+        tags=tags,
+        filter_json=filter_json,
+        photo_count=len(photo_ids),
+    )
+
+    try:
+        created = _db.insert_bulk_proposals(
+            batch_id=batch_id,
+            photo_ids=photo_ids,
+            field=field,
+            value=value,
+            tags=tags,
+            skip_existing=skip_existing,
+        )
+    except Exception:
+        _db.conn.execute("DELETE FROM bulk_batches WHERE id=?", (batch_id,))
+        _db.conn.commit()
+        return jsonify({"ok": False, "error": "proposal insertion failed"}), 500
+
+    return jsonify({"ok": True, "proposals_created": created, "batch_id": batch_id})
 
 
 @app.route("/api/stats")
