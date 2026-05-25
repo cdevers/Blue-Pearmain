@@ -6,6 +6,8 @@
 
 ---
 
+**Status:** ✓ Implemented in #131
+
 ## Overview
 
 Blue Pearmain's reviewer UI is desktop-first and breaks down on narrow phone screens: the nav bar overflows, buttons are too small to tap accurately, and keyboard-shortcut-driven workflows don't translate to touch. This spec covers the changes needed to make the UI usable on a phone without disrupting the existing desktop experience.
