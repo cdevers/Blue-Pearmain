@@ -71,6 +71,29 @@
   border-bottom: 2px solid #3a5fff;
 }
 .lib-edit-panel.visible { display: block; }
+
+/* ── Remove-album confirmation (inline in action bar) ────── */
+#remove-album-confirm {
+  display: flex; align-items: center; gap: 8px; font-size: 12px;
+}
+#remove-album-confirm button {
+  padding: 2px 8px; border-radius: 3px; font-size: 12px; cursor: pointer;
+}
+#remove-album-confirm .confirm-yes {
+  background: #aa2222; color: #fff; border: none;
+}
+#remove-album-confirm .confirm-no {
+  background: none; border: 1px solid #444; color: var(--muted);
+}
+
+/* ── Album checkbox list in add panel ────────────────────── */
+.album-checkbox-row {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--text);
+}
+.album-checkbox-row.already-member { opacity: 0.4; }
+.album-checkbox-row input[type=checkbox] { cursor: pointer; }
+
 .lib-edit-panel h4 {
   color: #7a9fff; font-size: 12px; text-transform: uppercase;
   letter-spacing: .06em; margin-bottom: 10px;
@@ -213,6 +236,21 @@
   <button onclick="openPanel('description')">Edit description</button>
   <button onclick="openPanel('tags_add')">Add tags</button>
   <button onclick="openPanel('tags_remove')">Remove tags</button>
+  <span class="sep">│</span>
+  <button onclick="openAlbumPanel()">Add to album ▾</button>
+  {% if current_album %}
+  <span class="sep">│</span>
+  <button id="remove-album-btn" style="color:#ff7a7a"
+          onclick="showRemoveConfirm()">Remove from {{ current_album.name }}</button>
+  <span id="remove-album-confirm" style="display:none">
+    <span style="color:#ccc">Remove
+      <span id="remove-album-count-label"></span> from
+      <strong>{{ current_album.name }}</strong>?
+    </span>
+    <button class="confirm-yes" onclick="confirmAlbumRemove()">Confirm</button>
+    <button class="confirm-no" onclick="hideRemoveConfirm()">Cancel</button>
+  </span>
+  {% endif %}
   <button class="clear-btn" onclick="clearSelection()">✕ Clear</button>
 </div>
 
@@ -244,6 +282,18 @@
   <div class="panel-actions">
     <button class="btn-confirm" id="panel-confirm-btn" onclick="submitPanel()" disabled>Queue proposals</button>
     <button class="btn-cancel" onclick="closePanel()">Cancel</button>
+  </div>
+</div>
+
+<!-- Album add panel -->
+<div class="lib-edit-panel" id="album-add-panel">
+  <h4 id="album-panel-title">Add to album</h4>
+  <div id="album-checkbox-list" style="display:flex;flex-wrap:wrap;gap:10px 20px;margin-bottom:12px;min-height:24px">
+    <span style="color:var(--muted);font-size:12px">Loading…</span>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <button id="album-apply-btn" onclick="applyAlbumAdd()" disabled>Apply</button>
+    <button class="btn-cancel" onclick="closeAlbumPanel()">Cancel</button>
   </div>
 </div>
 
@@ -305,6 +355,10 @@ _photoData[{{ photo.id }}] = {
 };
 {% endfor %}
 
+// ── Album data from server ───────────────────────────────────────────
+const _albums = {{ albums | tojson }};
+// [{id, name, flickr_set_id, photo_count}, ...]
+
 function thumbClick(evt, id) {
   if (evt.target.tagName === 'INPUT') return;
   togglePhoto(id);
@@ -344,6 +398,7 @@ document.getElementById('select-all-cb').addEventListener('change', function() {
 });
 
 function clearSelection() {
+  if (typeof hideRemoveConfirm === 'function') hideRemoveConfirm();
   _selectAllFilter = false;
   _selectedIds.clear();
   document.querySelectorAll('.photo-cb').forEach(cb => { cb.checked = false; });
@@ -419,6 +474,7 @@ function openPanel(field) {
 
 function closePanel() {
   document.getElementById('lib-edit-panel').classList.remove('visible');
+  document.getElementById('album-add-panel').classList.remove('visible');
   document.getElementById('panel-preview').innerHTML = '';
   document.getElementById('panel-confirm-btn').disabled = true;
   _currentField = null;
@@ -595,6 +651,149 @@ async function submitPanel() {
     btn.disabled = false;
   }
 }
+
+// ── Album membership ─────────────────────────────────────────────────
+let _membershipCache = {};  // {album_id: Set of photo_ids} — populated on panel open
+
+async function openAlbumPanel() {
+  closePanel();  // close metadata panel if open
+  const panel = document.getElementById('album-add-panel');
+  const list = document.getElementById('album-checkbox-list');
+  const title = document.getElementById('album-panel-title');
+  const applyBtn = document.getElementById('album-apply-btn');
+
+  panel.classList.add('visible');
+  title.textContent = `Add to album · ${_selectionCount()} photos`;
+  applyBtn.disabled = true;
+  list.innerHTML = '<span style="color:var(--muted);font-size:12px">Loading…</span>';
+
+  // Fetch current membership for selected photos
+  const ids = [..._selectedIds].join(',');
+  _membershipCache = {};
+  if (ids) {
+    try {
+      const r = await fetch(`/api/album-membership?photo_ids=${ids}`);
+      const data = await r.json();
+      // Convert to {album_id_int: Set<photo_id_int>}
+      for (const [k, v] of Object.entries(data.membership || {})) {
+        _membershipCache[parseInt(k)] = new Set(v);
+      }
+    } catch (e) { /* non-fatal — grey-out won't work but add still works */ }
+  }
+
+  // Render checkboxes
+  if (_albums.length === 0) {
+    list.innerHTML = '<span style="color:var(--muted);font-size:12px">No albums found.</span>';
+    return;
+  }
+  list.innerHTML = '';
+  for (const album of _albums) {
+    const memberSet = _membershipCache[album.id] || new Set();
+    const selIds = [..._selectedIds];
+    const allMembers = selIds.length > 0 && selIds.every(id => memberSet.has(id));
+    const row = document.createElement('label');
+    row.className = 'album-checkbox-row' + (allMembers ? ' already-member' : '');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = album.id;
+    cb.disabled = allMembers;
+    if (allMembers) cb.title = 'All selected photos are already in this album';
+    cb.addEventListener('change', function() {
+      applyBtn.disabled = !list.querySelector('input[type=checkbox]:checked:not(:disabled)');
+    });
+    row.appendChild(cb);
+    row.appendChild(document.createTextNode(album.name));
+    if (allMembers) {
+      const note = document.createElement('span');
+      note.style.cssText = 'font-size:11px;color:var(--muted)';
+      note.textContent = '(already member)';
+      row.appendChild(note);
+    }
+    list.appendChild(row);
+  }
+}
+
+function closeAlbumPanel() {
+  document.getElementById('album-add-panel').classList.remove('visible');
+  _membershipCache = {};
+}
+
+async function applyAlbumAdd() {
+  const checked = document.querySelectorAll('#album-checkbox-list input[type=checkbox]:checked:not(:disabled)');
+  const albumIds = [...checked].map(cb => parseInt(cb.value));
+  if (albumIds.length === 0) return;
+
+  const btn = document.getElementById('album-apply-btn');
+  btn.disabled = true;
+  btn.textContent = 'Adding…';
+
+  const payload = { photo_ids: [..._selectedIds], add: albumIds };
+  try {
+    const r = await fetch('/api/album-membership', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (r.ok) {
+      const n = data.added;
+      toast(`Added to ${albumIds.length} album${albumIds.length !== 1 ? 's' : ''} (${n} new membership${n !== 1 ? 's' : ''})`, 'ok');
+      closeAlbumPanel();
+      clearSelection();
+    } else {
+      toast('Error: ' + (data.error || 'unknown'), 'err');
+      btn.disabled = false;
+      btn.textContent = 'Apply';
+    }
+  } catch (e) {
+    toast('Network error — try again', 'err');
+    btn.disabled = false;
+    btn.textContent = 'Apply';
+  }
+}
+
+function showRemoveConfirm() {
+  document.getElementById('remove-album-btn').style.display = 'none';
+  const confirm = document.getElementById('remove-album-confirm');
+  const countLabel = document.getElementById('remove-album-count-label');
+  const n = _selectionCount();
+  countLabel.textContent = `${n} photo${n !== 1 ? 's' : ''}`;
+  confirm.style.display = 'flex';
+}
+
+function hideRemoveConfirm() {
+  const confirmEl = document.getElementById('remove-album-confirm');
+  const btnEl = document.getElementById('remove-album-btn');
+  if (confirmEl) confirmEl.style.display = 'none';
+  if (btnEl) btnEl.style.display = '';
+}
+
+{% if current_album %}
+async function confirmAlbumRemove() {
+  const albumId = {{ current_album.id }};
+  const payload = { photo_ids: [..._selectedIds], remove: [albumId] };
+  hideRemoveConfirm();
+
+  try {
+    const r = await fetch('/api/album-membership', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (r.ok) {
+      toast(`Removed ${data.removed} photo${data.removed !== 1 ? 's' : ''} from {{ current_album.name | tojson }}`, 'ok');
+      clearSelection();
+      // Reload grid — removed photos no longer appear in this album filter
+      setTimeout(() => location.reload(), 800);
+    } else {
+      toast('Error: ' + (data.error || 'unknown'), 'err');
+    }
+  } catch (e) {
+    toast('Network error — try again', 'err');
+  }
+}
+{% endif %}
 
 // ── Double-click → open photo detail ────────────────────────────────
 document.querySelectorAll('.lib-thumb').forEach(function(card) {
