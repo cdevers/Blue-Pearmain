@@ -122,6 +122,12 @@
 .confirm-box h3 { font-size: 15px; margin-bottom: 8px; }
 .confirm-box p  { font-size: 13px; color: var(--muted); margin-bottom: 20px; line-height: 1.5; }
 .confirm-box .actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+@media (max-width: 640px) {
+  .faces-container { padding: 12px; }
+  .kbd-hints { display: none; }
+  .person-row { padding: 10px 12px; }
+}
 {% endblock %}
 
 {% block content %}
