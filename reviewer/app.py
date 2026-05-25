@@ -1213,6 +1213,12 @@ def api_bulk_edit() -> _JsonResp:
     return jsonify({"ok": True, "proposals_created": created, "batch_id": batch_id})
 
 
+@app.route("/api/bulk-batches/<int:batch_id>/reject", methods=["POST"])
+def api_bulk_batch_reject(batch_id: int) -> _JsonResp:
+    n = db().reject_bulk_batch(batch_id)
+    return jsonify({"ok": True, "rejected": n})
+
+
 @app.route("/api/stats")
 def api_stats() -> _JsonResp:
     return jsonify(db().stats())
@@ -1319,6 +1325,7 @@ def proposals() -> str:
     items = db().get_pending_proposals(limit=per_page, offset=offset)
     counts = db().get_proposal_counts()
     total = counts["total"]
+    bulk_batches = db().get_pending_bulk_batches()
     return render_template(
         "proposals.html",
         proposals=items,
@@ -1326,6 +1333,7 @@ def proposals() -> str:
         page=page,
         total_pages=max(1, (total + per_page - 1) // per_page),
         total=total,
+        bulk_batches=bulk_batches,
     )
 
 

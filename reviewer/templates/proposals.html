@@ -303,6 +303,38 @@
 {% endblock %}
 
 {% block content %}
+{% if bulk_batches %}
+<div style="margin: 12px 24px 0;">
+  <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px">
+    Bulk operations — {{ bulk_batches|length }} pending batch{{ 'es' if bulk_batches|length != 1 }}
+  </div>
+  {% for batch in bulk_batches %}
+  <div style="background:var(--surface);border:1px solid var(--border);border-left:3px solid #3a5fff;
+              border-radius:var(--radius);padding:10px 16px;margin-bottom:8px;
+              display:flex;align-items:center;gap:12px;">
+    <div style="flex:1;min-width:0">
+      <span style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">Bulk · </span>
+      <strong style="font-size:13px">
+        {% if batch.operation == 'set_title' %}Set title: "{{ batch.value }}"
+        {% elif batch.operation == 'set_description' %}Set description
+        {% elif batch.operation == 'tags_add' %}Add tags: {{ batch.tags | join(', ') if batch.tags else '—' }}
+        {% elif batch.operation == 'tags_remove' %}Remove tags: {{ batch.tags | join(', ') if batch.tags else '—' }}
+        {% else %}{{ batch.operation }}{% endif %}
+      </strong>
+      <span style="font-size:12px;color:var(--muted);margin-left:8px">
+        {{ batch.pending_count }} proposal{{ 's' if batch.pending_count != 1 }} pending
+        · queued {{ batch.created_at[:10] }}
+      </span>
+    </div>
+    <button onclick="rejectBatch({{ batch.id }}, this)"
+            style="background:rgba(139,32,32,.2);border:1px solid var(--red);color:#f88;
+                   border-radius:var(--radius);padding:4px 12px;font-size:12px;cursor:pointer">
+      Reject all
+    </button>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
 <div class="toolbar">
   <span class="count" id="proposal-count-total">{{ total }} pending proposal{{ 's' if total != 1 }}</span>
   <div class="type-pills">
@@ -849,5 +881,31 @@ document.addEventListener('keydown', e => {
 // Auto-select first card on load
 const _first = _cards()[0];
 if (_first) _select(_first);
+
+// ---------------------------------------------------------------------------
+// Bulk batch reject
+// ---------------------------------------------------------------------------
+
+async function rejectBatch(batchId, btn) {
+  if (!confirm('Reject all pending proposals in this batch?')) return;
+  btn.disabled = true;
+  btn.textContent = 'Rejecting…';
+  try {
+    const r = await fetch(`/api/bulk-batches/${batchId}/reject`, {
+      method: 'POST',
+      headers: {'X-Requested-With': 'XMLHttpRequest'},
+    });
+    const data = await r.json();
+    if (data.ok) {
+      btn.closest('div[style]').remove();
+    } else {
+      btn.disabled = false;
+      btn.textContent = 'Reject all';
+    }
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Reject all';
+  }
+}
 </script>
 {% endblock %}

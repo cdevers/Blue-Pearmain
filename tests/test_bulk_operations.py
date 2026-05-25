@@ -675,3 +675,68 @@ class TestBulkEditEndpoint:
         c, _ = bulk_client
         resp = self._post(c, {"field": "tags_add", "photo_ids": [1]})
         assert resp.status_code == 400
+
+
+# ===========================================================================
+# Task 6 — Proposals batch grouping + reject endpoint
+# ===========================================================================
+
+
+@pytest.fixture(scope="module")
+def batch_client():
+    with tempfile.TemporaryDirectory() as tmp:
+        test_db = Database(Path(tmp) / "test.db")
+        pid = test_db.upsert_photo(
+            {
+                "uuid": "batch-u1",
+                "flickr_id": "batch-f1",
+                "original_filename": "BATCH.JPG",
+                "privacy_state": "already_public",
+                "flickr_title": "",
+                "flickr_description": "",
+                "flickr_tags": json.dumps([]),
+                "photos_tags": json.dumps([]),
+                "apple_persons": [],
+                "proposed_tags": [],
+            }
+        )
+        # Create a batch with one proposal
+        bid = test_db.create_bulk_batch("set_title", "title", "Batch Test", None, None, 1)
+        test_db.insert_bulk_proposals(bid, [pid], "title", value="Batch Test")
+        app_module._db = test_db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+        with app_module.app.test_client() as c:
+            yield c, test_db, bid
+        app_module._db = None
+
+
+class TestProposalsBatchGrouping:
+    def test_proposals_page_shows_batch_section(self, batch_client):
+        c, db, bid = batch_client
+        resp = c.get("/proposals")
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "Bulk" in html or "bulk" in html or "batch" in html.lower()
+
+    def test_reject_batch_endpoint(self, batch_client):
+        c, db, bid = batch_client
+        resp = c.post(
+            f"/api/bulk-batches/{bid}/reject",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert data["rejected"] >= 1
+
+    def test_reject_batch_nonexistent(self, batch_client):
+        c, _, _ = batch_client
+        resp = c.post(
+            "/api/bulk-batches/99999/reject",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert data["rejected"] == 0
