@@ -58,6 +58,18 @@ class TestAlbumRename:
         assert resp.status_code == 200
         assert resp.get_json()["name"] == "Padded Name"
 
+    def test_rename_to_same_name_succeeds(self, client_and_albums):
+        """Renaming to the current name is a valid no-op — returns 200."""
+        c, a1, _, db = client_and_albums
+        resp = c.patch(
+            f"/api/albums/{a1}",
+            data=json.dumps({"name": "Summer 2024"}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
+        assert resp.get_json()["name"] == "Summer 2024"
+
     def test_rename_empty_name_returns_400(self, client_and_albums):
         c, a1, _, _ = client_and_albums
         resp = c.patch(

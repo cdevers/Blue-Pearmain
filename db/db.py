@@ -1026,6 +1026,11 @@ class Database:
         the Flickr photoset title and then calls set_album_flickr_name() to
         bring flickr_name back in sync.
 
+        updated_at is always written, even when the name is unchanged.
+        sync_album_titles() (in bp sync-albums) pushes all album names
+        unconditionally on each run, so a same-name rename causes no
+        extra Flickr API churn beyond the normal sync invocation.
+
         Note: does not check deleted_at. The caller is responsible for
         confirming the album is not soft-deleted before calling this method.
         """
