@@ -595,5 +595,14 @@ async function submitPanel() {
     btn.disabled = false;
   }
 }
+
+// ── Double-click → open photo detail ────────────────────────────────
+document.querySelectorAll('.lib-thumb').forEach(function(card) {
+  card.addEventListener('dblclick', function(e) {
+    var photoId = card.dataset.id;
+    var back = encodeURIComponent(location.pathname + location.search);
+    window.location.href = '/photo/' + photoId + '?back=' + back;
+  });
+});
 </script>
 {% endblock %}
