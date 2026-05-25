@@ -373,6 +373,118 @@
 }
 .star-rating .star { color: #555; transition: color 0.1s; }
 .star-rating .star.filled { color: #f5a623; }
+
+/* ── Mobile toolbar ─────────────────────────────────── */
+/* Mobile progress row: hidden on desktop, shown via JS on mobile */
+.mobile-progress-row { display: none; }
+
+@media (max-width: 640px) {
+  .toolbar {
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    gap: 8px;
+  }
+
+  /* Hide keyboard hints entirely on mobile */
+  .shortcuts { display: none !important; }
+
+  /* Hide desktop count and spacer — replaced by mobile progress row */
+  .toolbar .count,
+  .toolbar .spacer { display: none; }
+
+  /* State select fills available space */
+  #state-select { flex: 1; min-width: 0; }
+
+  /* Undo button: more prominent on mobile (accidental swipes are likely) */
+  #undoBtn {
+    order: 9;
+    width: 100%;
+    justify-content: center;
+    min-height: 48px;
+    font-size: 15px;
+    color: #f5a623;
+    border-color: #7a5c00;
+    background: #2a1e00;
+  }
+
+  /* Mobile progress row: show when JS activates it */
+  .mobile-progress-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: center;
+    width: 100%;
+    order: 10;
+    padding: 4px 0;
+  }
+  .mobile-nav-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius);
+    padding: 4px 16px;
+    font-size: 20px;
+    line-height: 1.4;
+    cursor: pointer;
+    min-height: 36px;
+    min-width: 44px;
+  }
+  .mobile-nav-btn:hover { background: #252525; }
+  #mobile-progress-text {
+    font-size: 13px;
+    color: var(--muted);
+    min-width: 64px;
+    text-align: center;
+  }
+}
+
+/* ── Mobile single-card view ────────────────────────── */
+@media (max-width: 640px) {
+  /* Switch grid to block; cards shown one at a time */
+  .grid {
+    display: block;
+    padding: 12px;
+  }
+
+  /* Hide all cards by default; JS adds mobile-current to show one */
+  .photo-card { display: none; }
+
+  /* The visible card: full width, block layout */
+  .photo-card.mobile-current {
+    display: block;
+    width: 100%;
+  }
+
+  /* Normalise all thumb aspect ratios to 4/3 on mobile
+     (overrides panoramic 3/1 and portrait-pano 1/3) */
+  .photo-card.mobile-current .thumb,
+  .photo-card.pano.mobile-current .thumb,
+  .photo-card.pano-portrait.mobile-current .thumb {
+    aspect-ratio: 4 / 3;
+  }
+  .photo-card.pano.mobile-current .thumb img,
+  .photo-card.pano-portrait.mobile-current .thumb img {
+    object-fit: cover;
+  }
+
+  /* Larger action buttons — easy to tap */
+  .photo-card .actions { gap: 8px; }
+  .photo-card .actions button {
+    min-height: 52px;
+    font-size: 14px;
+    padding: 8px 4px;
+  }
+
+  /* Bigger star rating for accurate touch targets */
+  .star-rating {
+    font-size: 28px;
+    margin: 8px 0;
+  }
+
+  /* Slightly more breathing room in the meta row */
+  .photo-card .meta { padding: 12px; }
+  .photo-card .filename { font-size: 13px; margin-bottom: 6px; }
+}
 {% endblock %}
 
 {% block content %}
@@ -452,6 +564,13 @@
     <span><kbd>Enter</kbd> detail</span>
     <span><kbd>Z</kbd> undo</span>
     <span><kbd>R</kbd> reload</span>
+  </div>
+
+  <!-- Mobile progress indicator (shown on ≤640px) -->
+  <div class="mobile-progress-row">
+    <button class="mobile-nav-btn" onclick="mobileNavPrev()" aria-label="Previous photo">‹</button>
+    <span id="mobile-progress-text">— / —</span>
+    <button class="mobile-nav-btn" onclick="mobileNavNext()" aria-label="Next photo">›</button>
   </div>
 </div>
 
@@ -661,7 +780,7 @@ async function quickDecide(id, decision, card) {
   // Push tags for make_public/keep_private/friends/family; skip gets nothing
   const ok = await decide(id, decision, decision !== 'skip');
   if (!ok) return;
-  if (decision === 'make_public') card.classList.add('decided-pub');
+  if (decision === 'make_public' || decision === 'confirm_public') card.classList.add('decided-pub');
   else if (decision === 'keep_private') card.classList.add('decided-prv');
   else if (['make_friends','make_family','make_friends_family'].includes(decision))
     card.classList.add('decided-pub');
@@ -825,6 +944,10 @@ async function decideWithOverride(id, note, card) {
     const cards = [...document.querySelectorAll('.photo-card')];
     const idx = cards.indexOf(card);
     if (idx >= 0 && idx < cards.length - 1) selectCard(cards[idx + 1]);
+    // Advance mobile single-card view if active
+    if (window.innerWidth <= 640 && typeof showMobileCard === 'function') {
+      showMobileCard(idx + 1);
+    }
   } else {
     toast('Error: ' + (data.error || 'unknown'), 'err');
   }
@@ -914,4 +1037,195 @@ document.addEventListener('DOMContentLoaded', initStarWidgets);
     </div>
   </div>
 </div>
+
+<!-- Mobile single-card state management -->
+<script>
+// === MOBILE SINGLE-CARD VIEW ===
+// Active only on mobile (≤640px). Maintains currentMobileIndex into the
+// photo-card NodeList and updates which card has the mobile-current class.
+// Exposes showMobileCard() globally so the swipe section (Task 5) and
+// the mobileNavPrev/Next buttons can call it.
+
+let currentMobileIndex = 0;
+
+function showMobileCard(index) {
+  const cards = [...document.querySelectorAll('.photo-card')];
+  if (!cards.length) return;
+
+  // Clamp to valid range
+  currentMobileIndex = Math.max(0, Math.min(index, cards.length - 1));
+
+  // Swap mobile-current class
+  cards.forEach((c, i) => c.classList.toggle('mobile-current', i === currentMobileIndex));
+
+  // Keep the desktop selection in sync (preserves keyboard shortcut state)
+  selectCard(cards[currentMobileIndex]);
+
+  // Update ‹ N/Total › indicator
+  _updateMobileProgress(cards.length);
+
+  // Re-attach swipe handler to the now-visible card
+  // (window.attachSwipeHandler defined in Task 5 swipe section)
+  if (window.attachSwipeHandler) window.attachSwipeHandler(cards[currentMobileIndex]);
+
+  // Scroll to top so the photo is always fully visible
+  window.scrollTo({ top: 0, behavior: 'instant' });
+}
+
+function _updateMobileProgress(total) {
+  const el = document.getElementById('mobile-progress-text');
+  if (el) el.textContent = `${currentMobileIndex + 1} / ${total}`;
+}
+
+function mobileNavPrev() {
+  if (currentMobileIndex > 0) showMobileCard(currentMobileIndex - 1);
+}
+
+function mobileNavNext() {
+  const cards = [...document.querySelectorAll('.photo-card')];
+  if (currentMobileIndex < cards.length - 1) showMobileCard(currentMobileIndex + 1);
+}
+
+// Patch quickDecide to advance the mobile card view after a successful decision.
+// This is applied here — after quickDecide is defined in the script above —
+// so the original function is not modified directly (keeps the swipe logic isolated).
+if (window.innerWidth <= 640) {
+  const _quickDecide = quickDecide;
+  quickDecide = async function(id, decision, card) {
+    const cards = [...document.querySelectorAll('.photo-card')];
+    const idx = cards.indexOf(card);
+    await _quickDecide(id, decision, card);
+    // Only advance if the decision was applied (card has a decided-* class)
+    if (card.classList.contains('decided-pub') ||
+        card.classList.contains('decided-prv') ||
+        card.classList.contains('decided-skp')) {
+      showMobileCard(idx + 1);
+    }
+  };
+
+  // Initialise the mobile view once the page (and all cards) are loaded.
+  // The existing load handler already calls selectCard(first) and scrolls
+  // to top; our handler additionally activates the mobile-current class.
+  window.addEventListener('load', () => {
+    showMobileCard(0);
+  });
+}
+</script>
+
+<!-- Mobile swipe gesture detection -->
+<script>
+// === MOBILE SWIPE ===
+// Isolated touch handler for the review single-card view.
+// Detects directional swipes on the photo thumbnail and calls quickDecide.
+//
+// Swipe right  →  make_public
+// Swipe left   →  keep_private
+// Swipe up     →  skip
+//
+// A gesture fires only when:
+//   horizontal:  |deltaX| > 50 AND |deltaX| > |deltaY|
+//   upward:      deltaY < -50  AND |deltaY| > |deltaX|
+// All other movements (small or diagonal) are ignored — treated as scroll.
+
+(function() {
+  if (window.innerWidth > 640) return; // no-op on desktop
+
+  let _swipeStart = null;
+
+  // Named handler references (required for removeEventListener to work)
+  function onTouchStart(e) {
+    _swipeStart = {
+      x: e.changedTouches[0].clientX,
+      y: e.changedTouches[0].clientY,
+    };
+    e.currentTarget.addEventListener('touchmove', onTouchMove, { passive: true });
+  }
+
+  function onTouchMove(e) {
+    if (!_swipeStart) return;
+    const dx = e.changedTouches[0].clientX - _swipeStart.x;
+    const dy = e.changedTouches[0].clientY - _swipeStart.y;
+    const card = e.currentTarget.closest('.photo-card');
+    if (!card) return;
+
+    // Tint card background while dragging to signal pending decision
+    if (Math.abs(dx) > Math.abs(dy)) {
+      const intensity = Math.min(Math.abs(dx) / 200, 0.5);
+      if (dx > 20) {
+        card.style.background = `rgba(45, 125, 70, ${intensity})`; // green → public
+      } else if (dx < -20) {
+        card.style.background = `rgba(139, 32, 32, ${intensity})`; // red → private
+      } else {
+        card.style.background = '';
+      }
+    } else if (dy < -20) {
+      card.style.background = 'rgba(60, 60, 60, 0.3)'; // grey → skip
+    } else {
+      card.style.background = '';
+    }
+  }
+
+  function onTouchEnd(e) {
+    const thumb = e.currentTarget;
+    thumb.removeEventListener('touchmove', onTouchMove);
+
+    if (!_swipeStart) return;
+    const dx = e.changedTouches[0].clientX - _swipeStart.x;
+    const dy = e.changedTouches[0].clientY - _swipeStart.y;
+    _swipeStart = null;
+
+    const card = thumb.closest('.photo-card');
+    if (!card) return;
+
+    // Always clear tinting on release
+    card.style.background = '';
+
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    if (absDx > 50 && absDx > absDy) {
+      // Horizontal swipe
+      if (dx > 0) {
+        // Swipe right → public (or pulse badge if protected)
+        if (isProtected(card)) {
+          pulseProtectedBadge(card);
+        } else {
+          const _pubDecision = (typeof _stateFilter !== 'undefined' && _stateFilter === 'screenshot_public')
+            ? 'confirm_public' : 'make_public';
+          quickDecide(+card.dataset.id, _pubDecision, card);
+        }
+      } else {
+        // Swipe left → private
+        quickDecide(+card.dataset.id, 'keep_private', card);
+      }
+    } else if (dy < -50 && absDy > absDx) {
+      // Upward swipe → skip
+      quickDecide(+card.dataset.id, 'skip', card);
+    }
+    // All other movements (scroll attempts, diagonal drags): do nothing
+  }
+
+  // Attach swipe handlers to a card's thumb element.
+  // Called by showMobileCard() each time a new card becomes current.
+  // Removes existing listeners before adding new ones (safe to call repeatedly).
+  function attachSwipeHandler(card) {
+    if (!card) return;
+    const thumb = card.querySelector('.thumb');
+    if (!thumb) return;
+    thumb.removeEventListener('touchstart', onTouchStart);
+    thumb.removeEventListener('touchend', onTouchEnd);
+    thumb.addEventListener('touchstart', onTouchStart, { passive: true });
+    thumb.addEventListener('touchend', onTouchEnd);
+  }
+
+  // Expose globally so showMobileCard (Task 4) can call it
+  window.attachSwipeHandler = attachSwipeHandler;
+
+  // Attach to the first card immediately (load handler in Task 4 will also
+  // call showMobileCard(0) → attachSwipeHandler, but this handles the case
+  // where this script runs after the load event)
+  const first = document.querySelector('.photo-card');
+  if (first) attachSwipeHandler(first);
+})();
+</script>
 {% endblock %}

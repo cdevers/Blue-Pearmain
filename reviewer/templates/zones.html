@@ -61,6 +61,14 @@
   color: var(--muted);
   line-height: 1.5;
 }
+
+@media (max-width: 640px) {
+  .zones-layout {
+    grid-template-columns: 1fr;
+    padding: 12px;
+    gap: 16px;
+  }
+}
 {% endblock %}
 
 {% block content %}

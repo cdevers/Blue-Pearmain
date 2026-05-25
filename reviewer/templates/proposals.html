@@ -294,6 +294,12 @@
 }
 .pagination a { color: var(--accent); }
 .pagination span { color: var(--muted); background: var(--surface); }
+
+@media (max-width: 640px) {
+  .toolbar { flex-wrap: wrap; padding: 8px 12px; }
+  .toolbar .spacer { display: none; }
+  .kbd-hints { display: none; }
+}
 {% endblock %}
 
 {% block content %}

@@ -90,6 +90,32 @@
   color: var(--muted);
 }
 .empty-state p { margin-top: 8px; font-size: 14px; }
+
+@media (max-width: 640px) {
+  /* Hide keyboard hints */
+  .toolbar .shortcuts { display: none; }
+  .toolbar .spacer    { display: none; }
+
+  .toolbar { flex-wrap: wrap; padding: 8px 12px; }
+
+  /* Conflict card: stack thumb above body on mobile */
+  .conflict-card {
+    grid-template-columns: 1fr;
+    margin: 12px;
+  }
+  .conflict-card .thumb {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    height: auto;
+  }
+
+  /* Field rows: scroll horizontally rather than overflow */
+  .field-row {
+    overflow-x: auto;
+    gap: 6px;
+    font-size: 12px;
+  }
+}
 {% endblock %}
 
 {% block content %}
