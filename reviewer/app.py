@@ -732,6 +732,59 @@ def zones() -> str:
     return render_template("zones.html", zones=[dict(r) for r in zone_rows])
 
 
+@app.route("/library")
+def library() -> str:
+    page = int(request.args.get("page", 1))
+    per_page = int(request.args.get("per_page", 120))
+    offset = (page - 1) * per_page
+
+    date_from = request.args.get("date_from") or None
+    date_to = request.args.get("date_to") or None
+    album_id_raw = request.args.get("album_id")
+    album_id = int(album_id_raw) if album_id_raw else None
+    tag = request.args.get("tag") or None
+    status = request.args.get("status") or None
+    untitled_only = bool(request.args.get("untitled"))
+
+    photos = db().library_photos(
+        date_from=date_from,
+        date_to=date_to,
+        album_id=album_id,
+        tag=tag,
+        status=status,
+        untitled_only=untitled_only,
+        limit=per_page,
+        offset=offset,
+    )
+    total = db().library_photo_count(
+        date_from=date_from,
+        date_to=date_to,
+        album_id=album_id,
+        tag=tag,
+        status=status,
+        untitled_only=untitled_only,
+    )
+    albums = db().get_all_albums()
+
+    return render_template(
+        "library.html",
+        photos=photos,
+        albums=albums,
+        total=total,
+        page=page,
+        per_page=per_page,
+        total_pages=max(1, (total + per_page - 1) // per_page),
+        filters={
+            "date_from": date_from or "",
+            "date_to": date_to or "",
+            "album_id": album_id,
+            "tag": tag or "",
+            "status": status or "",
+            "untitled": untitled_only,
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Routes — API
 # ---------------------------------------------------------------------------

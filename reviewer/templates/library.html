@@ -1,0 +1,594 @@
+{% extends "base.html" %}
+{% block title %}Library — Blue Pearmain{% endblock %}
+
+{% block extra_style %}
+<style>
+/* ── Filter bar ─────────────────────────────────── */
+.lib-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.lib-filter-bar label { font-size: 11px; color: var(--muted); }
+.lib-filter-bar input[type=text],
+.lib-filter-bar input[type=date],
+.lib-filter-bar select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+/* ── Selection toolbar ──────────────────────────── */
+.lib-select-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.lib-select-bar label { color: var(--muted); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+
+/* ── Action bar (appears when photos selected) ───── */
+.lib-action-bar {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #1a2a4a;
+  border-bottom: 1px solid #3a5fff;
+  font-size: 13px;
+  position: sticky;
+  top: 41px;
+  z-index: 19;
+}
+.lib-action-bar.visible { display: flex; }
+.lib-action-bar .sel-count { color: #ccc; font-weight: 600; }
+.lib-action-bar .sep { color: #444; }
+.lib-action-bar button {
+  background: none; border: none;
+  color: #7a9fff; cursor: pointer; font-size: 13px; padding: 2px 0;
+}
+.lib-action-bar button:hover { text-decoration: underline; }
+.lib-action-bar .clear-btn { color: var(--muted); margin-left: auto; }
+
+/* ── Inline edit panel ───────────────────────────── */
+.lib-edit-panel {
+  display: none;
+  padding: 12px 16px;
+  background: #141e38;
+  border-bottom: 2px solid #3a5fff;
+}
+.lib-edit-panel.visible { display: block; }
+.lib-edit-panel h4 {
+  color: #7a9fff; font-size: 12px; text-transform: uppercase;
+  letter-spacing: .06em; margin-bottom: 10px;
+}
+.lib-edit-panel input[type=text],
+.lib-edit-panel textarea {
+  width: 100%; background: var(--bg); border: 1px solid #3a5fff;
+  color: var(--text); border-radius: var(--radius); padding: 6px 10px;
+  font-size: 13px; box-sizing: border-box;
+}
+.lib-edit-panel textarea { height: 70px; resize: vertical; }
+.lib-edit-panel .panel-meta { margin: 8px 0; font-size: 12px; color: var(--muted); }
+.lib-edit-panel .panel-meta strong { color: #ccc; }
+.lib-edit-panel .panel-meta .warn { color: #f88; font-weight: 600; }
+.panel-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.panel-actions .btn-confirm {
+  background: #3a5fff; color: white; border: none;
+  border-radius: var(--radius); padding: 6px 16px; font-size: 13px; cursor: pointer;
+}
+.panel-actions .btn-confirm:disabled { opacity: .5; cursor: default; }
+.panel-actions .btn-cancel {
+  background: none; border: none; color: var(--muted);
+  font-size: 13px; cursor: pointer;
+}
+
+/* Tag chips */
+.tag-chip-input-wrap {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  background: var(--bg); border: 1px solid #3a5fff;
+  border-radius: var(--radius); padding: 6px 8px; min-height: 36px;
+}
+.tag-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 10px; font-size: 12px;
+  background: rgba(58,95,255,.25); border: 1px solid #3a5fff; color: #aac;
+}
+.tag-chip.remove-chip {
+  background: rgba(139,32,32,.25); border-color: #8b2020; color: #f88;
+}
+.tag-chip button { background: none; border: none; color: inherit; cursor: pointer; padding: 0; }
+.tag-chip-input {
+  background: none; border: none; outline: none;
+  color: var(--text); font-size: 12px; min-width: 80px; flex: 1;
+}
+
+/* ── Photo grid ─────────────────────────────────── */
+.lib-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 4px;
+  padding: 8px 16px;
+}
+.lib-thumb {
+  position: relative;
+  aspect-ratio: 1;
+  background: var(--surface);
+  border-radius: 3px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.lib-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lib-thumb .placeholder-icon {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 28px;
+}
+.lib-thumb input[type=checkbox] {
+  position: absolute; top: 5px; left: 5px;
+  width: 18px; height: 18px; cursor: pointer;
+  accent-color: #3a5fff;
+}
+.lib-thumb.selected { outline: 2px solid #3a5fff; outline-offset: -2px; }
+.lib-thumb .thumb-title {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: rgba(0,0,0,.65); color: #ccc;
+  font-size: 10px; padding: 3px 5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── Pagination ─────────────────────────────────── */
+.lib-pagination {
+  display: flex; gap: 8px; align-items: center;
+  padding: 12px 16px; font-size: 13px; color: var(--muted);
+}
+.lib-pagination a { color: var(--accent); }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Filter bar -->
+<form id="lib-filter-form" method="get" action="{{ url_for('library') }}">
+<div class="lib-filter-bar">
+  <label>From <input type="date" name="date_from" value="{{ filters.date_from }}"></label>
+  <label>To <input type="date" name="date_to" value="{{ filters.date_to }}"></label>
+  <label>Album
+    <select name="album_id">
+      <option value="">All albums</option>
+      {% for a in albums %}
+        <option value="{{ a.id }}" {% if filters.album_id == a.id %}selected{% endif %}>{{ a.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Tag <input type="text" name="tag" value="{{ filters.tag }}" placeholder="filter by tag…" style="width:120px"></label>
+  <label>Status
+    <select name="status">
+      <option value="">All</option>
+      <option value="public"  {% if filters.status == 'public'  %}selected{% endif %}>Public</option>
+      <option value="private" {% if filters.status == 'private' %}selected{% endif %}>Private</option>
+      <option value="pending" {% if filters.status == 'pending' %}selected{% endif %}>Pending</option>
+    </select>
+  </label>
+  <label style="display:flex;align-items:center;gap:5px">
+    <input type="checkbox" name="untitled" value="1" {% if filters.untitled %}checked{% endif %} onchange="this.form.submit()">
+    Untitled only
+  </label>
+  <button type="submit" style="background:var(--accent);border:none;color:white;padding:4px 12px;border-radius:var(--radius);font-size:12px;cursor:pointer">Apply</button>
+  {% if filters.date_from or filters.date_to or filters.album_id or filters.tag or filters.status or filters.untitled %}
+  <a href="{{ url_for('library') }}" style="font-size:12px;color:var(--muted)">Clear filters</a>
+  {% endif %}
+  <span style="color:var(--muted);font-size:12px;margin-left:auto;white-space:nowrap">{{ total }} photo{{ 's' if total != 1 }}</span>
+</div>
+</form>
+
+<!-- Select-all row -->
+<div class="lib-select-bar">
+  <label>
+    <input type="checkbox" id="select-all-cb">
+    Select all {{ total }} matching
+  </label>
+  <span id="sel-filter-note" style="display:none;font-size:11px;color:var(--muted)">
+    — filter-based selection active
+  </span>
+</div>
+
+<!-- Action bar (hidden until selection) -->
+<div class="lib-action-bar" id="lib-action-bar">
+  <span class="sel-count" id="sel-count-label">0 selected</span>
+  <span class="sep">│</span>
+  <button onclick="openPanel('title')">Edit title</button>
+  <button onclick="openPanel('description')">Edit description</button>
+  <button onclick="openPanel('tags_add')">Add tags</button>
+  <button onclick="openPanel('tags_remove')">Remove tags</button>
+  <button class="clear-btn" onclick="clearSelection()">✕ Clear</button>
+</div>
+
+<!-- Inline edit panel (hidden until action clicked) -->
+<div class="lib-edit-panel" id="lib-edit-panel">
+  <h4 id="panel-title">Edit</h4>
+
+  <!-- Title / description inputs -->
+  <div id="panel-text-wrap" style="display:none">
+    <input type="text" id="panel-text-input" placeholder="New value…">
+    <textarea id="panel-textarea" placeholder="New value…" style="display:none"></textarea>
+    <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px">
+        <input type="checkbox" id="skip-existing-cb" checked>
+        Skip photos that already have a value
+      </label>
+    </div>
+  </div>
+
+  <!-- Tag chip input -->
+  <div id="panel-tag-wrap" style="display:none">
+    <div class="tag-chip-input-wrap" id="tag-chip-wrap">
+      <input class="tag-chip-input" id="tag-chip-input" placeholder="type tag, press Enter…">
+    </div>
+  </div>
+
+  <div class="panel-meta" id="panel-preview"></div>
+
+  <div class="panel-actions">
+    <button class="btn-confirm" id="panel-confirm-btn" onclick="submitPanel()" disabled>Queue proposals</button>
+    <button class="btn-cancel" onclick="closePanel()">Cancel</button>
+  </div>
+</div>
+
+<!-- Photo grid -->
+<div class="lib-grid" id="lib-grid">
+{% for photo in photos %}
+  <div class="lib-thumb {% if photo.is_video %}is-video{% endif %}"
+       id="thumb-{{ photo.id }}"
+       data-id="{{ photo.id }}"
+       data-title="{{ (photo.flickr_title or photo.photos_title or '') | e }}"
+       data-tags="{{ (photo.flickr_tags or []) | tojson | e }}"
+       onclick="thumbClick(event, {{ photo.id }})">
+    {% if photo.thumbnail_path %}
+      <img src="{{ url_for('thumb', photo_id=photo.id) }}"
+           loading="lazy"
+           {% if photo.display_rotation %}style="transform:rotate({{ photo.display_rotation }}deg)"{% endif %}>
+    {% else %}
+      <div class="placeholder-icon">{% if photo.is_video %}🎬{% else %}📷{% endif %}</div>
+    {% endif %}
+    <input type="checkbox" class="photo-cb" data-id="{{ photo.id }}"
+           onclick="event.stopPropagation(); togglePhoto({{ photo.id }})">
+    {% set title = photo.flickr_title or photo.photos_title %}
+    {% if title %}
+      <div class="thumb-title">{{ title }}</div>
+    {% endif %}
+  </div>
+{% else %}
+  <p style="grid-column:1/-1;color:var(--muted);padding:24px">No photos match the current filters.</p>
+{% endfor %}
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<div class="lib-pagination">
+  {% if page > 1 %}
+    <a href="{{ url_for('library', page=page-1, per_page=per_page, **filters) }}">← Prev</a>
+  {% endif %}
+  <span>Page {{ page }} of {{ total_pages }}</span>
+  {% if page < total_pages %}
+    <a href="{{ url_for('library', page=page+1, per_page=per_page, **filters) }}">Next →</a>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Selection state ─────────────────────────────────────────────────
+let _selectedIds = new Set();
+let _selectAllFilter = false;
+const _totalMatching = {{ total }};
+
+const _photoData = {};
+{% for photo in photos %}
+_photoData[{{ photo.id }}] = {
+  title: {{ (photo.flickr_title or '') | tojson }},
+  description: '',
+  tags: {{ (photo.flickr_tags or []) | tojson }},
+};
+{% endfor %}
+
+function thumbClick(evt, id) {
+  if (evt.target.tagName === 'INPUT') return;
+  togglePhoto(id);
+}
+
+function togglePhoto(id) {
+  if (_selectAllFilter) {
+    _selectAllFilter = false;
+    _selectedIds = new Set(Object.keys(_photoData).map(Number));
+    document.getElementById('sel-filter-note').style.display = 'none';
+  }
+  const el = document.getElementById(`thumb-${id}`);
+  const cb = el.querySelector('.photo-cb');
+  if (_selectedIds.has(id)) {
+    _selectedIds.delete(id);
+    el.classList.remove('selected');
+    cb.checked = false;
+  } else {
+    _selectedIds.add(id);
+    el.classList.add('selected');
+    cb.checked = true;
+  }
+  _updateUI();
+}
+
+document.getElementById('select-all-cb').addEventListener('change', function() {
+  if (this.checked) {
+    _selectAllFilter = true;
+    _selectedIds.clear();
+    document.querySelectorAll('.photo-cb').forEach(cb => { cb.checked = true; });
+    document.querySelectorAll('.lib-thumb').forEach(el => el.classList.add('selected'));
+    document.getElementById('sel-filter-note').style.display = '';
+  } else {
+    clearSelection();
+  }
+  _updateUI();
+});
+
+function clearSelection() {
+  _selectAllFilter = false;
+  _selectedIds.clear();
+  document.querySelectorAll('.photo-cb').forEach(cb => { cb.checked = false; });
+  document.querySelectorAll('.lib-thumb').forEach(el => el.classList.remove('selected'));
+  document.getElementById('select-all-cb').checked = false;
+  document.getElementById('sel-filter-note').style.display = 'none';
+  _updateUI();
+  closePanel();
+}
+
+function _selectionCount() {
+  return _selectAllFilter ? _totalMatching : _selectedIds.size;
+}
+
+function _updateUI() {
+  const n = _selectionCount();
+  const actionBar = document.getElementById('lib-action-bar');
+  document.getElementById('sel-count-label').textContent = `${n} selected`;
+  if (n > 0) {
+    actionBar.classList.add('visible');
+  } else {
+    actionBar.classList.remove('visible');
+    closePanel();
+  }
+}
+
+// ── Inline edit panel ────────────────────────────────────────────────
+let _currentField = null;
+let _panelTags = [];
+
+function openPanel(field) {
+  _currentField = field;
+  _panelTags = [];
+  const panel = document.getElementById('lib-edit-panel');
+  const textWrap = document.getElementById('panel-text-wrap');
+  const tagWrap = document.getElementById('panel-tag-wrap');
+  const titleEl = document.getElementById('panel-title');
+  const input = document.getElementById('panel-text-input');
+  const textarea = document.getElementById('panel-textarea');
+
+  panel.classList.add('visible');
+
+  if (field === 'title') {
+    titleEl.textContent = `Edit title · ${_selectionCount()} photos`;
+    textWrap.style.display = '';
+    tagWrap.style.display = 'none';
+    input.style.display = '';
+    textarea.style.display = 'none';
+    input.value = '';
+    input.focus();
+    input.oninput = _updatePreview;
+    document.getElementById('skip-existing-cb').onchange = _updatePreview;
+  } else if (field === 'description') {
+    titleEl.textContent = `Edit description · ${_selectionCount()} photos`;
+    textWrap.style.display = '';
+    tagWrap.style.display = 'none';
+    input.style.display = 'none';
+    textarea.style.display = '';
+    textarea.value = '';
+    textarea.focus();
+    textarea.oninput = _updatePreview;
+    document.getElementById('skip-existing-cb').onchange = _updatePreview;
+  } else {
+    titleEl.textContent = (field === 'tags_add' ? 'Add tags' : 'Remove tags') +
+      ` · ${_selectionCount()} photos`;
+    textWrap.style.display = 'none';
+    tagWrap.style.display = '';
+    _renderTagChips();
+    document.getElementById('tag-chip-input').focus();
+  }
+  _updatePreview();
+}
+
+function closePanel() {
+  document.getElementById('lib-edit-panel').classList.remove('visible');
+  document.getElementById('panel-preview').innerHTML = '';
+  document.getElementById('panel-confirm-btn').disabled = true;
+  _currentField = null;
+  _panelTags = [];
+  const wrap = document.getElementById('tag-chip-wrap');
+  if (wrap) wrap.querySelectorAll('.tag-chip').forEach(c => c.remove());
+}
+
+document.getElementById('tag-chip-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault();
+    const val = this.value.trim().replace(/,+$/, '');
+    if (val && !_panelTags.includes(val)) {
+      _panelTags.push(val);
+      _renderTagChips();
+      _updatePreview();
+    }
+    this.value = '';
+  } else if (e.key === 'Backspace' && !this.value && _panelTags.length) {
+    _panelTags.pop();
+    _renderTagChips();
+    _updatePreview();
+  }
+});
+
+function _renderTagChips() {
+  const wrap = document.getElementById('tag-chip-wrap');
+  wrap.querySelectorAll('.tag-chip').forEach(c => c.remove());
+  const input = document.getElementById('tag-chip-input');
+  const isRemove = _currentField === 'tags_remove';
+  _panelTags.forEach(tag => {
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip' + (isRemove ? ' remove-chip' : '');
+    chip.innerHTML = `${tag} <button onclick="removeChip('${tag}')">×</button>`;
+    wrap.insertBefore(chip, input);
+  });
+}
+
+function removeChip(tag) {
+  _panelTags = _panelTags.filter(t => t !== tag);
+  _renderTagChips();
+  _updatePreview();
+}
+
+function _getTextValue() {
+  if (_currentField === 'title') return document.getElementById('panel-text-input').value.trim();
+  if (_currentField === 'description') return document.getElementById('panel-textarea').value.trim();
+  return '';
+}
+
+function _updatePreview() {
+  const previewEl = document.getElementById('panel-preview');
+  const confirmBtn = document.getElementById('panel-confirm-btn');
+  const hasInput = (_currentField === 'tags_add' || _currentField === 'tags_remove')
+    ? _panelTags.length > 0
+    : _getTextValue().length > 0;
+
+  if (!hasInput) {
+    previewEl.innerHTML = '';
+    confirmBtn.disabled = true;
+    return;
+  }
+
+  if (!_selectAllFilter && _selectedIds.size > 0 && _selectedIds.size <= Object.keys(_photoData).length) {
+    const ids = [..._selectedIds];
+    const skipExisting = document.getElementById('skip-existing-cb')?.checked ?? true;
+    let willUpdate = 0, willSkip = 0;
+    for (const id of ids) {
+      const d = _photoData[id];
+      if (!d) continue;
+      if (_currentField === 'title') {
+        if (skipExisting && (d.title || '').trim()) willSkip++; else willUpdate++;
+      } else if (_currentField === 'description') {
+        if (skipExisting && (d.description || '').trim()) willSkip++; else willUpdate++;
+      } else if (_currentField === 'tags_add') {
+        const missing = _panelTags.filter(t => !d.tags.includes(t));
+        if (missing.length) willUpdate++; else willSkip++;
+      } else if (_currentField === 'tags_remove') {
+        const present = _panelTags.filter(t => d.tags.includes(t));
+        if (present.length) willUpdate++; else willSkip++;
+      }
+    }
+    _renderPreviewCounts(willUpdate, willSkip);
+    confirmBtn.disabled = willUpdate === 0;
+    return;
+  }
+
+  _fetchPreview().then(result => {
+    _renderPreviewCounts(result.would_update, result.would_skip);
+    confirmBtn.disabled = result.would_update === 0;
+  });
+}
+
+function _renderPreviewCounts(willUpdate, willSkip) {
+  const previewEl = document.getElementById('panel-preview');
+  const isRemove = _currentField === 'tags_remove';
+  const updateHtml = isRemove
+    ? `<span class="warn">${willUpdate} photo${willUpdate !== 1 ? 's' : ''} will be updated</span>`
+    : `<strong>${willUpdate} photo${willUpdate !== 1 ? 's' : ''} will be updated</strong>`;
+  const skipHtml = willSkip ? ` · ${willSkip} skipped` : '';
+  previewEl.innerHTML = updateHtml + skipHtml;
+}
+
+async function _fetchPreview() {
+  const payload = _buildPayload(true);
+  try {
+    const r = await fetch('/api/bulk-edit', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+      body: JSON.stringify(payload),
+    });
+    return await r.json();
+  } catch (e) {
+    return {would_update: 0, would_skip: 0};
+  }
+}
+
+function _buildPayload(dryRun) {
+  const payload = { field: _currentField, dry_run: dryRun };
+  if (_currentField === 'title' || _currentField === 'description') {
+    payload.value = _getTextValue();
+    payload.skip_existing = document.getElementById('skip-existing-cb')?.checked ?? true;
+  } else {
+    payload.tags = _panelTags;
+  }
+  if (_selectAllFilter) {
+    const form = document.getElementById('lib-filter-form');
+    const fd = new FormData(form);
+    payload.filter = {
+      date_from: fd.get('date_from') || null,
+      date_to: fd.get('date_to') || null,
+      album_id: fd.get('album_id') ? parseInt(fd.get('album_id')) : null,
+      tag: fd.get('tag') || null,
+      status: fd.get('status') || null,
+      untitled: fd.get('untitled') === '1',
+    };
+  } else {
+    payload.photo_ids = [..._selectedIds];
+  }
+  return payload;
+}
+
+async function submitPanel() {
+  const btn = document.getElementById('panel-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Queuing…';
+  try {
+    const payload = _buildPayload(false);
+    const r = await fetch('/api/bulk-edit', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      const n = data.proposals_created;
+      btn.textContent = `✓ Queued ${n} proposal${n !== 1 ? 's' : ''}`;
+      setTimeout(() => {
+        closePanel();
+        clearSelection();
+        btn.textContent = 'Queue proposals';
+      }, 1500);
+    } else {
+      btn.textContent = 'Error — try again';
+      setTimeout(() => { btn.textContent = 'Queue proposals'; btn.disabled = false; }, 2000);
+    }
+  } catch (e) {
+    btn.textContent = 'Error';
+    btn.disabled = false;
+  }
+}
+</script>
+{% endblock %}

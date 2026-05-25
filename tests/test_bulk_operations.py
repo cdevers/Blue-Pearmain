@@ -18,8 +18,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import reviewer.app as app_module  # noqa: E402
 from db.db import Database  # noqa: E402
 
 
@@ -502,3 +505,58 @@ class TestBulkProposals(unittest.TestCase):
         self.db.resolve_proposal(proposals[0]["id"], "applied")
         n = self.db.reject_bulk_batch(bid)
         self.assertEqual(n, 1)
+
+
+# ===========================================================================
+# Task 4 — /library route
+# ===========================================================================
+
+
+@pytest.fixture(scope="module")
+def lib_client():
+    with tempfile.TemporaryDirectory() as tmp:
+        test_db = Database(Path(tmp) / "test.db")
+        for i in range(1, 6):
+            test_db.upsert_photo(
+                {
+                    "uuid": f"lib-uuid-{i}",
+                    "flickr_id": f"flickr-{i}",
+                    "original_filename": f"IMG_{i:04d}.JPG",
+                    "privacy_state": "already_public",
+                    "date_taken": f"2024-0{min(i, 9)}-10 12:00:00",
+                    "flickr_title": f"Title {i}" if i % 2 == 0 else "",
+                    "flickr_tags": json.dumps([f"tag{i}"]),
+                    "photos_tags": json.dumps([]),
+                    "apple_persons": [],
+                    "proposed_tags": [],
+                }
+            )
+        app_module._db = test_db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+        with app_module.app.test_client() as c:
+            yield c
+        app_module._db = None
+
+
+class TestLibraryRoute:
+    def test_library_page_200(self, lib_client):
+        resp = lib_client.get("/library")
+        assert resp.status_code == 200
+
+    def test_library_page_shows_photos(self, lib_client):
+        resp = lib_client.get("/library")
+        html = resp.data.decode()
+        assert "IMG_0001.JPG" in html or "library" in html.lower()
+
+    def test_library_filter_status(self, lib_client):
+        resp = lib_client.get("/library?status=public")
+        assert resp.status_code == 200
+
+    def test_library_filter_untitled(self, lib_client):
+        resp = lib_client.get("/library?untitled=1")
+        assert resp.status_code == 200
+
+    def test_library_pagination(self, lib_client):
+        resp = lib_client.get("/library?page=1&per_page=2")
+        assert resp.status_code == 200
