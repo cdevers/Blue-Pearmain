@@ -1002,6 +1002,86 @@ class Database:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_all_albums_with_counts(self) -> list[dict]:
+        """Return all non-deleted albums with active photo membership counts, ordered by name."""
+        rows = self.conn.execute(
+            """SELECT a.id, a.name, a.flickr_set_id,
+                      COUNT(pa.photo_id) AS photo_count
+               FROM albums a
+               LEFT JOIN photo_albums pa ON pa.album_id = a.id
+                                         AND pa.removed_at IS NULL
+               WHERE a.deleted_at IS NULL
+               GROUP BY a.id
+               ORDER BY a.name""",
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_album_membership_for_photos(self, photo_ids: list[int]) -> dict[int, set[int]]:
+        """
+        Return {album_id: {photo_id, ...}} for all active memberships among the given photo_ids.
+        Used to show current membership state in the Add-to-album panel.
+        Empty list input returns empty dict.
+        """
+        if not photo_ids:
+            return {}
+        placeholders = ",".join("?" * len(photo_ids))
+        rows = self.conn.execute(
+            f"""SELECT album_id, photo_id
+                FROM photo_albums
+                WHERE photo_id IN ({placeholders})
+                  AND removed_at IS NULL""",
+            photo_ids,
+        ).fetchall()
+        result: dict[int, set[int]] = {}
+        for row in rows:
+            result.setdefault(row["album_id"], set()).add(row["photo_id"])
+        return result
+
+    def bulk_upsert_photo_albums(self, photo_ids: list[int], album_id: int) -> int:
+        """
+        Add photo_ids to album_id without committing — caller must commit.
+        Idempotent: already-active rows are no-ops (not counted).
+        Tombstoned rows have removed_at cleared and are counted as re-activated.
+        Returns count of newly inserted or re-activated rows.
+        """
+        if not photo_ids:
+            return 0
+        added = 0
+        for photo_id in photo_ids:
+            cur = self.conn.execute(
+                "INSERT OR IGNORE INTO photo_albums (photo_id, album_id) VALUES (?, ?)",
+                (photo_id, album_id),
+            )
+            if cur.rowcount > 0:
+                added += 1
+            else:
+                cur2 = self.conn.execute(
+                    "UPDATE photo_albums SET removed_at = NULL "
+                    "WHERE photo_id = ? AND album_id = ? AND removed_at IS NOT NULL",
+                    (photo_id, album_id),
+                )
+                added += cur2.rowcount
+        return added
+
+    def bulk_remove_photo_albums(self, photo_ids: list[int], album_id: int) -> int:
+        """
+        Tombstone photo_ids in album_id without committing — caller must commit.
+        Only tombstones active (non-tombstoned) rows; already-tombstoned rows are no-ops.
+        Returns count of newly tombstoned rows.
+        """
+        if not photo_ids:
+            return 0
+        removed = 0
+        _now = _now_iso()
+        for photo_id in photo_ids:
+            cur = self.conn.execute(
+                "UPDATE photo_albums SET removed_at = ? "
+                "WHERE photo_id = ? AND album_id = ? AND removed_at IS NULL",
+                (_now, photo_id, album_id),
+            )
+            removed += cur.rowcount
+        return removed
+
     # -----------------------------------------------------------------------
     # Bulk operations
     # -----------------------------------------------------------------------
