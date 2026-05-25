@@ -732,6 +732,12 @@ def zones() -> str:
     return render_template("zones.html", zones=[dict(r) for r in zone_rows])
 
 
+@app.route("/albums")
+def albums_index() -> str:
+    albums = db().get_all_albums_with_counts()
+    return render_template("albums.html", albums=albums)
+
+
 @app.route("/library")
 def library() -> str:
     page = int(request.args.get("page", 1))
@@ -766,6 +772,10 @@ def library() -> str:
     )
     albums = db().get_all_albums()
 
+    current_album = None
+    if album_id is not None:
+        current_album = next((a for a in albums if a["id"] == album_id), None)
+
     return render_template(
         "library.html",
         photos=photos,
@@ -774,6 +784,7 @@ def library() -> str:
         page=page,
         per_page=per_page,
         total_pages=max(1, (total + per_page - 1) // per_page),
+        current_album=current_album,
         filters={
             "date_from": date_from or "",
             "date_to": date_to or "",
@@ -1217,6 +1228,59 @@ def api_bulk_edit() -> _JsonResp:
 def api_bulk_batch_reject(batch_id: int) -> _JsonResp:
     n = db().reject_bulk_batch(batch_id)
     return jsonify({"ok": True, "rejected": n})
+
+
+@app.route("/api/album-membership", methods=["POST"])
+def api_album_membership_write() -> _JsonResp:
+    data = request.get_json(silent=True) or {}
+    photo_ids: list[int] = data.get("photo_ids", [])
+    add_album_ids: list[int] = data.get("add", [])
+    remove_album_ids: list[int] = data.get("remove", [])
+
+    if not photo_ids:
+        return jsonify({"error": "photo_ids required"}), 400
+    if not isinstance(photo_ids, list) or not all(isinstance(i, int) for i in photo_ids):
+        return jsonify({"error": "photo_ids must be a list of integers"}), 400
+
+    # Validate album IDs exist
+    all_requested = set(add_album_ids) | set(remove_album_ids)
+    if all_requested:
+        valid_ids = {a["id"] for a in db().get_all_albums()}
+        invalid = all_requested - valid_ids
+        if invalid:
+            return jsonify({"error": f"Unknown album_id(s): {sorted(invalid)}"}), 400
+
+    try:
+        added = 0
+        removed = 0
+        for album_id in add_album_ids:
+            added += db().bulk_upsert_photo_albums(photo_ids, album_id)
+        for album_id in remove_album_ids:
+            removed += db().bulk_remove_photo_albums(photo_ids, album_id)
+        db().conn.commit()
+    except Exception:
+        try:
+            db().conn.rollback()
+        except Exception:
+            pass
+        raise
+
+    return jsonify({"added": added, "removed": removed})
+
+
+@app.route("/api/album-membership", methods=["GET"])
+def api_album_membership_read() -> _JsonResp:
+    raw = request.args.get("photo_ids", "")
+    if not raw:
+        return jsonify({"membership": {}})
+    try:
+        photo_ids = [int(x) for x in raw.split(",") if x.strip()]
+    except ValueError:
+        return jsonify({"error": "photo_ids must be comma-separated integers"}), 400
+    membership = db().get_album_membership_for_photos(photo_ids)
+    # JSON keys must be strings; convert set → list for serialisation
+    serialisable = {str(k): list(v) for k, v in membership.items()}
+    return jsonify({"membership": serialisable})
 
 
 @app.route("/api/stats")
