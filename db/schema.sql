@@ -338,3 +338,7 @@ CREATE INDEX IF NOT EXISTS idx_proposals_field_target
 CREATE UNIQUE INDEX IF NOT EXISTS idx_proposals_identity
     ON metadata_proposals(photo_id, field, proposed_value, target, source)
     WHERE status = 'pending';
+-- Fast lookup of proposals belonging to a bulk batch (for grouping and batch-reject)
+CREATE INDEX IF NOT EXISTS idx_proposals_batch
+    ON metadata_proposals(batch_id)
+    WHERE batch_id IS NOT NULL;

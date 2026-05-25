@@ -74,6 +74,12 @@ def run(db_path: str, dry_run: bool = False) -> None:
         conn.execute(
             "ALTER TABLE metadata_proposals ADD COLUMN batch_id INTEGER REFERENCES bulk_batches(id)"
         )
+        # Index for fast batch-level lookups (grouping + batch-reject)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_proposals_batch
+            ON metadata_proposals(batch_id)
+            WHERE batch_id IS NOT NULL
+        """)
 
     conn.execute(
         "INSERT OR IGNORE INTO schema_migrations (name, applied_at) VALUES (?, ?)",
