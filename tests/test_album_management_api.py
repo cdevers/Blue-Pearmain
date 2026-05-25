@@ -96,6 +96,7 @@ class TestAlbumRename:
             content_type="application/json",
         )
         assert resp.status_code == 404
+        assert resp.get_json()["ok"] is False
 
     def test_rename_twice_before_sync(self, client_and_albums):
         """Rename a second time before sync runs — DB holds the latest name."""
@@ -112,8 +113,10 @@ class TestAlbumRename:
         )
         row = db.conn.execute("SELECT name, flickr_name FROM albums WHERE id = ?", (a1,)).fetchone()
         assert row["name"] == "Second Rename"
-        # flickr_name unchanged — still reflects last Flickr push, not the pending rename
-        assert row["flickr_name"] != "Second Rename" or row["flickr_name"] is None
+        # flickr_name is NULL in a fresh test DB (upsert_album never sets it).
+        # rename_album must not overwrite it — if it did, sync tooling could not
+        # detect a pending rename by comparing name vs flickr_name.
+        assert row["flickr_name"] is None
 
 
 class TestAlbumDelete:

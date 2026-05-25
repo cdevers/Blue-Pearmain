@@ -1025,6 +1025,9 @@ class Database:
         sync_album_titles() (called by bp sync-albums) pushes albums.name to
         the Flickr photoset title and then calls set_album_flickr_name() to
         bring flickr_name back in sync.
+
+        Note: does not check deleted_at. The caller is responsible for
+        confirming the album is not soft-deleted before calling this method.
         """
         self.conn.execute(
             "UPDATE albums SET name = ?, updated_at = ? WHERE id = ?",
