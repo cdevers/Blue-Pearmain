@@ -912,7 +912,7 @@ class Database:
         where = "WHERE " + " AND ".join(clauses)
 
         if album_id is not None:
-            return where + " AND pa.album_id = ?", params + [album_id]
+            return where + " AND pa.album_id = ? AND pa.removed_at IS NULL", params + [album_id]
 
         return where, params
 

@@ -261,3 +261,19 @@ class TestLibraryPhotos(unittest.TestCase):
         names = [a["name"] for a in albums]
         self.assertIn("My Album", names)
         self.assertNotIn("Deleted Album", names)
+
+    def test_library_album_filter_excludes_tombstoned_membership(self):
+        """Photos removed from an album (removed_at set) should not appear in album filter."""
+        from datetime import datetime, timezone
+
+        album_id = self.db.upsert_album("album-tomb-1", "Tombstone Album")
+        # Add p1 to the album, then tombstone it
+        self.db.upsert_photo_album(self.p1, album_id)
+        self.db.conn.execute(
+            "UPDATE photo_albums SET removed_at=? WHERE photo_id=? AND album_id=?",
+            (datetime.now(timezone.utc).isoformat(), self.p1, album_id),
+        )
+        self.db.conn.commit()
+        rows = self.db.library_photos(album_id=album_id)
+        ids = {r["id"] for r in rows}
+        self.assertNotIn(self.p1, ids)
