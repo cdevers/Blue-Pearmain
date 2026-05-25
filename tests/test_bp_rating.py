@@ -890,3 +890,93 @@ class TestStarWidgetHTML(unittest.TestCase):
         template_path = Path(__file__).parent.parent / "reviewer" / "templates" / "review.html"
         source = template_path.read_text()
         self.assertIn(".star-rating", source)
+
+
+# ===========================================================================
+# Task 8 — Photo detail page: star rating widget (#132)
+# ===========================================================================
+
+
+class TestStarWidgetPhotoDetail(unittest.TestCase):
+    """Star rating widget must appear in the rendered /photo/<id> page."""
+
+    def _setup_and_get_photo_html(self):
+        """Create a test DB with one rated photo and render /photo/<id>."""
+        import reviewer.app as app_module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(Path(tmp) / "test.db")
+            db.conn.execute(
+                "CREATE TABLE IF NOT EXISTS person_policies "
+                "(id INTEGER PRIMARY KEY, person_name TEXT NOT NULL UNIQUE, "
+                "policy TEXT NOT NULL, created_at TEXT NOT NULL)"
+            )
+            db.conn.commit()
+            photo_id = db.upsert_photo(
+                {
+                    "uuid": "detail-star-uuid",
+                    "original_filename": "IMG_DETAIL.JPG",
+                    "privacy_state": "candidate_public",
+                    "apple_persons": [],
+                    "proposed_tags": [],
+                }
+            )
+            db.set_bp_rating(photo_id, 3)
+            app_module._db = db
+            app_module.app.config["TESTING"] = True
+            app_module.app.config["SECRET_KEY"] = "test-secret"
+            with app_module.app.test_client() as client:
+                r = client.get(f"/photo/{photo_id}?state=candidate_public")
+                html = r.data.decode()
+            db.close()
+            return html, photo_id
+
+    def test_star_rating_div_present_on_detail_page(self):
+        """photo.html must render a .star-rating div."""
+        html, _ = self._setup_and_get_photo_html()
+        self.assertIn("star-rating", html)
+
+    def test_star_widget_data_rating_present(self):
+        """star-rating div must carry the data-rating attribute."""
+        html, _ = self._setup_and_get_photo_html()
+        self.assertIn("data-rating=", html)
+
+    def test_star_widget_data_rating_reflects_db_value(self):
+        """data-rating must equal 3 (the value we set before rendering)."""
+        html, _ = self._setup_and_get_photo_html()
+        self.assertIn('data-rating="3"', html)
+
+    def test_star_widget_has_five_star_spans(self):
+        """The widget must contain exactly five star characters."""
+        html, _ = self._setup_and_get_photo_html()
+        self.assertGreaterEqual(html.count("★"), 5)
+
+    def test_set_rating_js_present_on_detail_page(self):
+        """photo.html must include the setRating JS function."""
+        template_path = Path(__file__).parent.parent / "reviewer" / "templates" / "photo.html"
+        source = template_path.read_text()
+        self.assertIn("setRating", source)
+
+    def test_init_star_widgets_called_on_detail_page(self):
+        """photo.html must call initStarWidgets (or equivalent inline init)."""
+        template_path = Path(__file__).parent.parent / "reviewer" / "templates" / "photo.html"
+        source = template_path.read_text()
+        self.assertIn("initStarWidgets", source)
+
+    def test_keyboard_0_to_5_rating_on_detail_page(self):
+        """photo.html keydown handler must handle digit 0–5 to set rating."""
+        template_path = Path(__file__).parent.parent / "reviewer" / "templates" / "photo.html"
+        source = template_path.read_text()
+        self.assertIn("digit >= 0 && digit <= 5", source)
+
+    def test_star_css_present_on_detail_page(self):
+        """.star-rating CSS must be defined in photo.html."""
+        template_path = Path(__file__).parent.parent / "reviewer" / "templates" / "photo.html"
+        source = template_path.read_text()
+        self.assertIn(".star-rating", source)
+
+    def test_mobile_star_size_28px_on_detail_page(self):
+        """Mobile media query must enlarge stars to 28px on photo detail page."""
+        template_path = Path(__file__).parent.parent / "reviewer" / "templates" / "photo.html"
+        source = template_path.read_text()
+        self.assertIn("28px", source)

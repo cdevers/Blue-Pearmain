@@ -226,7 +226,7 @@ For ongoing use, all three services run as launchd agents — no terminal window
 | `db/migrate_003_dimensions_and_dedup.py` | DB migration: adds width/height columns and duplicate_groups table |
 | `db/` (`operation_log` table) | Append-only journal of all BP mutations (review decisions, proposal applies, reconcile fixes, tag writebacks) |
 | `bp` | Unified command-line entry point |
-| `tests/` | Unit tests (1102 tests) |
+| `tests/` | Unit tests (1111 tests) |
 
 ## Review UI
 
@@ -568,7 +568,7 @@ make test              # runs: python -m pytest tests/ -q
 make lint              # runs: mypy + ruff check + ruff format --check
 ```
 
-1102 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, Friends/Family visibility, reconcile convergence (pushed_tags ledger), tag write-back to Photos.app, reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration), Flickr re-upload duplicate enforcement (mark/delete discards), sync-albums removal phase, macOS daemon notifications, tag protection rules, reconcile --explain, operational status reporting, per-person privacy policies, operation journal (append-only log of all BP mutations), panoramic review UI layout, portrait panoramic tile support (rotation-aware detection), video badge/label indicators in the review grid, star ratings (0–5 bp_rating field, Apple Photos heart sync, Flickr bp:rating=N machine tags, reviewer UI widget with keyboard shortcuts 0–5), edit_pair duplicate category (iPhone original + edited version detection), dedup stale-group cleanup (--prune removes zombie groups and repairs stale photo_count), local Photos derivative thumbnails (multi-path fallback + live reviewer lookup with negative-miss sentinel), and local_duplicate classifier (same-fingerprint Apple Photos imports). See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
+1111 tests covering the privacy classifier, metadata sync pipeline, Flickr client (retry/backoff/rate-limiting), review UI routes, duplicate detection, orphan linking, album/collection sync, daemon install/uninstall, screenshot classification, Friends/Family visibility, reconcile convergence (pushed_tags ledger), tag write-back to Photos.app, reliability edge cases (file-descriptor lifecycle, Photos hang prevention, mDNS registration), Flickr re-upload duplicate enforcement (mark/delete discards), sync-albums removal phase, macOS daemon notifications, tag protection rules, reconcile --explain, operational status reporting, per-person privacy policies, operation journal (append-only log of all BP mutations), panoramic review UI layout, portrait panoramic tile support (rotation-aware detection), video badge/label indicators in the review grid, star ratings (0–5 bp_rating field, Apple Photos heart sync, Flickr bp:rating=N machine tags, reviewer UI widget with keyboard shortcuts 0–5), edit_pair duplicate category (iPhone original + edited version detection), dedup stale-group cleanup (--prune removes zombie groups and repairs stale photo_count), local Photos derivative thumbnails (multi-path fallback + live reviewer lookup with negative-miss sentinel), and local_duplicate classifier (same-fingerprint Apple Photos imports). See [`docs/testing.md`](docs/testing.md) for the full coverage inventory.
 
 CI runs the same suite on every push to `main` and on pull requests.
 

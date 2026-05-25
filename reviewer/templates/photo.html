@@ -189,6 +189,24 @@
   font-family: monospace;
   font-size: 10px;
 }
+/* Star rating widget */
+.star-rating {
+  margin: 6px 0 4px;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  user-select: none;
+}
+.star-rating .star { color: #555; transition: color 0.1s; }
+.star-rating .star.filled { color: #f5a623; }
+
+@media (max-width: 640px) {
+  /* Bigger stars for accurate touch targets on mobile */
+  .star-rating {
+    font-size: 28px;
+    margin: 8px 0;
+  }
+}
 {% endblock %}
 
 {% block content %}
@@ -240,6 +258,15 @@
       {% endif %}
     </div>
 
+    <!-- Star rating -->
+    {% set _bp_rating = photo.bp_rating if photo.bp_rating is defined else 0 %}
+    <div class="star-rating" data-id="{{ photo.id }}" data-rating="{{ _bp_rating }}">
+      {% for n in [1, 2, 3, 4, 5] %}
+        <span class="star{% if n <= _bp_rating %} filled{% endif %}"
+              data-value="{{ n }}">★</span>
+      {% endfor %}
+    </div>
+
     <!-- Actions — fixed at top so position is consistent across photos -->
     <div class="action-row">
       <button class="btn btn-public" onclick="doDecide('make_public', true)">
@@ -277,6 +304,7 @@
       <span><kbd>D</kbd> title</span>
       <span><kbd>T</kbd> tags</span>
       <span><kbd>N</kbd> faces</span>
+      <span><kbd>0</kbd>–<kbd>5</kbd> rating</span>
     </div>
 
     <!-- Apple AI caption -->
@@ -586,6 +614,13 @@ async function rotateFlickr(degrees) {
 
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  // Keys 0–5: set star rating
+  const digit = parseInt(e.key, 10);
+  if (!isNaN(digit) && digit >= 0 && digit <= 5) {
+    const container = document.querySelector('.star-rating');
+    if (container) setRating(parseInt(container.dataset.id), digit, container);
+    return;
+  }
   if ((e.key === 'z' || e.key === 'Z') && !e.target.matches('input, textarea, select')) {
     doUndo();
     return;
@@ -622,5 +657,49 @@ document.addEventListener('keydown', e => {
     if (a) window.location.href = a.href;
   }
 });
+
+// Star rating widget
+function initStarWidgets() {
+  document.querySelectorAll('.star-rating').forEach(container => {
+    const stars = [...container.querySelectorAll('.star')];
+    const current = () => parseInt(container.dataset.rating) || 0;
+
+    stars.forEach((star, idx) => {
+      star.addEventListener('mouseover', () => {
+        stars.forEach((s, i) => s.classList.toggle('filled', i <= idx));
+      });
+    });
+    container.addEventListener('mouseleave', () => {
+      const c = current();
+      stars.forEach((s, i) => s.classList.toggle('filled', i < c));
+    });
+
+    stars.forEach(star => {
+      star.addEventListener('click', e => {
+        e.stopPropagation();
+        const val = parseInt(star.dataset.value);
+        const newRating = val === current() ? 0 : val;
+        setRating(parseInt(container.dataset.id), newRating, container);
+      });
+    });
+  });
+}
+
+async function setRating(id, rating, container) {
+  const r = await apiFetch(`/rate/${id}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rating }),
+  });
+  if (!r.ok) return;
+  const d = await r.json();
+  if (d.ok) {
+    container.dataset.rating = d.bp_rating;
+    const stars = [...container.querySelectorAll('.star')];
+    stars.forEach((s, i) => s.classList.toggle('filled', i < d.bp_rating));
+  }
+}
+
+document.addEventListener('DOMContentLoaded', initStarWidgets);
 </script>
 {% endblock %}
