@@ -1186,7 +1186,9 @@ if (window.innerWidth <= 640) {
         if (isProtected(card)) {
           pulseProtectedBadge(card);
         } else {
-          quickDecide(+card.dataset.id, 'make_public', card);
+          const _pubDecision = (typeof _stateFilter !== 'undefined' && _stateFilter === 'screenshot_public')
+            ? 'confirm_public' : 'make_public';
+          quickDecide(+card.dataset.id, _pubDecision, card);
         }
       } else {
         // Swipe left → private
