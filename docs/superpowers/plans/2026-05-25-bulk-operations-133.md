@@ -2189,6 +2189,8 @@ def api_bulk_edit() -> _JsonResp:
         "tags_add": None, "tags_remove": None,
     }
 
+    # batch creation and proposal insertion are two separate SQLite commits.
+    # Clean up any orphan batch record if proposal insertion throws.
     batch_id = _db.create_bulk_batch(
         operation=operation_map[field],
         field=db_field_map[field],
@@ -2198,14 +2200,19 @@ def api_bulk_edit() -> _JsonResp:
         photo_count=len(photo_ids),
     )
 
-    created = _db.insert_bulk_proposals(
-        batch_id=batch_id,
-        photo_ids=photo_ids,
-        field=field,
-        value=value,
-        tags=tags,
-        skip_existing=skip_existing,
-    )
+    try:
+        created = _db.insert_bulk_proposals(
+            batch_id=batch_id,
+            photo_ids=photo_ids,
+            field=field,
+            value=value,
+            tags=tags,
+            skip_existing=skip_existing,
+        )
+    except Exception:
+        _db.conn.execute("DELETE FROM bulk_batches WHERE id=?", (batch_id,))
+        _db.conn.commit()
+        return jsonify({"ok": False, "error": "proposal insertion failed"}), 500
 
     return jsonify({"ok": True, "proposals_created": created, "batch_id": batch_id})
 ```
