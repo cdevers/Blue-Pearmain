@@ -1238,9 +1238,20 @@ def api_album_membership_write() -> _JsonResp:
     remove_album_ids: list[int] = data.get("remove", [])
 
     if not photo_ids:
-        return jsonify({"error": "photo_ids required"}), 400
-    if not isinstance(photo_ids, list) or not all(isinstance(i, int) for i in photo_ids):
-        return jsonify({"error": "photo_ids must be a list of integers"}), 400
+        return jsonify({"ok": False, "error": "photo_ids required"}), 400
+    try:
+        photo_ids = [int(i) for i in photo_ids]
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "photo_ids must be a list of integers"}), 400
+
+    # Validate and coerce add/remove album ID lists
+    if not isinstance(add_album_ids, list) or not isinstance(remove_album_ids, list):
+        return jsonify({"ok": False, "error": "add and remove must be lists"}), 400
+    try:
+        add_album_ids = [int(i) for i in add_album_ids]
+        remove_album_ids = [int(i) for i in remove_album_ids]
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "add and remove must be lists of integers"}), 400
 
     # Validate album IDs exist
     all_requested = set(add_album_ids) | set(remove_album_ids)
@@ -1248,7 +1259,7 @@ def api_album_membership_write() -> _JsonResp:
         valid_ids = {a["id"] for a in db().get_all_albums()}
         invalid = all_requested - valid_ids
         if invalid:
-            return jsonify({"error": f"Unknown album_id(s): {sorted(invalid)}"}), 400
+            return jsonify({"ok": False, "error": f"Unknown album_id(s): {sorted(invalid)}"}), 400
 
     try:
         added = 0
@@ -1265,22 +1276,22 @@ def api_album_membership_write() -> _JsonResp:
             pass
         raise
 
-    return jsonify({"added": added, "removed": removed})
+    return jsonify({"ok": True, "added": added, "removed": removed})
 
 
 @app.route("/api/album-membership", methods=["GET"])
 def api_album_membership_read() -> _JsonResp:
     raw = request.args.get("photo_ids", "")
     if not raw:
-        return jsonify({"membership": {}})
+        return jsonify({"ok": True, "membership": {}})
     try:
         photo_ids = [int(x) for x in raw.split(",") if x.strip()]
     except ValueError:
-        return jsonify({"error": "photo_ids must be comma-separated integers"}), 400
+        return jsonify({"ok": False, "error": "photo_ids must be comma-separated integers"}), 400
     membership = db().get_album_membership_for_photos(photo_ids)
     # JSON keys must be strings; convert set → list for serialisation
     serialisable = {str(k): list(v) for k, v in membership.items()}
-    return jsonify({"membership": serialisable})
+    return jsonify({"ok": True, "membership": serialisable})
 
 
 @app.route("/api/stats")

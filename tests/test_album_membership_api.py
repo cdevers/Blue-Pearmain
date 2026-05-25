@@ -185,6 +185,8 @@ class TestAlbumMembershipRead:
         resp = c.get(f"/api/album-membership?photo_ids={p1}")
         data = resp.get_json()
         assert str(a1) not in data["membership"]
+        # Restore state: reactivate so later tests are not affected
+        db.upsert_photo_album(p1, a1)
 
     def test_get_membership_empty_photo_ids_returns_empty(self, client_with_albums):
         c, *_ = client_with_albums
