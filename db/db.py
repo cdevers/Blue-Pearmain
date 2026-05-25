@@ -1016,6 +1016,22 @@ class Database:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def rename_album(self, album_id: int, name: str) -> None:
+        """Update the album's display name and timestamp.
+
+        flickr_name is intentionally NOT updated here — it holds the last
+        name successfully pushed to Flickr. After this call, name != flickr_name
+        signals a pending rename to any tooling that inspects both columns.
+        sync_album_titles() (called by bp sync-albums) pushes albums.name to
+        the Flickr photoset title and then calls set_album_flickr_name() to
+        bring flickr_name back in sync.
+        """
+        self.conn.execute(
+            "UPDATE albums SET name = ?, updated_at = ? WHERE id = ?",
+            (name, _now_iso(), album_id),
+        )
+        self.conn.commit()
+
     def get_album_membership_for_photos(self, photo_ids: list[int]) -> dict[int, set[int]]:
         """
         Return {album_id: {photo_id, ...}} for all active memberships among the given photo_ids.

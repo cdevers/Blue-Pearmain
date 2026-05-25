@@ -738,6 +738,43 @@ def albums_index() -> str:
     return render_template("albums.html", albums=albums)
 
 
+@app.route("/api/albums/<int:album_id>", methods=["PATCH"])
+def api_album_rename(album_id: int) -> _JsonResp:
+    row = (
+        db()
+        .conn.execute(
+            "SELECT id, name FROM albums WHERE id = ? AND deleted_at IS NULL", (album_id,)
+        )
+        .fetchone()
+    )
+    if not row:
+        return jsonify({"ok": False, "error": "album not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "")
+    if not isinstance(name, str) or not name.strip():
+        return jsonify({"ok": False, "error": "name must be a non-empty string"}), 400
+
+    name = name.strip()
+    db().rename_album(album_id, name)
+    return jsonify({"ok": True, "name": name})
+
+
+@app.route("/api/albums/<int:album_id>", methods=["DELETE"])
+def api_album_delete(album_id: int) -> _JsonResp:
+    # Check the album row exists at all (regardless of deleted_at)
+    row = (
+        db().conn.execute("SELECT id, deleted_at FROM albums WHERE id = ?", (album_id,)).fetchone()
+    )
+    if not row:
+        return jsonify({"ok": False, "error": "album not found"}), 404
+
+    # Idempotent: already-deleted albums are a no-op, not an error
+    if row["deleted_at"] is None:
+        db().mark_album_deleted(album_id)
+    return jsonify({"ok": True})
+
+
 @app.route("/library")
 def library() -> str:
     page = int(request.args.get("page", 1))
