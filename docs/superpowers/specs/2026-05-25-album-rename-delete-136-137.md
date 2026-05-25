@@ -2,7 +2,7 @@
 
 **Issues:** #136 (rename), #137 (delete)  
 **Date:** 2026-05-25  
-**Status:** Approved, awaiting implementation plan
+**Status:** ✓ done
 
 ---
 
