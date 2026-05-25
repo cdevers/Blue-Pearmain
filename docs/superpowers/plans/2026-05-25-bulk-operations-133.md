@@ -254,7 +254,7 @@ def run(db_path: str, dry_run: bool = False) -> None:
                 field       TEXT,
                 value       TEXT,
                 tags        TEXT,
-                filter      TEXT,
+                filter      TEXT,  -- audit metadata only, not executable replay state
                 photo_count INTEGER NOT NULL,
                 created_at  TEXT NOT NULL DEFAULT (datetime('now'))
             )
@@ -309,6 +309,8 @@ CREATE TABLE IF NOT EXISTS bulk_batches (
     value       TEXT,            -- new text value for title/description ops
     tags        TEXT,            -- JSON array of tag strings for tag ops
     filter      TEXT,            -- JSON filter object if filter-based selection, else NULL
+                                 -- Treat as audit/debug metadata only — not executable replay state.
+                                 -- Filter schema may drift over time; never re-execute this JSON.
     photo_count INTEGER NOT NULL,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -1054,6 +1056,9 @@ Add after the `get_all_albums` method:
             else:
                 raise ValueError(f"Unknown bulk field: {field!r}")
 
+            # One INSERT per photo — O(N) and correct for BP's scale.
+            # If selections routinely exceed ~10k photos, consider
+            # chunked executemany; for now individual inserts are fine.
             # INSERT OR IGNORE respects the unique pending index
             cur = self.conn.execute(
                 """INSERT OR IGNORE INTO metadata_proposals
