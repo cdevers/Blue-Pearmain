@@ -1033,4 +1033,193 @@ document.addEventListener('DOMContentLoaded', initStarWidgets);
     </div>
   </div>
 </div>
+
+<!-- Mobile single-card state management -->
+<script>
+// === MOBILE SINGLE-CARD VIEW ===
+// Active only on mobile (≤640px). Maintains currentMobileIndex into the
+// photo-card NodeList and updates which card has the mobile-current class.
+// Exposes showMobileCard() globally so the swipe section (Task 5) and
+// the mobileNavPrev/Next buttons can call it.
+
+let currentMobileIndex = 0;
+
+function showMobileCard(index) {
+  const cards = [...document.querySelectorAll('.photo-card')];
+  if (!cards.length) return;
+
+  // Clamp to valid range
+  currentMobileIndex = Math.max(0, Math.min(index, cards.length - 1));
+
+  // Swap mobile-current class
+  cards.forEach((c, i) => c.classList.toggle('mobile-current', i === currentMobileIndex));
+
+  // Keep the desktop selection in sync (preserves keyboard shortcut state)
+  selectCard(cards[currentMobileIndex]);
+
+  // Update ‹ N/Total › indicator
+  _updateMobileProgress(cards.length);
+
+  // Re-attach swipe handler to the now-visible card
+  // (window.attachSwipeHandler defined in Task 5 swipe section)
+  if (window.attachSwipeHandler) window.attachSwipeHandler(cards[currentMobileIndex]);
+
+  // Scroll to top so the photo is always fully visible
+  window.scrollTo({ top: 0, behavior: 'instant' });
+}
+
+function _updateMobileProgress(total) {
+  const el = document.getElementById('mobile-progress-text');
+  if (el) el.textContent = `${currentMobileIndex + 1} / ${total}`;
+}
+
+function mobileNavPrev() {
+  if (currentMobileIndex > 0) showMobileCard(currentMobileIndex - 1);
+}
+
+function mobileNavNext() {
+  const cards = [...document.querySelectorAll('.photo-card')];
+  if (currentMobileIndex < cards.length - 1) showMobileCard(currentMobileIndex + 1);
+}
+
+// Patch quickDecide to advance the mobile card view after a successful decision.
+// This is applied here — after quickDecide is defined in the script above —
+// so the original function is not modified directly (keeps the swipe logic isolated).
+if (window.innerWidth <= 640) {
+  const _quickDecide = quickDecide;
+  quickDecide = async function(id, decision, card) {
+    const cards = [...document.querySelectorAll('.photo-card')];
+    const idx = cards.indexOf(card);
+    await _quickDecide(id, decision, card);
+    // Only advance if the decision was applied (card has a decided-* class)
+    if (card.classList.contains('decided-pub') ||
+        card.classList.contains('decided-prv') ||
+        card.classList.contains('decided-skp')) {
+      showMobileCard(idx + 1);
+    }
+  };
+
+  // Initialise the mobile view once the page (and all cards) are loaded.
+  // The existing load handler already calls selectCard(first) and scrolls
+  // to top; our handler additionally activates the mobile-current class.
+  window.addEventListener('load', () => {
+    showMobileCard(0);
+  });
+}
+</script>
+
+<!-- Mobile swipe gesture detection -->
+<script>
+// === MOBILE SWIPE ===
+// Isolated touch handler for the review single-card view.
+// Detects directional swipes on the photo thumbnail and calls quickDecide.
+//
+// Swipe right  →  make_public
+// Swipe left   →  keep_private
+// Swipe up     →  skip
+//
+// A gesture fires only when:
+//   horizontal:  |deltaX| > 50 AND |deltaX| > |deltaY|
+//   upward:      deltaY < -50  AND |deltaY| > |deltaX|
+// All other movements (small or diagonal) are ignored — treated as scroll.
+
+(function() {
+  if (window.innerWidth > 640) return; // no-op on desktop
+
+  let _swipeStart = null;
+
+  // Named handler references (required for removeEventListener to work)
+  function onTouchStart(e) {
+    _swipeStart = {
+      x: e.changedTouches[0].clientX,
+      y: e.changedTouches[0].clientY,
+    };
+    e.currentTarget.addEventListener('touchmove', onTouchMove, { passive: true });
+  }
+
+  function onTouchMove(e) {
+    if (!_swipeStart) return;
+    const dx = e.changedTouches[0].clientX - _swipeStart.x;
+    const dy = e.changedTouches[0].clientY - _swipeStart.y;
+    const card = e.currentTarget.closest('.photo-card');
+    if (!card) return;
+
+    // Tint card background while dragging to signal pending decision
+    if (Math.abs(dx) > Math.abs(dy)) {
+      const intensity = Math.min(Math.abs(dx) / 200, 0.5);
+      if (dx > 20) {
+        card.style.background = `rgba(45, 125, 70, ${intensity})`; // green → public
+      } else if (dx < -20) {
+        card.style.background = `rgba(139, 32, 32, ${intensity})`; // red → private
+      } else {
+        card.style.background = '';
+      }
+    } else if (dy < -20) {
+      card.style.background = 'rgba(60, 60, 60, 0.3)'; // grey → skip
+    } else {
+      card.style.background = '';
+    }
+  }
+
+  function onTouchEnd(e) {
+    const thumb = e.currentTarget;
+    thumb.removeEventListener('touchmove', onTouchMove);
+
+    if (!_swipeStart) return;
+    const dx = e.changedTouches[0].clientX - _swipeStart.x;
+    const dy = e.changedTouches[0].clientY - _swipeStart.y;
+    _swipeStart = null;
+
+    const card = thumb.closest('.photo-card');
+    if (!card) return;
+
+    // Always clear tinting on release
+    card.style.background = '';
+
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    if (absDx > 50 && absDx > absDy) {
+      // Horizontal swipe
+      if (dx > 0) {
+        // Swipe right → public (or pulse badge if protected)
+        if (isProtected(card)) {
+          pulseProtectedBadge(card);
+        } else {
+          quickDecide(+card.dataset.id, 'make_public', card);
+        }
+      } else {
+        // Swipe left → private
+        quickDecide(+card.dataset.id, 'keep_private', card);
+      }
+    } else if (dy < -50 && absDy > absDx) {
+      // Upward swipe → skip
+      quickDecide(+card.dataset.id, 'skip', card);
+    }
+    // All other movements (scroll attempts, diagonal drags): do nothing
+  }
+
+  // Attach swipe handlers to a card's thumb element.
+  // Called by showMobileCard() each time a new card becomes current.
+  // Removes existing listeners before adding new ones (safe to call repeatedly).
+  function attachSwipeHandler(card) {
+    if (!card) return;
+    const thumb = card.querySelector('.thumb');
+    if (!thumb) return;
+    thumb.removeEventListener('touchstart', onTouchStart);
+    thumb.removeEventListener('touchend', onTouchEnd);
+    thumb.addEventListener('touchstart', onTouchStart, { passive: true });
+    thumb.addEventListener('touchend', onTouchEnd);
+  }
+
+  // Expose globally so showMobileCard (Task 4) can call it
+  window.attachSwipeHandler = attachSwipeHandler;
+
+  // Attach to the first card immediately (load handler in Task 4 will also
+  // call showMobileCard(0) → attachSwipeHandler, but this handles the case
+  // where this script runs after the load event)
+  const first = document.querySelector('.photo-card');
+  if (first) attachSwipeHandler(first);
+})();
+</script>
 {% endblock %}
