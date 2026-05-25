@@ -457,6 +457,28 @@ class Database:
                     ON operation_log(occurred_at);
             """)
             self.conn.commit()
+        if "bulk_batches" not in tables:
+            self.conn.executescript("""
+                CREATE TABLE IF NOT EXISTS bulk_batches (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    operation   TEXT NOT NULL,
+                    field       TEXT,
+                    value       TEXT,
+                    tags        TEXT,
+                    filter      TEXT,  -- audit metadata only, not executable replay state
+                    photo_count INTEGER NOT NULL,
+                    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+            """)
+            self.conn.commit()
+        prop_cols = {
+            r[1] for r in self.conn.execute("PRAGMA table_info(metadata_proposals)").fetchall()
+        }
+        if "batch_id" not in prop_cols:
+            self.conn.execute(
+                "ALTER TABLE metadata_proposals ADD COLUMN batch_id INTEGER REFERENCES bulk_batches(id)"
+            )
+            self.conn.commit()
 
     # -----------------------------------------------------------------------
     # Photo upsert — the main ingestion path
