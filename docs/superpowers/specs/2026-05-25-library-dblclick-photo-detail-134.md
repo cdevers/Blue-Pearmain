@@ -1,7 +1,7 @@
 # Library Double-Click to Photo Detail — Design Spec
 
 **Date:** 2026-05-25  
-**Status:** Approved, awaiting implementation plan
+**Status:** ✓ done
 
 ---
 

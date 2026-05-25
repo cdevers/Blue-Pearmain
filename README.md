@@ -22,7 +22,7 @@ Blue Pearmain addresses both:
 - Detects and queues duplicates (Snapbridge pairs, dual-device uploads) for review
 - Keeps Flickr and Apple Photos metadata in sync: auto-applies non-conflicts, queues collisions for human resolution
 - Serves a local web UI for the review queue, metadata proposals, duplicates, and album management
-- Library view with multi-select for bulk title, description, and tag editing across photo sets — changes queue as proposals before writing to Flickr
+- Library view with multi-select for bulk title, description, and tag editing across photo sets — changes queue as proposals before writing to Flickr; double-click any photo to open its detail page (larger image, editable title/description/tags) with a back link returning to the library
 
 Nothing is written to Flickr or Apple Photos without explicit human confirmation or auto-apply rules you've opted into.
 
