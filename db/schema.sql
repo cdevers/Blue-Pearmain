@@ -283,6 +283,24 @@ CREATE INDEX IF NOT EXISTS idx_metadata_conflicts_unresolved
 
 
 -- ============================================================
+-- Bulk operation batches: groups proposals created by bulk edits
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS bulk_batches (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    operation   TEXT NOT NULL,   -- 'set_title' | 'set_description' | 'tags_add' | 'tags_remove'
+    field       TEXT,            -- 'title' | 'description' | NULL for tag ops
+    value       TEXT,            -- new text value for title/description ops
+    tags        TEXT,            -- JSON array of tag strings for tag ops
+    filter      TEXT,            -- JSON filter object if filter-based selection, else NULL
+                                 -- Treat as audit/debug metadata only — not executable replay state.
+                                 -- Filter schema may drift over time; never re-execute this JSON.
+    photo_count INTEGER NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+
+-- ============================================================
 -- Metadata proposals: sync engine output, reviewed before apply
 -- ============================================================
 
@@ -304,7 +322,8 @@ CREATE TABLE IF NOT EXISTS metadata_proposals (
                                 CHECK(status IN ('pending', 'applied', 'rejected', 'superseded', 'failed')),
     created_at              TEXT NOT NULL,
     resolved_at             TEXT,
-    resolution_note         TEXT
+    resolution_note         TEXT,
+    batch_id                INTEGER REFERENCES bulk_batches(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_proposals_photo
@@ -319,3 +338,7 @@ CREATE INDEX IF NOT EXISTS idx_proposals_field_target
 CREATE UNIQUE INDEX IF NOT EXISTS idx_proposals_identity
     ON metadata_proposals(photo_id, field, proposed_value, target, source)
     WHERE status = 'pending';
+-- Fast lookup of proposals belonging to a bulk batch (for grouping and batch-reject)
+CREATE INDEX IF NOT EXISTS idx_proposals_batch
+    ON metadata_proposals(batch_id)
+    WHERE batch_id IS NOT NULL;

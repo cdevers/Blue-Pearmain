@@ -485,6 +485,49 @@
   .photo-card .meta { padding: 12px; }
   .photo-card .filename { font-size: 13px; margin-bottom: 6px; }
 }
+
+/* ── Review select mode ─────────────────────────── */
+body.select-mode .photo-card { cursor: pointer; }
+body.select-mode .photo-card input[type=checkbox] { display: block !important; }
+.photo-card input[type=checkbox] {
+  display: none;
+  position: absolute; top: 5px; left: 5px;
+  width: 18px; height: 18px; accent-color: #3a5fff; z-index: 5;
+}
+.photo-card.rev-selected { outline: 2px solid #3a5fff; outline-offset: -2px; }
+
+/* Review action bar — fixed at bottom */
+.review-action-bar {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #1a2a4a;
+  border-top: 1px solid #3a5fff;
+  font-size: 13px;
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  z-index: 30;
+}
+.review-action-bar.visible { display: flex; }
+.review-action-bar button {
+  background: none; border: none;
+  color: #7a9fff; cursor: pointer; font-size: 13px;
+}
+.review-action-bar .rev-sel-count { color: #ccc; font-weight: 600; }
+.review-action-bar .rev-clear-btn { color: var(--muted); margin-left: auto; }
+
+/* Inline edit panel — fixed above action bar */
+.review-edit-panel {
+  display: none;
+  padding: 12px 16px;
+  background: #141e38;
+  border-top: 2px solid #3a5fff;
+  position: fixed;
+  bottom: 42px; left: 0; right: 0;
+  z-index: 29;
+}
+.review-edit-panel.visible { display: block; }
 {% endblock %}
 
 {% block content %}
@@ -566,6 +609,14 @@
     <span><kbd>R</kbd> reload</span>
   </div>
 
+  <button id="select-mode-btn"
+          onclick="toggleSelectMode()"
+          title="Bulk select"
+          style="background:none;border:1px solid var(--border);color:var(--muted);
+                 padding:4px 10px;border-radius:var(--radius);font-size:12px;cursor:pointer">
+    Select
+  </button>
+
   <!-- Mobile progress indicator (shown on ≤640px) -->
   <div class="mobile-progress-row">
     <button class="mobile-nav-btn" onclick="mobileNavPrev()" aria-label="Previous photo">‹</button>
@@ -593,6 +644,8 @@
        ondblclick="openDetail({{ photo.id }})">
 
     <div class="thumb">
+      <input type="checkbox" class="rev-photo-cb" data-id="{{ photo.id }}"
+             onclick="event.stopPropagation(); revTogglePhoto({{ photo.id }})">
       <img src="{{ url_for('thumb', photo_id=photo.id, v=photo.updated_at) }}"
            alt="{{ photo.original_filename or '' }}"
            loading="lazy"
@@ -715,6 +768,53 @@
     <a href="{{ url_for('review', state=state_filter, page=page+1, person=person_filter or '') }}"
        style="opacity:0.5; font-size:0.9em;">Next page →</a>
   {% endif %}
+</div>
+
+<!-- Review select mode: action bar + inline panel -->
+<div class="review-action-bar" id="rev-action-bar">
+  <span class="rev-sel-count" id="rev-sel-count">0 selected</span>
+  <span style="color:#444">│</span>
+  <button onclick="revOpenPanel('title')">Edit title</button>
+  <button onclick="revOpenPanel('description')">Edit description</button>
+  <button onclick="revOpenPanel('tags_add')">Add tags</button>
+  <button onclick="revOpenPanel('tags_remove')">Remove tags</button>
+  <button class="rev-clear-btn" onclick="revClearSelection()">✕ Clear</button>
+</div>
+
+<div class="review-edit-panel" id="rev-edit-panel">
+  <h4 id="rev-panel-title" style="color:#7a9fff;font-size:12px;text-transform:uppercase;
+      letter-spacing:.06em;margin-bottom:10px">Edit</h4>
+  <div id="rev-text-wrap" style="display:none">
+    <input type="text" id="rev-text-input"
+           style="width:100%;background:var(--bg);border:1px solid #3a5fff;
+                  color:var(--text);border-radius:var(--radius);padding:6px 10px;
+                  font-size:13px;box-sizing:border-box">
+    <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px;margin-top:8px">
+      <input type="checkbox" id="rev-skip-cb" checked> Skip photos that already have a value
+    </label>
+  </div>
+  <div id="rev-tag-wrap" style="display:none">
+    <div id="rev-chip-wrap"
+         style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;
+                background:var(--bg);border:1px solid #3a5fff;
+                border-radius:var(--radius);padding:6px 8px;min-height:36px">
+      <input id="rev-chip-input" placeholder="type tag, press Enter…"
+             style="background:none;border:none;outline:none;color:var(--text);
+                    font-size:12px;min-width:80px;flex:1">
+    </div>
+  </div>
+  <div id="rev-preview" style="margin:8px 0;font-size:12px;color:var(--muted)"></div>
+  <div style="display:flex;align-items:center;gap:10px;margin-top:10px">
+    <button id="rev-confirm-btn" onclick="revSubmitPanel()" disabled
+            style="background:#3a5fff;color:white;border:none;
+                   border-radius:var(--radius);padding:6px 16px;font-size:13px;cursor:pointer">
+      Queue proposals
+    </button>
+    <button onclick="revClosePanel()"
+            style="background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer">
+      Cancel
+    </button>
+  </div>
 </div>
 
 {% endblock %}
@@ -1227,5 +1327,192 @@ if (window.innerWidth <= 640) {
   const first = document.querySelector('.photo-card');
   if (first) attachSwipeHandler(first);
 })();
+</script>
+
+<!-- Review select mode JS -->
+<script>
+// ── Review select mode ────────────────────────────────────────────────
+let _revSelected = new Set();
+let _revField = null;
+let _revTags = [];
+
+function toggleSelectMode() {
+  const active = document.body.classList.toggle('select-mode');
+  const btn = document.getElementById('select-mode-btn');
+  btn.style.background = active ? 'rgba(58,95,255,.2)' : '';
+  btn.style.color = active ? '#7a9fff' : '';
+  btn.style.borderColor = active ? '#3a5fff' : '';
+  if (!active) revClearSelection();
+}
+
+document.querySelectorAll('.photo-card').forEach(el => {
+  el.addEventListener('click', function(e) {
+    if (!document.body.classList.contains('select-mode')) return;
+    if (e.target.tagName === 'INPUT') return;
+    const id = parseInt(this.dataset.id);
+    revTogglePhoto(id);
+  });
+});
+
+function revTogglePhoto(id) {
+  const el = document.querySelector(`.photo-card[data-id="${id}"]`);
+  if (!el) return;
+  const cb = el.querySelector('.rev-photo-cb');
+  if (_revSelected.has(id)) {
+    _revSelected.delete(id);
+    el.classList.remove('rev-selected');
+    if (cb) cb.checked = false;
+  } else {
+    _revSelected.add(id);
+    el.classList.add('rev-selected');
+    if (cb) cb.checked = true;
+  }
+  _revUpdateUI();
+}
+
+function _revUpdateUI() {
+  const n = _revSelected.size;
+  document.getElementById('rev-sel-count').textContent = `${n} selected`;
+  const bar = document.getElementById('rev-action-bar');
+  if (n > 0) bar.classList.add('visible');
+  else { bar.classList.remove('visible'); revClosePanel(); }
+}
+
+function revClearSelection() {
+  _revSelected.clear();
+  document.querySelectorAll('.photo-card').forEach(el => {
+    el.classList.remove('rev-selected');
+    const cb = el.querySelector('.rev-photo-cb');
+    if (cb) cb.checked = false;
+  });
+  _revUpdateUI();
+  revClosePanel();
+}
+
+function revOpenPanel(field) {
+  _revField = field;
+  _revTags = [];
+  const panel = document.getElementById('rev-edit-panel');
+  panel.classList.add('visible');
+  const labels = {title:'Edit title', description:'Edit description',
+                  tags_add:'Add tags', tags_remove:'Remove tags'};
+  document.getElementById('rev-panel-title').textContent =
+    `${labels[field] || field} · ${_revSelected.size} photos`;
+  const textWrap = document.getElementById('rev-text-wrap');
+  const tagWrap = document.getElementById('rev-tag-wrap');
+  if (field === 'title' || field === 'description') {
+    textWrap.style.display = '';
+    tagWrap.style.display = 'none';
+    document.getElementById('rev-text-input').value = '';
+    document.getElementById('rev-text-input').focus();
+    document.getElementById('rev-text-input').oninput = _revUpdatePreview;
+    document.getElementById('rev-skip-cb').onchange = _revUpdatePreview;
+  } else {
+    textWrap.style.display = 'none';
+    tagWrap.style.display = '';
+    document.getElementById('rev-chip-input').focus();
+    _revRenderChips();
+  }
+  _revUpdatePreview();
+}
+
+function revClosePanel() {
+  document.getElementById('rev-edit-panel').classList.remove('visible');
+  document.getElementById('rev-preview').innerHTML = '';
+  document.getElementById('rev-confirm-btn').disabled = true;
+  _revField = null; _revTags = [];
+  document.querySelectorAll('#rev-chip-wrap .rev-chip').forEach(c => c.remove());
+}
+
+document.getElementById('rev-chip-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault();
+    const val = this.value.trim();
+    if (val && !_revTags.includes(val)) {
+      _revTags.push(val);
+      _revRenderChips();
+      _revUpdatePreview();
+    }
+    this.value = '';
+  } else if (e.key === 'Backspace' && !this.value && _revTags.length) {
+    _revTags.pop();
+    _revRenderChips();
+    _revUpdatePreview();
+  }
+});
+
+function _revRenderChips() {
+  const wrap = document.getElementById('rev-chip-wrap');
+  wrap.querySelectorAll('.rev-chip').forEach(c => c.remove());
+  const input = document.getElementById('rev-chip-input');
+  const isRemove = _revField === 'tags_remove';
+  _revTags.forEach(tag => {
+    const chip = document.createElement('span');
+    chip.className = 'rev-chip';
+    chip.style.cssText = isRemove
+      ? 'display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;font-size:12px;background:rgba(139,32,32,.25);border:1px solid #8b2020;color:#f88'
+      : 'display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;font-size:12px;background:rgba(58,95,255,.25);border:1px solid #3a5fff;color:#aac';
+    const label = document.createTextNode(tag + ' ');
+    const btn = document.createElement('button');
+    btn.textContent = '×';
+    btn.style.cssText = 'background:none;border:none;color:inherit;cursor:pointer;padding:0';
+    btn.addEventListener('click', () => revRemoveChip(tag));
+    chip.appendChild(label);
+    chip.appendChild(btn);
+    wrap.insertBefore(chip, input);
+  });
+}
+
+function revRemoveChip(tag) {
+  _revTags = _revTags.filter(t => t !== tag);
+  _revRenderChips();
+  _revUpdatePreview();
+}
+
+function _revUpdatePreview() {
+  const hasInput = (_revField === 'tags_add' || _revField === 'tags_remove')
+    ? _revTags.length > 0
+    : (document.getElementById('rev-text-input')?.value || '').trim().length > 0;
+  const btn = document.getElementById('rev-confirm-btn');
+  if (!hasInput) {
+    document.getElementById('rev-preview').innerHTML = '';
+    btn.disabled = true;
+    return;
+  }
+  btn.disabled = false;
+  document.getElementById('rev-preview').innerHTML =
+    `<strong>${_revSelected.size} photo${_revSelected.size !== 1 ? 's' : ''}</strong> will be updated`;
+}
+
+async function revSubmitPanel() {
+  const btn = document.getElementById('rev-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Queuing…';
+  const payload = {
+    field: _revField,
+    photo_ids: [..._revSelected],
+    skip_existing: document.getElementById('rev-skip-cb')?.checked ?? true,
+  };
+  if (_revField === 'title' || _revField === 'description') {
+    payload.value = document.getElementById('rev-text-input').value.trim();
+  } else {
+    payload.tags = _revTags;
+  }
+  try {
+    const r = await fetch('/api/bulk-edit', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      const n = data.proposals_created;
+      btn.textContent = `✓ ${n} queued`;
+      setTimeout(() => { revClosePanel(); revClearSelection(); btn.textContent = 'Queue proposals'; }, 1500);
+    } else {
+      btn.textContent = 'Error'; btn.disabled = false;
+    }
+  } catch (e) { btn.textContent = 'Error'; btn.disabled = false; }
+}
 </script>
 {% endblock %}

@@ -76,7 +76,13 @@ def run(db_path: str, dry_run: bool = False) -> None:
         );
 
         INSERT INTO metadata_proposals
-            SELECT * FROM metadata_proposals_old;
+            (id, photo_id, field, proposed_value, source, target, conflict_type,
+             source_hash_at_creation, target_hash_at_creation, status,
+             created_at, resolved_at, resolution_note)
+            SELECT id, photo_id, field, proposed_value, source, target, conflict_type,
+                   source_hash_at_creation, target_hash_at_creation, status,
+                   created_at, resolved_at, resolution_note
+            FROM metadata_proposals_old;
 
         DROP TABLE metadata_proposals_old;
 

@@ -457,6 +457,28 @@ class Database:
                     ON operation_log(occurred_at);
             """)
             self.conn.commit()
+        if "bulk_batches" not in tables:
+            self.conn.executescript("""
+                CREATE TABLE IF NOT EXISTS bulk_batches (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    operation   TEXT NOT NULL,
+                    field       TEXT,
+                    value       TEXT,
+                    tags        TEXT,
+                    filter      TEXT,  -- audit metadata only, not executable replay state
+                    photo_count INTEGER NOT NULL,
+                    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+            """)
+            self.conn.commit()
+        prop_cols = {
+            r[1] for r in self.conn.execute("PRAGMA table_info(metadata_proposals)").fetchall()
+        }
+        if "batch_id" not in prop_cols:
+            self.conn.execute(
+                "ALTER TABLE metadata_proposals ADD COLUMN batch_id INTEGER REFERENCES bulk_batches(id)"
+            )
+            self.conn.commit()
 
     # -----------------------------------------------------------------------
     # Photo upsert — the main ingestion path
@@ -834,6 +856,315 @@ class Database:
             states,
         ).fetchone()
         return row["n"] if row else 0
+
+    # -----------------------------------------------------------------------
+    # Library view queries (bulk operations)
+    # -----------------------------------------------------------------------
+
+    _STATUS_STATES: dict[str, tuple[str, ...]] = {
+        "public": (
+            "already_public",
+            "approved_public",
+            "approved_friends",
+            "approved_family",
+            "approved_friends_family",
+        ),
+        "private": ("auto_private", "keep_private"),
+        "pending": ("needs_review", "candidate_public", "skipped"),
+    }
+
+    def _library_where(
+        self,
+        date_from: str | None,
+        date_to: str | None,
+        album_id: int | None,
+        tag: str | None,
+        status: str | None,
+        untitled_only: bool,
+    ) -> tuple[str, list]:
+        """Return (WHERE clause fragment, params list) for library queries."""
+        clauses: list[str] = ["p.flickr_deleted = 0"]
+        params: list = []
+
+        if date_from:
+            clauses.append("p.date_taken >= ?")
+            params.append(date_from)
+        if date_to:
+            clauses.append("p.date_taken <= ?")
+            params.append(date_to)
+        if status and status in self._STATUS_STATES:
+            states = self._STATUS_STATES[status]
+            placeholders = ",".join("?" * len(states))
+            clauses.append(f"p.privacy_state IN ({placeholders})")
+            params.extend(states)
+        if untitled_only:
+            clauses.append(
+                "(p.flickr_title IS NULL OR p.flickr_title = '') "
+                "AND (p.photos_title IS NULL OR p.photos_title = '')"
+            )
+        if tag:
+            clauses.append(
+                "(EXISTS (SELECT 1 FROM json_each(p.flickr_tags) WHERE value = ?) "
+                "OR EXISTS (SELECT 1 FROM json_each(p.photos_tags) WHERE value = ?))"
+            )
+            params.extend([tag, tag])
+
+        where = "WHERE " + " AND ".join(clauses)
+
+        if album_id is not None:
+            return where + " AND pa.album_id = ? AND pa.removed_at IS NULL", params + [album_id]
+
+        return where, params
+
+    def library_photos(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        album_id: int | None = None,
+        tag: str | None = None,
+        status: str | None = None,
+        untitled_only: bool = False,
+        limit: int = 120,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Return photos for the library grid, newest first, with filters applied."""
+        where, params = self._library_where(
+            date_from, date_to, album_id, tag, status, untitled_only
+        )
+        join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
+        rows = self.conn.execute(
+            f"""SELECT p.id, p.flickr_id, p.uuid, p.original_filename,
+                       p.thumbnail_path, p.date_taken, p.privacy_state,
+                       p.flickr_title, p.photos_title,
+                       p.flickr_tags, p.photos_tags,
+                       p.is_video, p.width, p.height, p.bp_rating,
+                       p.display_rotation
+                FROM photos p {join}
+                {where}
+                ORDER BY p.date_taken DESC, p.id DESC
+                LIMIT ? OFFSET ?""",
+            params + [limit, offset],
+        ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["flickr_tags"] = _json_loads_safe(d.get("flickr_tags"))
+            d["photos_tags"] = _json_loads_safe(d.get("photos_tags"))
+            result.append(d)
+        return result
+
+    def library_photo_count(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        album_id: int | None = None,
+        tag: str | None = None,
+        status: str | None = None,
+        untitled_only: bool = False,
+    ) -> int:
+        """Return total photo count for the given library filters."""
+        where, params = self._library_where(
+            date_from, date_to, album_id, tag, status, untitled_only
+        )
+        join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
+        row = self.conn.execute(
+            f"SELECT COUNT(*) AS n FROM photos p {join} {where}", params
+        ).fetchone()
+        return row["n"] if row else 0
+
+    def library_photo_ids(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        album_id: int | None = None,
+        tag: str | None = None,
+        status: str | None = None,
+        untitled_only: bool = False,
+    ) -> list[int]:
+        """Return all photo IDs matching the filters (no limit — used by bulk-edit)."""
+        where, params = self._library_where(
+            date_from, date_to, album_id, tag, status, untitled_only
+        )
+        join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
+        rows = self.conn.execute(
+            f"SELECT p.id FROM photos p {join} {where} ORDER BY p.id",
+            params,
+        ).fetchall()
+        return [r["id"] for r in rows]
+
+    def get_all_albums(self) -> list[dict]:
+        """Return all non-deleted albums ordered by name."""
+        rows = self.conn.execute(
+            """SELECT id, name, flickr_set_id
+               FROM albums
+               WHERE deleted_at IS NULL
+               ORDER BY name""",
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # -----------------------------------------------------------------------
+    # Bulk operations
+    # -----------------------------------------------------------------------
+
+    def create_bulk_batch(
+        self,
+        operation: str,
+        field: str | None,
+        value: str | None,
+        tags: list[str] | None,
+        filter_json: str | None,
+        photo_count: int,
+    ) -> int:
+        """Create a bulk_batches record and return the new batch_id."""
+        cur = self.conn.execute(
+            """INSERT INTO bulk_batches (operation, field, value, tags, filter, photo_count, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                operation,
+                field,
+                value,
+                json.dumps(tags) if tags is not None else None,
+                filter_json,
+                photo_count,
+                _now_iso(),
+            ),
+        )
+        self.conn.commit()
+        return cur.lastrowid  # type: ignore[return-value]
+
+    def insert_bulk_proposals(
+        self,
+        batch_id: int,
+        photo_ids: list[int],
+        field: str,
+        value: str | None = None,
+        tags: list[str] | None = None,
+        skip_existing: bool = False,
+    ) -> int:
+        """
+        Insert metadata_proposals for the given photos.
+
+        field must be one of: 'title', 'description', 'tags_add', 'tags_remove'.
+
+        For 'tags_add' / 'tags_remove', proposed_value is the full new tag list
+        (sorted JSON array), not the delta. Photos without a flickr_id are skipped.
+
+        Returns count of proposals actually inserted.
+        """
+        if not photo_ids:
+            return 0
+
+        placeholders = ",".join("?" * len(photo_ids))
+        rows = self.conn.execute(
+            f"""SELECT id, flickr_id,
+                       flickr_title, flickr_description,
+                       flickr_tags, flickr_tags_hash,
+                       photos_title
+                FROM photos
+                WHERE id IN ({placeholders}) AND flickr_id IS NOT NULL AND flickr_deleted = 0""",
+            photo_ids,
+        ).fetchall()
+
+        created = 0
+        now = _now_iso()
+
+        for row in rows:
+            photo_id = row["id"]
+            db_field: str
+            proposed_value: str
+
+            if field == "title":
+                db_field = "title"
+                existing = (row["flickr_title"] or "").strip()
+                if skip_existing and existing:
+                    continue
+                proposed_value = value or ""
+
+            elif field == "description":
+                db_field = "description"
+                existing = (row["flickr_description"] or "").strip()
+                if skip_existing and existing:
+                    continue
+                proposed_value = value or ""
+
+            elif field == "tags_add":
+                db_field = "tags"
+                assert tags is not None
+                current = _json_loads_safe(row["flickr_tags"])
+                current_set = set(current)
+                new_set = current_set | set(tags)
+                if new_set == current_set:
+                    continue  # all tags already present
+                proposed_value = json.dumps(sorted(new_set))
+
+            elif field == "tags_remove":
+                db_field = "tags"
+                assert tags is not None
+                current = _json_loads_safe(row["flickr_tags"])
+                remove_set = set(tags)
+                new_list = sorted(t for t in current if t not in remove_set)
+                if len(new_list) == len(current):
+                    continue  # none of the tags were present
+                proposed_value = json.dumps(new_list)
+
+            else:
+                raise ValueError(f"Unknown bulk field: {field!r}")
+
+            # One INSERT per photo — O(N) and correct for BP's scale.
+            # INSERT OR IGNORE respects the unique pending index:
+            # (photo_id, field, proposed_value, target, source) WHERE status='pending'
+            cur = self.conn.execute(
+                """INSERT OR IGNORE INTO metadata_proposals
+                   (photo_id, field, proposed_value, source, target, conflict_type,
+                    source_hash_at_creation, target_hash_at_creation,
+                    status, created_at, batch_id)
+                   VALUES (?, ?, ?, 'manual', 'flickr', 'non_conflict',
+                           NULL, ?, 'pending', ?, ?)""",
+                (
+                    photo_id,
+                    db_field,
+                    proposed_value,
+                    row["flickr_tags_hash"] if db_field == "tags" else None,
+                    now,
+                    batch_id,
+                ),
+            )
+            if cur.rowcount:
+                created += 1
+
+        self.conn.commit()
+        return created
+
+    def get_pending_bulk_batches(self) -> list[dict]:
+        """Return batches that have at least one pending proposal, newest first."""
+        rows = self.conn.execute(
+            """SELECT bb.id, bb.operation, bb.field, bb.value, bb.tags,
+                      bb.photo_count, bb.created_at,
+                      COUNT(mp.id) AS pending_count
+               FROM bulk_batches bb
+               JOIN metadata_proposals mp ON mp.batch_id = bb.id AND mp.status = 'pending'
+               GROUP BY bb.id
+               ORDER BY bb.id DESC"""
+        ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            if d.get("tags"):
+                d["tags"] = _json_loads_safe(d["tags"])
+            result.append(d)
+        return result
+
+    def reject_bulk_batch(self, batch_id: int) -> int:
+        """Reject all pending proposals in a batch. Returns count rejected."""
+        now = _now_iso()
+        cur = self.conn.execute(
+            """UPDATE metadata_proposals
+               SET status='rejected', resolved_at=?, resolution_note='bulk batch rejected'
+               WHERE batch_id=? AND status='pending'""",
+            (now, batch_id),
+        )
+        self.conn.commit()
+        return cur.rowcount
 
     def get_photo(self, photo_id: int) -> dict | None:
         row = self.conn.execute("SELECT * FROM photos WHERE id = ?", (photo_id,)).fetchone()
