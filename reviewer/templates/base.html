@@ -263,6 +263,7 @@
   <a href="{{ url_for('conflicts') }}" {% if request.endpoint == 'conflicts' %}class="active"{% endif %}><kbd class="nav-key">6</kbd>Conflicts <span id="nav-conflict-count" class="nav-badge" style="display:none"></span></a>
   <a href="{{ url_for('proposals') }}" {% if request.endpoint == 'proposals' %}class="active"{% endif %}><kbd class="nav-key">7</kbd>Proposals <span id="nav-proposal-count" class="nav-badge" style="display:none"></span></a>
   <a href="{{ url_for('library') }}" {% if request.endpoint == 'library' %}class="active"{% endif %}><kbd class="nav-key">8</kbd>Library</a>
+  <a href="{{ url_for('albums_index') }}" {% if request.endpoint == 'albums_index' %}class="active"{% endif %}><kbd class="nav-key">9</kbd>Albums</a>
   <span class="spacer"></span>
   <span class="stats-pill" id="nav-stats">Loading…</span>
   <button id="nav-hamburger" aria-label="Open navigation" aria-expanded="false">☰</button>
@@ -295,6 +296,9 @@
     </a>
     <a href="{{ url_for('library') }}" {% if request.endpoint == 'library' %}class="active"{% endif %}>
       Library
+    </a>
+    <a href="{{ url_for('albums_index') }}" {% if request.endpoint == 'albums_index' %}class="active"{% endif %}>
+      Albums
     </a>
   </div>
 </nav>
@@ -399,6 +403,7 @@ refreshStats();
     '6': {{ url_for('conflicts') | tojson }},
     '7': {{ url_for('proposals') | tojson }},
     '8': {{ url_for('library') | tojson }},
+    '9': {{ url_for('albums_index') | tojson }},
   };
   document.addEventListener('keydown', e => {
     if (e.target.matches('input, textarea, select')) return;
