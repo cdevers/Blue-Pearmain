@@ -34,13 +34,13 @@ User selects photos in library view
     ├─ clicks "Add to album ▾"
     │     → panel expands with album checkboxes
     │     → POST /api/album-membership  { photo_ids: [...], add: [album_id, ...] }
-    │     → db.upsert_photo_album() per photo/album pair  (flickr_pushed=0)
+    │     → db.bulk_upsert_photo_albums()  — single transaction, flickr_pushed=0
     │     → queued for next  bp sync-albums  run
     │
     └─ clicks "Remove from [Album]"  (only visible when album_id filter is active)
           → inline confirm appears
           → POST /api/album-membership  { photo_ids: [...], remove: [album_id] }
-          → db.mark_photo_album_removed() per photo  (removed_at=now)
+          → db.bulk_remove_photo_albums()  — single transaction, removed_at=now
           → queued for next  bp sync-albums --remove --apply  run
 ```
 
@@ -50,7 +50,7 @@ No new async machinery. Both add and remove use the existing sync pipeline (`bp 
 
 ## Backend
 
-### New DB method — `db/db.py`
+### New DB methods — `db/db.py`
 
 ```python
 def get_album_membership_for_photos(self, photo_ids: list[int]) -> dict[int, set[int]]:
@@ -59,9 +59,30 @@ def get_album_membership_for_photos(self, photo_ids: list[int]) -> dict[int, set
     memberships among the given photo_ids.
     Used to show current membership state in the Add-to-album panel.
     """
+
+def bulk_upsert_photo_albums(self, photo_ids: list[int], album_id: int) -> int:
+    """
+    Add all photo_ids to album_id in a single transaction.
+    Idempotent: already-member photos are no-ops; tombstoned rows have
+    removed_at cleared (re-add after remove, before sync ran).
+    Returns count of rows newly inserted or restored (not already-active no-ops).
+    """
+
+def bulk_remove_photo_albums(self, photo_ids: list[int], album_id: int) -> int:
+    """
+    Tombstone all photo_ids in album_id in a single transaction.
+    Sets removed_at = now() for active rows; already-tombstoned rows are no-ops.
+    Returns count of rows newly tombstoned.
+    """
 ```
 
-No other new DB methods needed. `upsert_photo_album` and `mark_photo_album_removed` already exist and handle the write side correctly (idempotent add, tombstone remove).
+The two bulk write methods wrap their work in a single SQLite transaction so that a mixed add/remove request in `POST /api/album-membership` cannot partially apply.
+
+`upsert_photo_album` and `mark_photo_album_removed` (existing single-row methods) are still used by the scanner and Flickr sync pipeline — the new bulk methods are for the web route only.
+
+**Re-activation semantics (explicit):** `bulk_upsert_photo_albums` clears `removed_at` when a photo is re-added to an album it was previously removed from. This ensures no Flickr removal is triggered for a photo that was removed and then immediately re-added before the sync ran. `INSERT OR IGNORE` prevents duplicate rows.
+
+**Future enhancement (not in this issue):** The response shape `{ "added": N, "removed": N }` can be extended to `{ "added": N, "already_present": N, "removed": N }` once the counts prove useful at scale. The batch methods return the data needed to compute `already_present` if wanted later.
 
 ### New routes — `reviewer/app.py`
 
@@ -78,7 +99,8 @@ Returns: { "added": N, "removed": N }
 Errors: 400 on empty photo_ids, unknown album_id, or unknown photo_id
 ```
 Both `add` and `remove` are optional (one or both may be present in a single request).  
-`added` and `removed` counts reflect new rows created / tombstoned — already-member photos that are re-added are not counted (idempotent, no-op).
+`added` and `removed` counts reflect new rows created / tombstoned — already-member photos that are re-added are not counted (idempotent, no-op).  
+The entire operation (all adds and removes) executes in a single DB transaction — a partial failure rolls back completely.
 
 **`GET /api/album-membership`**
 ```
@@ -147,7 +169,9 @@ Extends `base.html`. Contains:
 
 - `get_album_membership_for_photos` returns correct `{album_id: {photo_id}}` mapping
 - `get_album_membership_for_photos` with empty list → empty dict
-- Verify `upsert_photo_album` idempotency (add existing membership → no duplicate row, `removed_at` cleared if previously tombstoned)
+- `bulk_upsert_photo_albums` idempotency: add existing membership → no duplicate row, `removed_at` cleared if previously tombstoned
+- `bulk_remove_photo_albums` idempotency: tombstone already-tombstoned row → no-op, single row in DB
+- **Invariant test:** after repeated add/remove/add cycles on the same (photo_id, album_id) pair, exactly one `photo_albums` row exists and it is active (`removed_at IS NULL`)
 
 ### Manual verification
 
