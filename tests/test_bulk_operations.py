@@ -740,3 +740,41 @@ class TestProposalsBatchGrouping:
         data = resp.get_json()
         assert data["ok"] is True
         assert data["rejected"] == 0
+
+
+# ===========================================================================
+# Task 7 — Review queue select mode
+# ===========================================================================
+
+
+@pytest.fixture(scope="module")
+def review_client():
+    with tempfile.TemporaryDirectory() as tmp:
+        test_db = Database(Path(tmp) / "test.db")
+        test_db.upsert_photo(
+            {
+                "uuid": "rev-uuid-1",
+                "flickr_id": "rev-flickr-1",
+                "original_filename": "REV_0001.JPG",
+                "privacy_state": "candidate_public",
+                "flickr_title": "",
+                "flickr_tags": json.dumps([]),
+                "photos_tags": json.dumps([]),
+                "apple_persons": [],
+                "proposed_tags": [],
+            }
+        )
+        app_module._db = test_db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+        with app_module.app.test_client() as c:
+            yield c
+        app_module._db = None
+
+
+class TestReviewSelectMode:
+    def test_review_page_has_select_toggle(self, review_client):
+        resp = review_client.get("/review?state=candidate_public")
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "select-mode-btn" in html
