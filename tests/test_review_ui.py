@@ -242,6 +242,39 @@ class TestPhotoDetailAlbums:
 
 
 # ---------------------------------------------------------------------------
+# Back link — photo detail
+# ---------------------------------------------------------------------------
+
+
+class TestPhotoDetailBackLink:
+    """Back link in photo detail page honours the ?back= query param."""
+
+    def test_back_param_renders_library_link(self, client_with_albums):
+        """?back=/library → back link points to /library, not the review queue."""
+        c, photo_id = client_with_albums
+        import urllib.parse
+
+        back = urllib.parse.quote("/library?album_id=3", safe="")
+        resp = c.get(f"/photo/{photo_id}?back={back}")
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "Back to Library" in html
+        assert "/library?album_id=3" in html
+        # Should NOT contain the review-queue back link when ?back= is set
+        assert "url_for" not in html  # rendered HTML never contains template syntax
+
+    def test_no_back_param_renders_review_link(self, client_with_albums):
+        """No ?back= → back link still points to the review queue."""
+        c, photo_id = client_with_albums
+        resp = c.get(f"/photo/{photo_id}?state=candidate_public")
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        # The review-queue back link uses url_for('review', ...) which renders as /review
+        assert "/review" in html
+        assert "Back to Library" not in html
+
+
+# ---------------------------------------------------------------------------
 # Album badge — review grid
 # ---------------------------------------------------------------------------
 
