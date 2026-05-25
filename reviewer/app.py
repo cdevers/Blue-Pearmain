@@ -744,7 +744,7 @@ def library() -> str:
     album_id = int(album_id_raw) if album_id_raw else None
     tag = request.args.get("tag") or None
     status = request.args.get("status") or None
-    untitled_only = bool(request.args.get("untitled"))
+    untitled_only = request.args.get("untitled") == "1"
 
     photos = db().library_photos(
         date_from=date_from,

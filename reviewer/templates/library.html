@@ -452,7 +452,12 @@ function _renderTagChips() {
   _panelTags.forEach(tag => {
     const chip = document.createElement('span');
     chip.className = 'tag-chip' + (isRemove ? ' remove-chip' : '');
-    chip.innerHTML = `${tag} <button onclick="removeChip('${tag}')">×</button>`;
+    const label = document.createTextNode(tag + ' ');
+    const btn = document.createElement('button');
+    btn.textContent = '×';
+    btn.addEventListener('click', () => removeChip(tag));
+    chip.appendChild(label);
+    chip.appendChild(btn);
     wrap.insertBefore(chip, input);
   });
 }
