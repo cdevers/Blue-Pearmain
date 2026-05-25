@@ -857,6 +857,151 @@ class Database:
         ).fetchone()
         return row["n"] if row else 0
 
+    # -----------------------------------------------------------------------
+    # Library view queries (bulk operations)
+    # -----------------------------------------------------------------------
+
+    _STATUS_STATES: dict[str, tuple[str, ...]] = {
+        "public": (
+            "already_public",
+            "approved_public",
+            "approved_friends",
+            "approved_family",
+            "approved_friends_family",
+        ),
+        "private": ("auto_private", "keep_private"),
+        "pending": ("needs_review", "candidate_public", "skipped"),
+    }
+
+    def _library_where(
+        self,
+        date_from: str | None,
+        date_to: str | None,
+        album_id: int | None,
+        tag: str | None,
+        status: str | None,
+        untitled_only: bool,
+    ) -> tuple[str, list]:
+        """Return (WHERE clause fragment, params list) for library queries."""
+        clauses: list[str] = ["p.flickr_deleted = 0"]
+        params: list = []
+
+        if date_from:
+            clauses.append("p.date_taken >= ?")
+            params.append(date_from)
+        if date_to:
+            clauses.append("p.date_taken <= ?")
+            params.append(date_to)
+        if status and status in self._STATUS_STATES:
+            states = self._STATUS_STATES[status]
+            placeholders = ",".join("?" * len(states))
+            clauses.append(f"p.privacy_state IN ({placeholders})")
+            params.extend(states)
+        if untitled_only:
+            clauses.append(
+                "(p.flickr_title IS NULL OR p.flickr_title = '') "
+                "AND (p.photos_title IS NULL OR p.photos_title = '')"
+            )
+        if tag:
+            clauses.append(
+                "(EXISTS (SELECT 1 FROM json_each(p.flickr_tags) WHERE value = ?) "
+                "OR EXISTS (SELECT 1 FROM json_each(p.photos_tags) WHERE value = ?))"
+            )
+            params.extend([tag, tag])
+
+        where = "WHERE " + " AND ".join(clauses)
+
+        if album_id is not None:
+            return where + " AND pa.album_id = ?", params + [album_id]
+
+        return where, params
+
+    def library_photos(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        album_id: int | None = None,
+        tag: str | None = None,
+        status: str | None = None,
+        untitled_only: bool = False,
+        limit: int = 120,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Return photos for the library grid, newest first, with filters applied."""
+        where, params = self._library_where(
+            date_from, date_to, album_id, tag, status, untitled_only
+        )
+        join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
+        rows = self.conn.execute(
+            f"""SELECT p.id, p.flickr_id, p.uuid, p.original_filename,
+                       p.thumbnail_path, p.date_taken, p.privacy_state,
+                       p.flickr_title, p.photos_title,
+                       p.flickr_tags, p.photos_tags,
+                       p.is_video, p.width, p.height, p.bp_rating,
+                       p.display_rotation
+                FROM photos p {join}
+                {where}
+                ORDER BY p.date_taken DESC, p.id DESC
+                LIMIT ? OFFSET ?""",
+            params + [limit, offset],
+        ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["flickr_tags"] = _json_loads_safe(d.get("flickr_tags"))
+            d["photos_tags"] = _json_loads_safe(d.get("photos_tags"))
+            result.append(d)
+        return result
+
+    def library_photo_count(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        album_id: int | None = None,
+        tag: str | None = None,
+        status: str | None = None,
+        untitled_only: bool = False,
+    ) -> int:
+        """Return total photo count for the given library filters."""
+        where, params = self._library_where(
+            date_from, date_to, album_id, tag, status, untitled_only
+        )
+        join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
+        row = self.conn.execute(
+            f"SELECT COUNT(*) AS n FROM photos p {join} {where}", params
+        ).fetchone()
+        return row["n"] if row else 0
+
+    def library_photo_ids(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        album_id: int | None = None,
+        tag: str | None = None,
+        status: str | None = None,
+        untitled_only: bool = False,
+    ) -> list[int]:
+        """Return all photo IDs matching the filters (no limit — used by bulk-edit)."""
+        where, params = self._library_where(
+            date_from, date_to, album_id, tag, status, untitled_only
+        )
+        join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
+        rows = self.conn.execute(
+            f"SELECT p.id FROM photos p {join} {where} ORDER BY p.id",
+            params,
+        ).fetchall()
+        return [r["id"] for r in rows]
+
+    def get_all_albums(self) -> list[dict]:
+        """Return all non-deleted albums ordered by name."""
+        rows = self.conn.execute(
+            """SELECT id, name, flickr_set_id
+               FROM albums
+               WHERE deleted_at IS NULL
+               ORDER BY name""",
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def get_photo(self, photo_id: int) -> dict | None:
         row = self.conn.execute("SELECT * FROM photos WHERE id = ?", (photo_id,)).fetchone()
         if not row:
