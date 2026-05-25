@@ -28,3 +28,4 @@ dist/
 # Claude Code
 .claude/settings.local.json
 memory/
+.superpowers/
