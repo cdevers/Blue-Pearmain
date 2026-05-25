@@ -277,3 +277,228 @@ class TestLibraryPhotos(unittest.TestCase):
         rows = self.db.library_photos(album_id=album_id)
         ids = {r["id"] for r in rows}
         self.assertNotIn(self.p1, ids)
+
+
+# ===========================================================================
+# Task 3 — bulk proposals DB methods
+# ===========================================================================
+
+
+class TestBulkProposals(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db = Database(Path(self.tmp) / "test.db")
+        self.p1 = self.db.upsert_photo(
+            {
+                "uuid": "u1",
+                "original_filename": "A.JPG",
+                "flickr_id": "f1",
+                "privacy_state": "already_public",
+                "flickr_title": "",
+                "flickr_description": "",
+                "flickr_tags": json.dumps(["paris"]),
+                "photos_tags": json.dumps([]),
+                "apple_persons": [],
+                "proposed_tags": [],
+            }
+        )
+        self.p2 = self.db.upsert_photo(
+            {
+                "uuid": "u2",
+                "original_filename": "B.JPG",
+                "flickr_id": "f2",
+                "privacy_state": "already_public",
+                "flickr_title": "Existing Title",
+                "flickr_description": "",
+                "flickr_tags": json.dumps(["london", "uk"]),
+                "photos_tags": json.dumps([]),
+                "apple_persons": [],
+                "proposed_tags": [],
+            }
+        )
+        self.p3 = self.db.upsert_photo(
+            {
+                "uuid": "u3",
+                "original_filename": "C.JPG",
+                "flickr_id": None,  # Photos-only — should be skipped
+                "privacy_state": "needs_review",
+                "flickr_title": "",
+                "flickr_tags": json.dumps([]),
+                "photos_tags": json.dumps([]),
+                "apple_persons": [],
+                "proposed_tags": [],
+            }
+        )
+
+    def tearDown(self):
+        self.db.close()
+        shutil.rmtree(self.tmp)
+
+    def _pending_proposals(self):
+        rows = self.db.conn.execute(
+            "SELECT * FROM metadata_proposals WHERE status='pending'"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # --- create_bulk_batch ---
+
+    def test_create_bulk_batch_returns_id(self):
+        bid = self.db.create_bulk_batch(
+            operation="set_title",
+            field="title",
+            value="Test Title",
+            tags=None,
+            filter_json=None,
+            photo_count=2,
+        )
+        self.assertIsInstance(bid, int)
+        self.assertGreater(bid, 0)
+
+    def test_create_bulk_batch_stores_data(self):
+        bid = self.db.create_bulk_batch(
+            operation="tags_add",
+            field=None,
+            value=None,
+            tags=["mfa-boston"],
+            filter_json='{"status": "public"}',
+            photo_count=10,
+        )
+        row = self.db.conn.execute("SELECT * FROM bulk_batches WHERE id=?", (bid,)).fetchone()
+        self.assertEqual(row["operation"], "tags_add")
+        self.assertEqual(json.loads(row["tags"]), ["mfa-boston"])
+        self.assertEqual(row["photo_count"], 10)
+
+    # --- insert_bulk_proposals — title ---
+
+    def test_insert_bulk_title_creates_proposals(self):
+        bid = self.db.create_bulk_batch("set_title", "title", "MFA Boston", None, None, 2)
+        n = self.db.insert_bulk_proposals(
+            batch_id=bid,
+            photo_ids=[self.p1, self.p2],
+            field="title",
+            value="MFA Boston",
+            skip_existing=False,
+        )
+        self.assertEqual(n, 2)
+        proposals = self._pending_proposals()
+        self.assertEqual(len(proposals), 2)
+        self.assertTrue(all(p["field"] == "title" for p in proposals))
+        self.assertTrue(all(p["proposed_value"] == "MFA Boston" for p in proposals))
+        self.assertTrue(all(p["batch_id"] == bid for p in proposals))
+
+    def test_insert_bulk_title_skip_existing(self):
+        bid = self.db.create_bulk_batch("set_title", "title", "MFA Boston", None, None, 1)
+        n = self.db.insert_bulk_proposals(
+            batch_id=bid,
+            photo_ids=[self.p1, self.p2],
+            field="title",
+            value="MFA Boston",
+            skip_existing=True,
+        )
+        # p2 already has 'Existing Title' → should be skipped
+        self.assertEqual(n, 1)
+        proposals = self._pending_proposals()
+        self.assertEqual(len(proposals), 1)
+        self.assertEqual(proposals[0]["photo_id"], self.p1)
+
+    def test_insert_bulk_title_skips_photos_without_flickr_id(self):
+        bid = self.db.create_bulk_batch("set_title", "title", "X", None, None, 1)
+        n = self.db.insert_bulk_proposals(
+            batch_id=bid,
+            photo_ids=[self.p1, self.p3],  # p3 has no flickr_id
+            field="title",
+            value="X",
+            skip_existing=False,
+        )
+        self.assertEqual(n, 1)  # only p1
+
+    def test_insert_bulk_title_idempotent(self):
+        """Running the same bulk op twice produces no additional proposals."""
+        bid = self.db.create_bulk_batch("set_title", "title", "MFA Boston", None, None, 1)
+        self.db.insert_bulk_proposals(bid, [self.p1], "title", value="MFA Boston")
+        n2 = self.db.insert_bulk_proposals(bid, [self.p1], "title", value="MFA Boston")
+        self.assertEqual(n2, 0)
+        self.assertEqual(len(self._pending_proposals()), 1)
+
+    # --- insert_bulk_proposals — tags_add ---
+
+    def test_insert_bulk_tags_add(self):
+        bid = self.db.create_bulk_batch("tags_add", None, None, ["mfa-boston"], None, 2)
+        n = self.db.insert_bulk_proposals(
+            batch_id=bid,
+            photo_ids=[self.p1, self.p2],
+            field="tags_add",
+            tags=["mfa-boston"],
+        )
+        self.assertEqual(n, 2)
+        proposals = self._pending_proposals()
+        # p1 had ["paris"] → should become ["mfa-boston", "paris"]
+        p1_prop = next(p for p in proposals if p["photo_id"] == self.p1)
+        self.assertEqual(json.loads(p1_prop["proposed_value"]), ["mfa-boston", "paris"])
+
+    def test_insert_bulk_tags_add_idempotent_per_photo(self):
+        """Adding a tag already present on a photo generates no proposal for that photo."""
+        bid = self.db.create_bulk_batch("tags_add", None, None, ["paris"], None, 1)
+        n = self.db.insert_bulk_proposals(
+            batch_id=bid,
+            photo_ids=[self.p1],  # p1 already has "paris"
+            field="tags_add",
+            tags=["paris"],
+        )
+        self.assertEqual(n, 0)
+
+    # --- insert_bulk_proposals — tags_remove ---
+
+    def test_insert_bulk_tags_remove(self):
+        bid = self.db.create_bulk_batch("tags_remove", None, None, ["paris"], None, 1)
+        n = self.db.insert_bulk_proposals(
+            batch_id=bid,
+            photo_ids=[self.p1],
+            field="tags_remove",
+            tags=["paris"],
+        )
+        self.assertEqual(n, 1)
+        proposals = self._pending_proposals()
+        self.assertEqual(json.loads(proposals[0]["proposed_value"]), [])
+
+    def test_insert_bulk_tags_remove_absent_tag_noop(self):
+        """Removing a tag not present on a photo generates no proposal."""
+        bid = self.db.create_bulk_batch("tags_remove", None, None, ["nonexistent"], None, 1)
+        n = self.db.insert_bulk_proposals(
+            batch_id=bid,
+            photo_ids=[self.p1],
+            field="tags_remove",
+            tags=["nonexistent"],
+        )
+        self.assertEqual(n, 0)
+
+    # --- get_pending_bulk_batches / reject_bulk_batch ---
+
+    def test_get_pending_bulk_batches_empty(self):
+        self.assertEqual(self.db.get_pending_bulk_batches(), [])
+
+    def test_get_pending_bulk_batches_returns_batch_with_pending_proposals(self):
+        bid = self.db.create_bulk_batch("set_title", "title", "X", None, None, 1)
+        self.db.insert_bulk_proposals(bid, [self.p1], "title", value="X")
+        batches = self.db.get_pending_bulk_batches()
+        self.assertEqual(len(batches), 1)
+        self.assertEqual(batches[0]["id"], bid)
+        self.assertEqual(batches[0]["pending_count"], 1)
+
+    def test_reject_bulk_batch(self):
+        bid = self.db.create_bulk_batch("set_title", "title", "X", None, None, 2)
+        self.db.insert_bulk_proposals(bid, [self.p1, self.p2], "title", value="X")
+        n = self.db.reject_bulk_batch(bid)
+        self.assertEqual(n, 2)
+        proposals = self._pending_proposals()
+        self.assertEqual(len(proposals), 0)
+
+    def test_reject_bulk_batch_only_affects_pending(self):
+        """Already-resolved proposals in the batch are not re-rejected."""
+        bid = self.db.create_bulk_batch("set_title", "title", "X", None, None, 2)
+        self.db.insert_bulk_proposals(bid, [self.p1, self.p2], "title", value="X")
+        proposals = self._pending_proposals()
+        # Manually resolve one
+        self.db.resolve_proposal(proposals[0]["id"], "applied")
+        n = self.db.reject_bulk_batch(bid)
+        self.assertEqual(n, 1)
