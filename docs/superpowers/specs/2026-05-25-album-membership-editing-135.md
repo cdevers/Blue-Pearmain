@@ -2,7 +2,7 @@
 
 **Issue:** Subset of #124 (Album / photoset management from BP UI)  
 **Date:** 2026-05-25  
-**Status:** Approved, awaiting implementation plan
+**Status:** ✓ done
 
 ---
 
