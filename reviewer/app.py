@@ -793,13 +793,41 @@ def map_view() -> str:
 @app.route("/api/map-photos")
 def api_map_photos() -> Response:
     flickr_username = _config.get("flickr", {}).get("username", "")
+    time_pattern = request.args.get("time_pattern") or None
+    time_expand = 2 if request.args.get("expand") == "1" else 0
+
+    extra_where = ""
+    extra_params: list = []
+    if time_pattern:
+        from db.time_patterns import parse_pattern
+
+        years = (
+            [
+                r[0]
+                for r in db()
+                .conn.execute(
+                    "SELECT DISTINCT CAST(strftime('%Y', date_taken) AS INTEGER) AS y "
+                    "FROM photos WHERE date_taken IS NOT NULL ORDER BY y"
+                )
+                .fetchall()
+                if r[0] is not None
+            ]
+            if time_pattern.startswith("holiday:")
+            else []
+        )
+        frag, frag_params = parse_pattern(time_pattern, time_expand, years)
+        if frag != "1=1":
+            extra_where = f" AND {frag}"
+            extra_params = frag_params
+
     rows = (
         db()
         .conn.execute(
-            "SELECT id, latitude, longitude, photos_title, flickr_title, "
-            "       date_taken, flickr_id "
-            "FROM photos "
-            "WHERE latitude IS NOT NULL AND longitude IS NOT NULL"
+            "SELECT p.id, p.latitude, p.longitude, p.photos_title, p.flickr_title, "
+            "       p.date_taken, p.flickr_id "
+            "FROM photos p "
+            f"WHERE p.latitude IS NOT NULL AND p.longitude IS NOT NULL{extra_where}",
+            extra_params,
         )
         .fetchall()
     )
