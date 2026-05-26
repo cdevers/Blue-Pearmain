@@ -775,6 +775,55 @@ def api_album_delete(album_id: int) -> _JsonResp:
     return jsonify({"ok": True})
 
 
+@app.route("/map")
+def map_view() -> str:
+    row = (
+        db()
+        .conn.execute(
+            "SELECT AVG(latitude) AS lat, AVG(longitude) AS lon "
+            "FROM photos WHERE latitude IS NOT NULL AND longitude IS NOT NULL"
+        )
+        .fetchone()
+    )
+    center_lat = row["lat"] if row["lat"] is not None else 20.0
+    center_lon = row["lon"] if row["lon"] is not None else 0.0
+    return render_template("map.html", center_lat=center_lat, center_lon=center_lon)
+
+
+@app.route("/api/map-photos")
+def api_map_photos() -> Response:
+    flickr_username = _config.get("flickr", {}).get("username", "")
+    rows = (
+        db()
+        .conn.execute(
+            "SELECT id, latitude, longitude, photos_title, flickr_title, "
+            "       date_taken, flickr_id "
+            "FROM photos "
+            "WHERE latitude IS NOT NULL AND longitude IS NOT NULL"
+        )
+        .fetchall()
+    )
+    result = []
+    for r in rows:
+        title = (r["photos_title"] or r["flickr_title"] or "").strip() or "(untitled)"
+        flickr_url = (
+            f"https://www.flickr.com/photos/{flickr_username}/{r['flickr_id']}"
+            if r["flickr_id"] and flickr_username
+            else None
+        )
+        result.append(
+            {
+                "id": r["id"],
+                "lat": r["latitude"],
+                "lon": r["longitude"],
+                "title": title,
+                "date": (r["date_taken"] or "")[:10],
+                "flickr_url": flickr_url,
+            }
+        )
+    return jsonify(result)
+
+
 @app.route("/library")
 def library() -> str:
     page = int(request.args.get("page", 1))
