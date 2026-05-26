@@ -882,7 +882,7 @@ class Database:
         status: str | None,
         untitled_only: bool,
         time_pattern: str | None = None,
-        time_expand: int = 2,
+        time_expand: int = 0,
     ) -> tuple[str, list]:
         """Return (WHERE clause fragment, params list) for library queries."""
         clauses: list[str] = ["p.flickr_deleted = 0"]
@@ -913,7 +913,8 @@ class Database:
         if time_pattern:
             from db.time_patterns import parse_pattern
 
-            frag, frag_params = parse_pattern(time_pattern, time_expand, self._distinct_years())
+            years = self._distinct_years() if time_pattern.startswith("holiday:") else []
+            frag, frag_params = parse_pattern(time_pattern, time_expand, years)
             if frag != "1=1":
                 clauses.append(frag)
                 params.extend(frag_params)
@@ -942,7 +943,7 @@ class Database:
         status: str | None = None,
         untitled_only: bool = False,
         time_pattern: str | None = None,
-        time_expand: int = 2,
+        time_expand: int = 0,
         limit: int = 120,
         offset: int = 0,
     ) -> list[dict]:
@@ -988,7 +989,7 @@ class Database:
         status: str | None = None,
         untitled_only: bool = False,
         time_pattern: str | None = None,
-        time_expand: int = 2,
+        time_expand: int = 0,
     ) -> int:
         """Return total photo count for the given library filters."""
         where, params = self._library_where(
@@ -1016,7 +1017,7 @@ class Database:
         status: str | None = None,
         untitled_only: bool = False,
         time_pattern: str | None = None,
-        time_expand: int = 2,
+        time_expand: int = 0,
     ) -> list[int]:
         """Return all photo IDs matching the filters (no limit — used by bulk-edit)."""
         where, params = self._library_where(
