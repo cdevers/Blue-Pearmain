@@ -27,7 +27,7 @@ Every non-trivial piece of work must be tracked in a GitHub issue:
 For each meaningful change (bug fix, feature, refactor):
 
 1. **Tests (TDD)** — invoke `/superpowers:test-driven-development` before writing implementation code. Write the tests first, confirm they fail for the right reason, then implement. Run `python -m pytest tests/ -q` and confirm all tests pass before committing.
-2. **README** — update `README.md` to reflect any user-visible change: new commands, changed behaviour, updated test count.
+2. **README** — update `README.md` to reflect any user-visible change: new commands, changed behaviour. Do not update a specific test count — the README now has a general coverage statement instead.
 3. **Docs** — if a `docs/` file describes work that was just completed, mark it done (e.g. `✓ done`) or update its status line.
 4. **GitHub issue** — reference the issue in the commit message (e.g. `Closes #1`). After the commit, update the issue with a status comment or close it with a summary of what was done.
 5. **Git commit** — create a commit that describes what changed and why, following the style of recent commits in this repo. Co-author line: `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>`.
