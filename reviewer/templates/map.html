@@ -1,11 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Map — Blue Pearmain{% endblock %}
 
-{% block extra_style %}
+{% block extra_head %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
-<style>
+{% endblock %}
+
+{% block extra_style %}
 .map-filter-bar {
   height: 40px;
   display: flex;
@@ -24,7 +26,6 @@
 .map-popup .pop-links { font-size: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
 .map-popup .pop-links a { color: #0070f3; text-decoration: none; }
 .map-popup .pop-links a:hover { text-decoration: underline; }
-</style>
 {% endblock %}
 
 {% block content %}
@@ -81,6 +82,7 @@
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script>
 const map = L.map('map').setView([{{ center_lat }}, {{ center_lon }}], 5);
+requestAnimationFrame(() => map.invalidateSize());  // re-measure after layout settles
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
