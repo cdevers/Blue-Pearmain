@@ -982,20 +982,20 @@ class Database:
     ) -> list[dict]:
         """Return photos for the library grid, newest first, with filters applied."""
         where, params = self._library_where(
-            date_from,
-            date_to,
-            album_id,
-            tag,
-            status,
-            untitled_only,
-            time_pattern,
-            time_expand,
-            q,
-            country,
-            state,
-            city,
-            neighborhood,
-            person,
+            date_from=date_from,
+            date_to=date_to,
+            album_id=album_id,
+            tag=tag,
+            status=status,
+            untitled_only=untitled_only,
+            time_pattern=time_pattern,
+            time_expand=time_expand,
+            q=q,
+            country=country,
+            state=state,
+            city=city,
+            neighborhood=neighborhood,
+            person=person,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         rows = self.conn.execute(
@@ -1038,20 +1038,20 @@ class Database:
     ) -> int:
         """Return total photo count for the given library filters."""
         where, params = self._library_where(
-            date_from,
-            date_to,
-            album_id,
-            tag,
-            status,
-            untitled_only,
-            time_pattern,
-            time_expand,
-            q,
-            country,
-            state,
-            city,
-            neighborhood,
-            person,
+            date_from=date_from,
+            date_to=date_to,
+            album_id=album_id,
+            tag=tag,
+            status=status,
+            untitled_only=untitled_only,
+            time_pattern=time_pattern,
+            time_expand=time_expand,
+            q=q,
+            country=country,
+            state=state,
+            city=city,
+            neighborhood=neighborhood,
+            person=person,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         row = self.conn.execute(
@@ -1078,20 +1078,20 @@ class Database:
     ) -> list[int]:
         """Return all photo IDs matching the filters (no limit — used by bulk-edit)."""
         where, params = self._library_where(
-            date_from,
-            date_to,
-            album_id,
-            tag,
-            status,
-            untitled_only,
-            time_pattern,
-            time_expand,
-            q,
-            country,
-            state,
-            city,
-            neighborhood,
-            person,
+            date_from=date_from,
+            date_to=date_to,
+            album_id=album_id,
+            tag=tag,
+            status=status,
+            untitled_only=untitled_only,
+            time_pattern=time_pattern,
+            time_expand=time_expand,
+            q=q,
+            country=country,
+            state=state,
+            city=city,
+            neighborhood=neighborhood,
+            person=person,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         rows = self.conn.execute(
@@ -1140,7 +1140,9 @@ class Database:
         rows = self.conn.execute(
             "SELECT DISTINCT j.value "
             "FROM photos p, json_each(p.apple_persons) j "
-            "WHERE j.value != '_UNKNOWN_' AND p.flickr_deleted = 0 "
+            "WHERE p.apple_persons IS NOT NULL "
+            "  AND p.apple_persons NOT IN ('null', '[]', '') "
+            "  AND j.value != '_UNKNOWN_' AND p.flickr_deleted = 0 "
             "ORDER BY j.value"
         ).fetchall()
         return [r["value"] for r in rows]
