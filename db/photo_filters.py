@@ -84,3 +84,23 @@ def build_date_alias_clause(date: str) -> tuple[str, list]:
     ?date=YYYY-MM-DD alias. The alias is resolved in app.py before DB calls;
     this function is reserved for future use by other endpoints."""
     return "DATE(p.date_taken) = ?", [date]
+
+
+def build_bbox_clause(
+    lat_min: float, lat_max: float, lon_min: float, lon_max: float
+) -> tuple[str, list]:
+    """Spatial bounding-box filter. Returns photos whose GPS coordinates fall
+    inside the given rectangle (BETWEEN is inclusive on both ends).
+    Caller must ensure all four params are non-None and that lat_min <= lat_max
+    and lon_min <= lon_max (app.py normalises these before calling).
+
+    Antimeridian note: boxes that cross ±180° longitude are not supported.
+    app.py swaps inverted lon values rather than splitting into two ranges.
+    This is intentional — BP photos are in the Americas/Europe where this
+    never occurs in practice."""
+    sql = (
+        "p.latitude IS NOT NULL AND p.longitude IS NOT NULL"
+        " AND p.latitude BETWEEN ? AND ?"
+        " AND p.longitude BETWEEN ? AND ?"
+    )
+    return sql, [lat_min, lat_max, lon_min, lon_max]

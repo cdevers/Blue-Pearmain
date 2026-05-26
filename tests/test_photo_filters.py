@@ -5,6 +5,7 @@ from db.photo_filters import (
     build_location_clause,
     build_person_clause,
     build_date_alias_clause,
+    build_bbox_clause,
 )
 
 
@@ -91,3 +92,23 @@ class TestBuildDateAliasClause:
         sql, params = build_date_alias_clause("2023-10-15")
         assert sql == "DATE(p.date_taken) = ?"
         assert params == ["2023-10-15"]
+
+
+class TestBuildBboxClause:
+    def test_returns_four_params_in_order(self):
+        _, params = build_bbox_clause(42.35, 42.41, -71.12, -71.08)
+        assert params == [42.35, 42.41, -71.12, -71.08]
+
+    def test_sql_uses_between_for_lat_and_lon(self):
+        sql, _ = build_bbox_clause(42.35, 42.41, -71.12, -71.08)
+        assert sql.count("BETWEEN") == 2
+
+    def test_sql_guards_null_coordinates(self):
+        sql, _ = build_bbox_clause(42.35, 42.41, -71.12, -71.08)
+        assert "p.latitude IS NOT NULL" in sql
+        assert "p.longitude IS NOT NULL" in sql
+
+    def test_negative_longitudes_accepted(self):
+        # West-of-prime-meridian coords should work fine
+        _, params = build_bbox_clause(-10.0, 10.0, -180.0, -90.0)
+        assert params == [-10.0, 10.0, -180.0, -90.0]
