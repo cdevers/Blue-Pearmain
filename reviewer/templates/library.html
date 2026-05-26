@@ -854,8 +854,12 @@ document.querySelectorAll('.lib-thumb').forEach(function(card) {
 (function () {
   const sel = document.querySelector('[name="time_pattern"]');
   const lbl = document.getElementById('lib-expand-label');
+  const cb  = document.querySelector('[name="expand"]');
+  if (!sel || !lbl || !cb) return;
   function syncExpand() {
-    lbl.style.display = sel.value.startsWith('holiday:') ? 'flex' : 'none';
+    const isHoliday = sel.value.startsWith('holiday:');
+    lbl.style.display = isHoliday ? 'flex' : 'none';
+    if (!isHoliday) cb.checked = false;
   }
   sel.addEventListener('change', syncExpand);
   syncExpand();  // run on page load to restore state when returning with expand=1
