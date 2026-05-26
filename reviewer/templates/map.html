@@ -1,9 +1,65 @@
 {% extends "base.html" %}
+{% block title %}Map — Blue Pearmain{% endblock %}
+
+{% block extra_style %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<style>
+#map { height: calc(100vh - 48px); width: 100%; }
+.map-popup img { width: 120px; height: 80px; object-fit: cover; border-radius: 4px; display: block; margin-bottom: 6px; }
+.map-popup .pop-title { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+.map-popup .pop-date  { font-size: 11px; color: #888; margin-bottom: 6px; }
+.map-popup .pop-links { font-size: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
+.map-popup .pop-links a { color: #0070f3; text-decoration: none; }
+.map-popup .pop-links a:hover { text-decoration: underline; }
+</style>
+{% endblock %}
+
 {% block content %}
-<div id="map" style="height: 600px;"></div>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script>
-  var map = L.map('map').setView([{{ center_lat }}, {{ center_lon }}], 4);
-  var markers = L.markerClusterGroup();
-  map.addLayer(markers);
+const map = L.map('map').setView([{{ center_lat }}, {{ center_lon }}], 5);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  maxZoom: 19,
+}).addTo(map);
+
+const markers = L.markerClusterGroup();
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+fetch('/api/map-photos')
+  .then(r => r.json())
+  .then(photos => {
+    photos.forEach(p => {
+      const marker = L.marker([p.lat, p.lon]);
+      const shortTitle = p.title.length > 60 ? p.title.slice(0, 60) + '…' : p.title;
+      let links = `<a href="/photo/${p.id}">Open photo</a>`;
+      if (p.flickr_url) links += `<a href="${esc(p.flickr_url)}" target="_blank" rel="noopener">Flickr &#x2197;</a>`;
+      if (p.date)       links += `<a href="/library?date=${p.date}">Show this day</a>`;
+      marker.bindPopup(`
+        <div class="map-popup">
+          <img src="/thumb/${p.id}" alt="">
+          <div class="pop-title">${esc(shortTitle)}</div>
+          <div class="pop-date">${esc(p.date || '')}</div>
+          <div class="pop-links">${links}</div>
+        </div>
+      `, { maxWidth: 200 });
+      markers.addLayer(marker);
+    });
+    map.addLayer(markers);
+  })
+  .catch(() => { /* silently fail — map usable, just empty */ });
 </script>
 {% endblock %}
