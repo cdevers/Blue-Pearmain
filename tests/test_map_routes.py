@@ -231,3 +231,34 @@ class TestMapPhotosDeletedFilter:
         ids = [p["id"] for p in data]
         assert live in ids
         assert deleted not in ids
+
+
+class TestMapPageSpatialUI:
+    def test_draw_button_present(self, client_geo):
+        c, *_ = client_geo
+        html = c.get("/map").data.decode()
+        assert "map-draw-btn" in html
+        assert "Draw selection" in html
+
+    def test_clear_button_present(self, client_geo):
+        c, *_ = client_geo
+        html = c.get("/map").data.decode()
+        assert "map-clear-btn" in html
+        assert "Clear selection" in html
+
+    def test_open_library_button_present(self, client_geo):
+        c, *_ = client_geo
+        html = c.get("/map").data.decode()
+        assert "map-open-lib-btn" in html
+        assert "Open in Library" in html
+
+    def test_leaflet_draw_script_loaded(self, client_geo):
+        c, *_ = client_geo
+        html = c.get("/map").data.decode()
+        assert "leaflet-draw" in html
+
+    def test_open_in_library_js_function_present(self, client_geo):
+        c, *_ = client_geo
+        html = c.get("/map").data.decode()
+        assert "openInLibrary" in html
+        assert "lat_min" in html

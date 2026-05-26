@@ -5,6 +5,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
 {% endblock %}
 
 {% block extra_style %}
@@ -26,6 +27,20 @@
 .map-popup .pop-links { font-size: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
 .map-popup .pop-links a { color: #0070f3; text-decoration: none; }
 .map-popup .pop-links a:hover { text-decoration: underline; }
+.map-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  cursor: pointer;
+}
+.map-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
 {% endblock %}
 
 {% block content %}
@@ -75,11 +90,18 @@
     <input type="checkbox" id="map-expand-cb"> ±2 days
   </label>
   <span id="map-photo-count" style="font-size:12px;color:var(--muted)"></span>
+  <button type="button" id="map-draw-btn" onclick="toggleDraw()"
+          class="map-btn" style="margin-left:auto">Draw selection</button>
+  <button type="button" id="map-clear-btn" onclick="clearSelection()"
+          class="map-btn" style="display:none">✕ Clear selection</button>
+  <button type="button" id="map-open-lib-btn" onclick="openInLibrary()"
+          class="map-btn map-btn-primary">Open in Library ↗</button>
 </div>
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
 <script>
 const map = L.map('map').setView([{{ center_lat }}, {{ center_lon }}], 5);
 requestAnimationFrame(() => map.invalidateSize());  // re-measure after layout settles
@@ -152,5 +174,57 @@ document.getElementById('map-time-select').addEventListener('change', function (
 document.getElementById('map-expand-cb').addEventListener('change', reloadMarkers);
 
 reloadMarkers();   // initial load
+
+// ── Spatial selection ─────────────────────────────────────────────────────
+const _drawnItems = new L.FeatureGroup();
+map.addLayer(_drawnItems);
+
+let _drawnLayer  = null;   // current rectangle layer, or null
+let _drawnBounds = null;   // LatLngBounds of drawn rect, or null
+let _drawHandler = null;   // active L.Draw.Rectangle handler, or null
+
+function toggleDraw() {
+  if (_drawHandler) {
+    _drawHandler.disable();
+    _drawHandler = null;
+    return;
+  }
+  _drawHandler = new L.Draw.Rectangle(map, {
+    shapeOptions: { color: '#0077cc', weight: 2, fillOpacity: 0.1 },
+  });
+  _drawHandler.enable();
+}
+
+map.on(L.Draw.Event.CREATED, function (e) {
+  if (_drawnLayer) _drawnItems.removeLayer(_drawnLayer);
+  _drawnLayer  = e.layer;
+  _drawnBounds = _drawnLayer.getBounds();
+  _drawnItems.addLayer(_drawnLayer);
+  _drawHandler = null;
+  document.getElementById('map-draw-btn').style.display  = 'none';
+  document.getElementById('map-clear-btn').style.display = '';
+});
+
+function clearSelection() {
+  if (_drawnLayer) _drawnItems.removeLayer(_drawnLayer);
+  _drawnLayer  = null;
+  _drawnBounds = null;
+  document.getElementById('map-draw-btn').style.display  = '';
+  document.getElementById('map-clear-btn').style.display = 'none';
+}
+
+function openInLibrary() {
+  const bounds = _drawnBounds || map.getBounds();
+  const params = new URLSearchParams({
+    lat_min: bounds.getSouth().toFixed(5),
+    lat_max: bounds.getNorth().toFixed(5),
+    lon_min: bounds.getWest().toFixed(5),
+    lon_max: bounds.getEast().toFixed(5),
+  });
+  const tp = document.getElementById('map-time-select').value;
+  if (tp) params.set('time_pattern', tp);
+  if (document.getElementById('map-expand-cb').checked) params.set('expand', '1');
+  window.open('/library?' + params.toString(), '_blank');
+}
 </script>
 {% endblock %}
