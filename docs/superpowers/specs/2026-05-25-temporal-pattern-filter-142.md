@@ -17,7 +17,7 @@ The map view makes this especially compelling: you can locate the place, but sti
 A `time_pattern` filter that works across all calendar years at once, on both the map and the library grid:
 
 - **Month** — "any October", "any March"
-- **Season** — Spring (Mar–May), Summer (Jun–Aug), Fall (Sep–Nov), Winter (Dec–Feb)
+- **Season** — Spring (Mar–Jun), Summer (Jun–Sep), Fall (Sep–Dec), Winter (Dec–Mar) — ranges intentionally overlap; see Seasonal Semantics note below
 - **Day type** — weekends, weekdays
 - **Named US holiday presets** — fixed-date and floating, with optional ±2-day expansion window
 
@@ -75,10 +75,11 @@ Pure functions — no Flask or DB dependencies.
 
 ```python
 SEASONS: dict[str, list[str]] = {
-    "spring": ["03", "04", "05"],
-    "summer": ["06", "07", "08"],
-    "fall":   ["09", "10", "11"],
-    "winter": ["12", "01", "02"],
+    # Ranges intentionally overlap — see Seasonal Semantics note below.
+    "spring": ["03", "04", "05", "06"],
+    "summer": ["06", "07", "08", "09"],
+    "fall":   ["09", "10", "11", "12"],
+    "winter": ["12", "01", "02", "03"],
 }
 
 # (type, *args)
@@ -134,7 +135,7 @@ def _nth_weekday(year: int, month: int, weekday: int, n: int) -> datetime.date:
 | Pattern type | SQL fragment |
 |---|---|
 | `month:MM` | `strftime('%m', p.date_taken) = ?` |
-| `season:X` | `strftime('%m', p.date_taken) IN (?,?,?)` |
+| `season:X` | `strftime('%m', p.date_taken) IN (?,?,?,?)` — 4 months per season |
 | `daytype:weekend` | `strftime('%w', p.date_taken) IN (?,?)` — values `'0','6'` |
 | `daytype:weekday` | `strftime('%w', p.date_taken) NOT IN (?,?)` — values `'0','6'` |
 | `holiday:X`, expand_days=0 | `DATE(p.date_taken) = ?` for each year → OR-joined |
@@ -143,6 +144,12 @@ def _nth_weekday(year: int, month: int, weekday: int, n: int) -> datetime.date:
 Note: `strftime('%w', ...)` in SQLite returns `'0'` = Sunday, `'6'` = Saturday.
 
 For holiday patterns, `parse_pattern` iterates `years`, calls `holiday_date(year, key)` for each, skips `None` results, and builds the OR chain. If no valid dates are found (e.g. unknown holiday key, empty years list), returns `("1=1", [])`.
+
+**Seasonal semantics:** Season ranges are intentionally fuzzy and overlapping (Winter = Dec–Mar, Spring = Mar–Jun, Summer = Jun–Sep, Fall = Sep–Dec). This is a deliberate design choice, not imprecision. Human memory for "when in the year" is itself fuzzy — "that fall trip" might mean October or early December depending on the person. Overlapping ranges make the filter more forgiving and therefore more useful for retrieval. The UI labels each season with its month span so users know exactly what they're getting. The semantics are human-oriented, not meteorological or astronomical.
+
+**Winter year-boundary:** Winter spans December of one calendar year and January–March of the next. This is not an edge case for `strftime('%m')` matching — the expression matches on month number independently of year, so December 2021 and January 2022 are both correctly included. No special handling is needed.
+
+**Timezone:** `date_taken` is used as stored in the DB. No timezone reinterpretation is performed. This is consistent with how all other date filtering works in BP.
 
 ---
 
@@ -361,7 +368,7 @@ The existing `fetch('/api/map-photos')` on page load is replaced by `reloadMarke
 - `holiday_date(2023, "christmas")` → `date(2023, 12, 25)`
 - `_nth_weekday` edge case: last Monday of May when May 1 is Monday → last is May 29
 - `parse_pattern("month:10", 0, [])` → `("strftime('%m', p.date_taken) = ?", ["10"])`
-- `parse_pattern("season:fall", 0, [])` → months `09`, `10`, `11`
+- `parse_pattern("season:fall", 0, [])` → months `09`, `10`, `11`, `12`
 - `parse_pattern("daytype:weekend", 0, [])` → weekday IN `'0'`, `'6'`
 - `parse_pattern("daytype:weekday", 0, [])` → weekday NOT IN `'0'`, `'6'`
 - `parse_pattern("holiday:thanksgiving", 0, [2023])` → exact date `2023-11-23`
