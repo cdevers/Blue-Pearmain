@@ -28,6 +28,39 @@
   font-size: 12px;
 }
 
+/* ── Filters panel (collapsible) ─────────────────── */
+.lib-filter-panel {
+  padding: 10px 16px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.lib-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.lib-filter-row label { font-size: 11px; color: var(--muted); }
+.lib-filter-row input[type=text],
+.lib-filter-row input[type=date],
+.lib-filter-row select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.lib-filter-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
 /* ── Selection toolbar ──────────────────────────── */
 .lib-select-bar {
   display: flex;
@@ -183,81 +216,171 @@
 {% endblock %}
 
 {% block content %}
-<!-- Filter bar -->
+{% set filter_count = (
+  (1 if filters.date_from or filters.date_to else 0) +
+  (1 if filters.album_id else 0) +
+  (1 if filters.tag else 0) +
+  (1 if filters.status else 0) +
+  (1 if filters.untitled else 0) +
+  (1 if filters.time_pattern else 0) +
+  (1 if filters.country else 0) +
+  (1 if filters.state else 0) +
+  (1 if filters.city else 0) +
+  (1 if filters.neighborhood else 0) +
+  (1 if filters.person else 0)
+) %}
 <form id="lib-filter-form" method="get" action="{{ url_for('library') }}">
+<!-- Search bar (always visible) -->
 <div class="lib-filter-bar">
-  <label>From <input type="date" name="date_from" value="{{ filters.date_from }}"></label>
-  <label>To <input type="date" name="date_to" value="{{ filters.date_to }}"></label>
-  <label>Album
-    <select name="album_id">
-      <option value="">All albums</option>
-      {% for a in albums %}
-        <option value="{{ a.id }}" {% if filters.album_id == a.id %}selected{% endif %}>{{ a.name }}</option>
-      {% endfor %}
-    </select>
-  </label>
-  <label>Tag <input type="text" name="tag" value="{{ filters.tag }}" placeholder="filter by tag…" style="width:120px"></label>
-  <label>Status
-    <select name="status">
-      <option value="">All</option>
-      <option value="public"  {% if filters.status == 'public'  %}selected{% endif %}>Public</option>
-      <option value="private" {% if filters.status == 'private' %}selected{% endif %}>Private</option>
-      <option value="pending" {% if filters.status == 'pending' %}selected{% endif %}>Pending</option>
-    </select>
-  </label>
-  <label style="display:flex;align-items:center;gap:5px">
-    <input type="checkbox" name="untitled" value="1" {% if filters.untitled %}checked{% endif %} onchange="this.form.submit()">
-    Untitled only
-  </label>
-  <label>Time of year
-    <select name="time_pattern">
-      <option value="">Any time</option>
-      <optgroup label="Month">
-        <option value="month:01" {% if filters.time_pattern == 'month:01' %}selected{% endif %}>January</option>
-        <option value="month:02" {% if filters.time_pattern == 'month:02' %}selected{% endif %}>February</option>
-        <option value="month:03" {% if filters.time_pattern == 'month:03' %}selected{% endif %}>March</option>
-        <option value="month:04" {% if filters.time_pattern == 'month:04' %}selected{% endif %}>April</option>
-        <option value="month:05" {% if filters.time_pattern == 'month:05' %}selected{% endif %}>May</option>
-        <option value="month:06" {% if filters.time_pattern == 'month:06' %}selected{% endif %}>June</option>
-        <option value="month:07" {% if filters.time_pattern == 'month:07' %}selected{% endif %}>July</option>
-        <option value="month:08" {% if filters.time_pattern == 'month:08' %}selected{% endif %}>August</option>
-        <option value="month:09" {% if filters.time_pattern == 'month:09' %}selected{% endif %}>September</option>
-        <option value="month:10" {% if filters.time_pattern == 'month:10' %}selected{% endif %}>October</option>
-        <option value="month:11" {% if filters.time_pattern == 'month:11' %}selected{% endif %}>November</option>
-        <option value="month:12" {% if filters.time_pattern == 'month:12' %}selected{% endif %}>December</option>
-      </optgroup>
-      <optgroup label="Season">
-        <option value="season:spring" {% if filters.time_pattern == 'season:spring' %}selected{% endif %}>Spring (Mar–Jun)</option>
-        <option value="season:summer" {% if filters.time_pattern == 'season:summer' %}selected{% endif %}>Summer (Jun–Sep)</option>
-        <option value="season:fall"   {% if filters.time_pattern == 'season:fall'   %}selected{% endif %}>Fall (Sep–Dec)</option>
-        <option value="season:winter" {% if filters.time_pattern == 'season:winter' %}selected{% endif %}>Winter (Dec–Mar)</option>
-      </optgroup>
-      <optgroup label="Day type">
-        <option value="daytype:weekend" {% if filters.time_pattern == 'daytype:weekend' %}selected{% endif %}>Weekends</option>
-        <option value="daytype:weekday" {% if filters.time_pattern == 'daytype:weekday' %}selected{% endif %}>Weekdays</option>
-      </optgroup>
-      <optgroup label="Holidays">
-        <option value="holiday:new_years"      {% if filters.time_pattern == 'holiday:new_years'      %}selected{% endif %}>New Year's Day (Jan 1)</option>
-        <option value="holiday:mlk_day"        {% if filters.time_pattern == 'holiday:mlk_day'        %}selected{% endif %}>MLK Day (3rd Mon Jan)</option>
-        <option value="holiday:presidents_day" {% if filters.time_pattern == 'holiday:presidents_day' %}selected{% endif %}>Presidents' Day (3rd Mon Feb)</option>
-        <option value="holiday:memorial_day"   {% if filters.time_pattern == 'holiday:memorial_day'   %}selected{% endif %}>Memorial Day (last Mon May)</option>
-        <option value="holiday:july_4th"       {% if filters.time_pattern == 'holiday:july_4th'       %}selected{% endif %}>July 4th</option>
-        <option value="holiday:labor_day"      {% if filters.time_pattern == 'holiday:labor_day'      %}selected{% endif %}>Labor Day (1st Mon Sep)</option>
-        <option value="holiday:columbus_day"   {% if filters.time_pattern == 'holiday:columbus_day'   %}selected{% endif %}>Columbus Day (2nd Mon Oct)</option>
-        <option value="holiday:halloween"      {% if filters.time_pattern == 'holiday:halloween'      %}selected{% endif %}>Halloween (Oct 31)</option>
-        <option value="holiday:thanksgiving"   {% if filters.time_pattern == 'holiday:thanksgiving'   %}selected{% endif %}>Thanksgiving (4th Thu Nov)</option>
-        <option value="holiday:christmas"      {% if filters.time_pattern == 'holiday:christmas'      %}selected{% endif %}>Christmas (Dec 25)</option>
-      </optgroup>
-    </select>
-  </label>
-  <label id="lib-expand-label" style="display:none;align-items:center;gap:5px">
-    <input type="checkbox" name="expand" value="1" {% if filters.expand == '1' %}checked{% endif %}> ±2 days
-  </label>
-  <button type="submit" style="background:var(--accent);border:none;color:white;padding:4px 12px;border-radius:var(--radius);font-size:12px;cursor:pointer">Apply</button>
-  {% if filters.date_from or filters.date_to or filters.album_id or filters.tag or filters.status or filters.untitled or filters.time_pattern %}
-  <a href="{{ url_for('library') }}" style="font-size:12px;color:var(--muted)">Clear filters</a>
+  <input type="search" name="q" value="{{ filters.q }}"
+         placeholder="Search photos…"
+         style="flex:1;min-width:180px;background:var(--bg);border:1px solid var(--border);
+                color:var(--text);border-radius:var(--radius);padding:4px 10px;font-size:12px">
+  <button type="button" id="lib-filter-toggle"
+          onclick="toggleFilterPanel()"
+          style="background:var(--surface);border:1px solid var(--border);color:var(--text);
+                 padding:4px 12px;border-radius:var(--radius);font-size:12px;cursor:pointer">
+    Filters{% if filter_count %} ({{ filter_count }}){% endif %} ▾
+  </button>
+  {% if filters.q or filter_count > 0 %}
+  <a href="{{ url_for('library') }}" style="font-size:12px;color:var(--muted)">Clear all</a>
   {% endif %}
-  <span style="color:var(--muted);font-size:12px;margin-left:auto;white-space:nowrap">{{ total }} photo{{ 's' if total != 1 }}</span>
+  <span style="color:var(--muted);font-size:12px;margin-left:auto;white-space:nowrap">
+    {{ total }} photo{{ 's' if total != 1 }}
+  </span>
+</div>
+
+<!-- Collapsible filter panel (auto-opens when any non-q filter is active) -->
+<div id="lib-filter-panel" class="lib-filter-panel"
+     style="display:{% if filter_count > 0 %}block{% else %}none{% endif %}">
+
+  <!-- Row 1: dates, album, tag, status, untitled -->
+  <div class="lib-filter-row">
+    <label>From <input type="date" name="date_from" value="{{ filters.date_from }}"></label>
+    <label>To <input type="date" name="date_to" value="{{ (filters.date_to or '')[:10] }}"></label>
+    <label>Album
+      <select name="album_id">
+        <option value="">All albums</option>
+        {% for a in albums %}
+          <option value="{{ a.id }}" {% if filters.album_id == a.id %}selected{% endif %}>{{ a.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Tag <input type="text" name="tag" value="{{ filters.tag }}" placeholder="filter by tag…" style="width:120px"></label>
+    <label>Status
+      <select name="status">
+        <option value="">All</option>
+        <option value="public"  {% if filters.status == 'public'  %}selected{% endif %}>Public</option>
+        <option value="private" {% if filters.status == 'private' %}selected{% endif %}>Private</option>
+        <option value="pending" {% if filters.status == 'pending' %}selected{% endif %}>Pending</option>
+      </select>
+    </label>
+    <label style="display:flex;align-items:center;gap:5px">
+      <input type="checkbox" name="untitled" value="1" {% if filters.untitled %}checked{% endif %}>
+      Untitled only
+    </label>
+  </div>
+
+  <!-- Row 2: time pattern (moved here from the flat filter bar) -->
+  <div class="lib-filter-row">
+    <label>Time of year
+      <select name="time_pattern">
+        <option value="">Any time</option>
+        <optgroup label="Month">
+          <option value="month:01" {% if filters.time_pattern == 'month:01' %}selected{% endif %}>January</option>
+          <option value="month:02" {% if filters.time_pattern == 'month:02' %}selected{% endif %}>February</option>
+          <option value="month:03" {% if filters.time_pattern == 'month:03' %}selected{% endif %}>March</option>
+          <option value="month:04" {% if filters.time_pattern == 'month:04' %}selected{% endif %}>April</option>
+          <option value="month:05" {% if filters.time_pattern == 'month:05' %}selected{% endif %}>May</option>
+          <option value="month:06" {% if filters.time_pattern == 'month:06' %}selected{% endif %}>June</option>
+          <option value="month:07" {% if filters.time_pattern == 'month:07' %}selected{% endif %}>July</option>
+          <option value="month:08" {% if filters.time_pattern == 'month:08' %}selected{% endif %}>August</option>
+          <option value="month:09" {% if filters.time_pattern == 'month:09' %}selected{% endif %}>September</option>
+          <option value="month:10" {% if filters.time_pattern == 'month:10' %}selected{% endif %}>October</option>
+          <option value="month:11" {% if filters.time_pattern == 'month:11' %}selected{% endif %}>November</option>
+          <option value="month:12" {% if filters.time_pattern == 'month:12' %}selected{% endif %}>December</option>
+        </optgroup>
+        <optgroup label="Season">
+          <option value="season:spring" {% if filters.time_pattern == 'season:spring' %}selected{% endif %}>Spring (Mar–Jun)</option>
+          <option value="season:summer" {% if filters.time_pattern == 'season:summer' %}selected{% endif %}>Summer (Jun–Sep)</option>
+          <option value="season:fall"   {% if filters.time_pattern == 'season:fall'   %}selected{% endif %}>Fall (Sep–Dec)</option>
+          <option value="season:winter" {% if filters.time_pattern == 'season:winter' %}selected{% endif %}>Winter (Dec–Mar)</option>
+        </optgroup>
+        <optgroup label="Day type">
+          <option value="daytype:weekend" {% if filters.time_pattern == 'daytype:weekend' %}selected{% endif %}>Weekends</option>
+          <option value="daytype:weekday" {% if filters.time_pattern == 'daytype:weekday' %}selected{% endif %}>Weekdays</option>
+        </optgroup>
+        <optgroup label="Holidays">
+          <option value="holiday:new_years"      {% if filters.time_pattern == 'holiday:new_years'      %}selected{% endif %}>New Year's Day (Jan 1)</option>
+          <option value="holiday:mlk_day"        {% if filters.time_pattern == 'holiday:mlk_day'        %}selected{% endif %}>MLK Day (3rd Mon Jan)</option>
+          <option value="holiday:presidents_day" {% if filters.time_pattern == 'holiday:presidents_day' %}selected{% endif %}>Presidents' Day (3rd Mon Feb)</option>
+          <option value="holiday:memorial_day"   {% if filters.time_pattern == 'holiday:memorial_day'   %}selected{% endif %}>Memorial Day (last Mon May)</option>
+          <option value="holiday:july_4th"       {% if filters.time_pattern == 'holiday:july_4th'       %}selected{% endif %}>July 4th</option>
+          <option value="holiday:labor_day"      {% if filters.time_pattern == 'holiday:labor_day'      %}selected{% endif %}>Labor Day (1st Mon Sep)</option>
+          <option value="holiday:columbus_day"   {% if filters.time_pattern == 'holiday:columbus_day'   %}selected{% endif %}>Columbus Day (2nd Mon Oct)</option>
+          <option value="holiday:halloween"      {% if filters.time_pattern == 'holiday:halloween'      %}selected{% endif %}>Halloween (Oct 31)</option>
+          <option value="holiday:thanksgiving"   {% if filters.time_pattern == 'holiday:thanksgiving'   %}selected{% endif %}>Thanksgiving (4th Thu Nov)</option>
+          <option value="holiday:christmas"      {% if filters.time_pattern == 'holiday:christmas'      %}selected{% endif %}>Christmas (Dec 25)</option>
+        </optgroup>
+      </select>
+    </label>
+    <label id="lib-expand-label" style="display:none;align-items:center;gap:5px">
+      <input type="checkbox" name="expand" value="1" {% if filters.expand == '1' %}checked{% endif %}> ±2 days
+    </label>
+  </div>
+
+  <!-- Row 3: location cascade -->
+  <div class="lib-filter-row">
+    <label>Country
+      <select name="country" id="sel-country">
+        <option value="">Any</option>
+        {% for c in location_tree.keys()|sort %}
+        <option value="{{ c }}" {% if filters.country == c %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>State/Region
+      <select name="state" id="sel-state">
+        <option value="">Any</option>
+      </select>
+    </label>
+    <label>City
+      <select name="city" id="sel-city">
+        <option value="">Any</option>
+      </select>
+    </label>
+    <label>Neighborhood
+      <select name="neighborhood" id="sel-neighborhood">
+        <option value="">Any</option>
+      </select>
+    </label>
+  </div>
+
+  <!-- Row 4: person -->
+  <div class="lib-filter-row">
+    <label>Person
+      <input type="text" name="person" value="{{ filters.person }}"
+             list="person-datalist" placeholder="person name…" style="width:200px">
+      <datalist id="person-datalist">
+        {% for name in person_list %}
+        <option value="{{ name }}">
+        {% endfor %}
+      </datalist>
+    </label>
+  </div>
+
+  <!-- Panel footer -->
+  <div class="lib-filter-footer">
+    <button type="submit"
+            style="background:var(--accent);border:none;color:white;
+                   padding:4px 12px;border-radius:var(--radius);font-size:12px;cursor:pointer">
+      Apply filters
+    </button>
+    {% if filter_count > 0 %}
+    <a href="{{ url_for('library', q=filters.q) if filters.q else url_for('library') }}"
+       style="font-size:12px;color:var(--muted)">Clear filters</a>
+    {% endif %}
+  </div>
 </div>
 </form>
 
@@ -653,14 +776,20 @@ function _buildPayload(dryRun) {
     const form = document.getElementById('lib-filter-form');
     const fd = new FormData(form);
     payload.filter = {
-      date_from: fd.get('date_from') || null,
-      date_to: fd.get('date_to') || null,
-      album_id: fd.get('album_id') ? parseInt(fd.get('album_id')) : null,
-      tag: fd.get('tag') || null,
-      status: fd.get('status') || null,
-      untitled: fd.get('untitled') === '1',
+      date_from:    fd.get('date_from') || null,
+      date_to:      fd.get('date_to') || null,
+      album_id:     fd.get('album_id') ? parseInt(fd.get('album_id')) : null,
+      tag:          fd.get('tag') || null,
+      status:       fd.get('status') || null,
+      untitled:     fd.get('untitled') === '1',
       time_pattern: fd.get('time_pattern') || null,
-      expand: fd.get('expand') || null,
+      expand:       fd.get('expand') || null,
+      q:            fd.get('q') || null,
+      country:      fd.get('country') || null,
+      state:        fd.get('state') || null,
+      city:         fd.get('city') || null,
+      neighborhood: fd.get('neighborhood') || null,
+      person:       fd.get('person') || null,
     };
   } else {
     payload.photo_ids = [..._selectedIds];
@@ -851,6 +980,16 @@ document.querySelectorAll('.lib-thumb').forEach(function(card) {
 });
 </script>
 <script>
+const locationTree = {{ location_tree | tojson }};
+const libFilters = {{ filters | tojson }};
+
+// ── Filter panel toggle ──────────────────────────────────────────────────
+function toggleFilterPanel() {
+  const panel = document.getElementById('lib-filter-panel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+// ── Expand checkbox show/hide (time_pattern — from #142) ─────────────────
 (function () {
   const sel = document.querySelector('[name="time_pattern"]');
   const lbl = document.getElementById('lib-expand-label');
@@ -862,7 +1001,51 @@ document.querySelectorAll('.lib-thumb').forEach(function(card) {
     if (!isHoliday) cb.checked = false;
   }
   sel.addEventListener('change', syncExpand);
-  syncExpand();  // run on page load to restore state when returning with expand=1
+  syncExpand();
 })();
+
+// ── Location cascade ─────────────────────────────────────────────────────
+const selCountry      = document.getElementById('sel-country');
+const selState        = document.getElementById('sel-state');
+const selCity         = document.getElementById('sel-city');
+const selNeighborhood = document.getElementById('sel-neighborhood');
+
+function rebuildSelect(sel, options, current) {
+  sel.innerHTML = '<option value="">Any</option>';
+  options.sort().forEach(opt => {
+    const o = document.createElement('option');
+    o.value = o.textContent = opt;
+    if (opt === current) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+selCountry.addEventListener('change', () => {
+  rebuildSelect(selState, Object.keys(locationTree[selCountry.value] || {}), '');
+  rebuildSelect(selCity, [], '');
+  rebuildSelect(selNeighborhood, [], '');
+});
+selState.addEventListener('change', () => {
+  const cities = (locationTree[selCountry.value] || {})[selState.value] || {};
+  rebuildSelect(selCity, Object.keys(cities), '');
+  rebuildSelect(selNeighborhood, [], '');
+});
+selCity.addEventListener('change', () => {
+  const nbhds = ((locationTree[selCountry.value] || {})[selState.value] || {})[selCity.value] || [];
+  rebuildSelect(selNeighborhood, nbhds, '');
+});
+
+// Initialise cascade from current filter values on page load
+if (libFilters.country) {
+  rebuildSelect(selState, Object.keys(locationTree[libFilters.country] || {}), libFilters.state);
+}
+if (libFilters.state) {
+  const cities = (locationTree[libFilters.country] || {})[libFilters.state] || {};
+  rebuildSelect(selCity, Object.keys(cities), libFilters.city);
+}
+if (libFilters.city) {
+  const nbhds = ((locationTree[libFilters.country] || {})[libFilters.state] || {})[libFilters.city] || [];
+  rebuildSelect(selNeighborhood, nbhds, libFilters.neighborhood);
+}
 </script>
 {% endblock %}
