@@ -6,7 +6,18 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 <style>
-#map { height: calc(100vh - 48px); width: 100%; }
+.map-filter-bar {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 13px;
+}
+.map-filter-bar label { display: flex; align-items: center; gap: 6px; }
+#map { height: calc(100vh - 48px - 40px); width: 100%; }
 .map-popup img { width: 120px; height: 80px; object-fit: cover; border-radius: 4px; display: block; margin-bottom: 6px; }
 .map-popup .pop-title { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
 .map-popup .pop-date  { font-size: 11px; color: #888; margin-bottom: 6px; }
@@ -17,6 +28,53 @@
 {% endblock %}
 
 {% block content %}
+<div class="map-filter-bar">
+  <label>Time of year
+    <select id="map-time-select">
+      <option value="">Any time</option>
+      <optgroup label="Month">
+        <option value="month:01">January</option>
+        <option value="month:02">February</option>
+        <option value="month:03">March</option>
+        <option value="month:04">April</option>
+        <option value="month:05">May</option>
+        <option value="month:06">June</option>
+        <option value="month:07">July</option>
+        <option value="month:08">August</option>
+        <option value="month:09">September</option>
+        <option value="month:10">October</option>
+        <option value="month:11">November</option>
+        <option value="month:12">December</option>
+      </optgroup>
+      <optgroup label="Season">
+        <option value="season:spring">Spring (Mar–Jun)</option>
+        <option value="season:summer">Summer (Jun–Sep)</option>
+        <option value="season:fall">Fall (Sep–Dec)</option>
+        <option value="season:winter">Winter (Dec–Mar)</option>
+      </optgroup>
+      <optgroup label="Day type">
+        <option value="daytype:weekend">Weekends</option>
+        <option value="daytype:weekday">Weekdays</option>
+      </optgroup>
+      <optgroup label="Holidays">
+        <option value="holiday:new_years">New Year's Day (Jan 1)</option>
+        <option value="holiday:mlk_day">MLK Day (3rd Mon Jan)</option>
+        <option value="holiday:presidents_day">Presidents' Day (3rd Mon Feb)</option>
+        <option value="holiday:memorial_day">Memorial Day (last Mon May)</option>
+        <option value="holiday:july_4th">July 4th</option>
+        <option value="holiday:labor_day">Labor Day (1st Mon Sep)</option>
+        <option value="holiday:columbus_day">Columbus Day (2nd Mon Oct)</option>
+        <option value="holiday:halloween">Halloween (Oct 31)</option>
+        <option value="holiday:thanksgiving">Thanksgiving (4th Thu Nov)</option>
+        <option value="holiday:christmas">Christmas (Dec 25)</option>
+      </optgroup>
+    </select>
+  </label>
+  <label id="map-expand-label" style="display:none;align-items:center;gap:5px">
+    <input type="checkbox" id="map-expand-cb"> ±2 days
+  </label>
+  <span id="map-photo-count" style="font-size:12px;color:var(--muted)"></span>
+</div>
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -30,6 +88,7 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 }).addTo(map);
 
 const markers = L.markerClusterGroup();
+map.addLayer(markers);   // added once; reloadMarkers only calls clearLayers()
 
 function esc(s) {
   return String(s)
@@ -39,27 +98,51 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
-fetch('/api/map-photos')
-  .then(r => r.json())
-  .then(photos => {
-    photos.forEach(p => {
-      const marker = L.marker([p.lat, p.lon]);
-      const shortTitle = p.title.length > 60 ? p.title.slice(0, 60) + '…' : p.title;
-      let links = `<a href="/photo/${p.id}">Open photo</a>`;
-      if (p.flickr_url) links += `<a href="${esc(p.flickr_url)}" target="_blank" rel="noopener">Flickr &#x2197;</a>`;
-      if (p.date)       links += `<a href="/library?date=${p.date}">Show this day</a>`;
-      marker.bindPopup(`
-        <div class="map-popup">
-          <img src="/thumb/${p.id}" alt="">
-          <div class="pop-title">${esc(shortTitle)}</div>
-          <div class="pop-date">${esc(p.date || '')}</div>
-          <div class="pop-links">${links}</div>
-        </div>
-      `, { maxWidth: 200 });
-      markers.addLayer(marker);
-    });
-    map.addLayer(markers);
-  })
-  .catch(() => { /* silently fail — map usable, just empty */ });
+function buildMapUrl() {
+  const p = document.getElementById('map-time-select').value;
+  const e = document.getElementById('map-expand-cb').checked ? '&expand=1' : '';
+  return p ? `/api/map-photos?time_pattern=${encodeURIComponent(p)}${e}` : '/api/map-photos';
+}
+
+function plotPhotos(photos) {
+  photos.forEach(p => {
+    const marker = L.marker([p.lat, p.lon]);
+    const shortTitle = p.title.length > 60 ? p.title.slice(0, 60) + '…' : p.title;
+    let links = `<a href="/photo/${p.id}">Open photo</a>`;
+    if (p.flickr_url) links += `<a href="${esc(p.flickr_url)}" target="_blank" rel="noopener">Flickr &#x2197;</a>`;
+    if (p.date)       links += `<a href="/library?date=${p.date}">Show this day</a>`;
+    marker.bindPopup(`
+      <div class="map-popup">
+        <img src="/thumb/${p.id}" alt="">
+        <div class="pop-title">${esc(shortTitle)}</div>
+        <div class="pop-date">${esc(p.date || '')}</div>
+        <div class="pop-links">${links}</div>
+      </div>
+    `, { maxWidth: 200 });
+    markers.addLayer(marker);
+  });
+  document.getElementById('map-photo-count').textContent =
+    photos.length === 1 ? '1 photo' : `${photos.length} photos`;
+}
+
+function reloadMarkers() {
+  markers.clearLayers();
+  fetch(buildMapUrl())
+    .then(r => r.json())
+    .then(plotPhotos)
+    .catch(() => { /* silently fail — map usable, just empty */ });
+}
+
+document.getElementById('map-time-select').addEventListener('change', function () {
+  const lbl = document.getElementById('map-expand-label');
+  const cb  = document.getElementById('map-expand-cb');
+  const isHoliday = this.value.startsWith('holiday:');
+  lbl.style.display = isHoliday ? 'flex' : 'none';
+  if (!isHoliday) cb.checked = false;
+  reloadMarkers();
+});
+document.getElementById('map-expand-cb').addEventListener('change', reloadMarkers);
+
+reloadMarkers();   // initial load
 </script>
 {% endblock %}
