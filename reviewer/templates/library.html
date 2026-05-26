@@ -209,8 +209,52 @@
     <input type="checkbox" name="untitled" value="1" {% if filters.untitled %}checked{% endif %} onchange="this.form.submit()">
     Untitled only
   </label>
+  <label>Time of year
+    <select name="time_pattern">
+      <option value="">Any time</option>
+      <optgroup label="Month">
+        <option value="month:01" {% if filters.time_pattern == 'month:01' %}selected{% endif %}>January</option>
+        <option value="month:02" {% if filters.time_pattern == 'month:02' %}selected{% endif %}>February</option>
+        <option value="month:03" {% if filters.time_pattern == 'month:03' %}selected{% endif %}>March</option>
+        <option value="month:04" {% if filters.time_pattern == 'month:04' %}selected{% endif %}>April</option>
+        <option value="month:05" {% if filters.time_pattern == 'month:05' %}selected{% endif %}>May</option>
+        <option value="month:06" {% if filters.time_pattern == 'month:06' %}selected{% endif %}>June</option>
+        <option value="month:07" {% if filters.time_pattern == 'month:07' %}selected{% endif %}>July</option>
+        <option value="month:08" {% if filters.time_pattern == 'month:08' %}selected{% endif %}>August</option>
+        <option value="month:09" {% if filters.time_pattern == 'month:09' %}selected{% endif %}>September</option>
+        <option value="month:10" {% if filters.time_pattern == 'month:10' %}selected{% endif %}>October</option>
+        <option value="month:11" {% if filters.time_pattern == 'month:11' %}selected{% endif %}>November</option>
+        <option value="month:12" {% if filters.time_pattern == 'month:12' %}selected{% endif %}>December</option>
+      </optgroup>
+      <optgroup label="Season">
+        <option value="season:spring" {% if filters.time_pattern == 'season:spring' %}selected{% endif %}>Spring (Mar–Jun)</option>
+        <option value="season:summer" {% if filters.time_pattern == 'season:summer' %}selected{% endif %}>Summer (Jun–Sep)</option>
+        <option value="season:fall"   {% if filters.time_pattern == 'season:fall'   %}selected{% endif %}>Fall (Sep–Dec)</option>
+        <option value="season:winter" {% if filters.time_pattern == 'season:winter' %}selected{% endif %}>Winter (Dec–Mar)</option>
+      </optgroup>
+      <optgroup label="Day type">
+        <option value="daytype:weekend" {% if filters.time_pattern == 'daytype:weekend' %}selected{% endif %}>Weekends</option>
+        <option value="daytype:weekday" {% if filters.time_pattern == 'daytype:weekday' %}selected{% endif %}>Weekdays</option>
+      </optgroup>
+      <optgroup label="Holidays">
+        <option value="holiday:new_years"      {% if filters.time_pattern == 'holiday:new_years'      %}selected{% endif %}>New Year's Day (Jan 1)</option>
+        <option value="holiday:mlk_day"        {% if filters.time_pattern == 'holiday:mlk_day'        %}selected{% endif %}>MLK Day (3rd Mon Jan)</option>
+        <option value="holiday:presidents_day" {% if filters.time_pattern == 'holiday:presidents_day' %}selected{% endif %}>Presidents' Day (3rd Mon Feb)</option>
+        <option value="holiday:memorial_day"   {% if filters.time_pattern == 'holiday:memorial_day'   %}selected{% endif %}>Memorial Day (last Mon May)</option>
+        <option value="holiday:july_4th"       {% if filters.time_pattern == 'holiday:july_4th'       %}selected{% endif %}>July 4th</option>
+        <option value="holiday:labor_day"      {% if filters.time_pattern == 'holiday:labor_day'      %}selected{% endif %}>Labor Day (1st Mon Sep)</option>
+        <option value="holiday:columbus_day"   {% if filters.time_pattern == 'holiday:columbus_day'   %}selected{% endif %}>Columbus Day (2nd Mon Oct)</option>
+        <option value="holiday:halloween"      {% if filters.time_pattern == 'holiday:halloween'      %}selected{% endif %}>Halloween (Oct 31)</option>
+        <option value="holiday:thanksgiving"   {% if filters.time_pattern == 'holiday:thanksgiving'   %}selected{% endif %}>Thanksgiving (4th Thu Nov)</option>
+        <option value="holiday:christmas"      {% if filters.time_pattern == 'holiday:christmas'      %}selected{% endif %}>Christmas (Dec 25)</option>
+      </optgroup>
+    </select>
+  </label>
+  <label id="lib-expand-label" style="display:none;align-items:center;gap:5px">
+    <input type="checkbox" name="expand" value="1" {% if filters.expand == '1' %}checked{% endif %}> ±2 days
+  </label>
   <button type="submit" style="background:var(--accent);border:none;color:white;padding:4px 12px;border-radius:var(--radius);font-size:12px;cursor:pointer">Apply</button>
-  {% if filters.date_from or filters.date_to or filters.album_id or filters.tag or filters.status or filters.untitled %}
+  {% if filters.date_from or filters.date_to or filters.album_id or filters.tag or filters.status or filters.untitled or filters.time_pattern %}
   <a href="{{ url_for('library') }}" style="font-size:12px;color:var(--muted)">Clear filters</a>
   {% endif %}
   <span style="color:var(--muted);font-size:12px;margin-left:auto;white-space:nowrap">{{ total }} photo{{ 's' if total != 1 }}</span>
@@ -615,6 +659,8 @@ function _buildPayload(dryRun) {
       tag: fd.get('tag') || null,
       status: fd.get('status') || null,
       untitled: fd.get('untitled') === '1',
+      time_pattern: fd.get('time_pattern') || null,
+      expand: fd.get('expand') || null,
     };
   } else {
     payload.photo_ids = [..._selectedIds];
@@ -803,5 +849,16 @@ document.querySelectorAll('.lib-thumb').forEach(function(card) {
     window.location.href = '/photo/' + photoId + '?back=' + back;
   });
 });
+</script>
+<script>
+(function () {
+  const sel = document.querySelector('[name="time_pattern"]');
+  const lbl = document.getElementById('lib-expand-label');
+  function syncExpand() {
+    lbl.style.display = sel.value.startsWith('holiday:') ? 'flex' : 'none';
+  }
+  sel.addEventListener('change', syncExpand);
+  syncExpand();  // run on page load to restore state when returning with expand=1
+})();
 </script>
 {% endblock %}
