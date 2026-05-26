@@ -881,8 +881,14 @@ class Database:
         tag: str | None,
         status: str | None,
         untitled_only: bool,
-        time_pattern: str | None = None,
-        time_expand: int = 0,
+        time_pattern: str | None = None,  # added by #142
+        time_expand: int = 0,  # added by #142
+        q: str | None = None,  # #141 text search
+        country: str | None = None,  # #141 location cascade
+        state: str | None = None,  # #141
+        city: str | None = None,  # #141
+        neighborhood: str | None = None,  # #141
+        person: str | None = None,  # #141 person filter
     ) -> tuple[str, list]:
         """Return (WHERE clause fragment, params list) for library queries."""
         clauses: list[str] = ["p.flickr_deleted = 0"]
@@ -919,6 +925,27 @@ class Database:
                 clauses.append(frag)
                 params.extend(frag_params)
 
+        # #141 — text, location, person
+        if q or country or state or city or neighborhood or person:
+            from db.photo_filters import (
+                build_text_clause,
+                build_location_clause,
+                build_person_clause,
+            )
+
+            if q:
+                frag, frag_params = build_text_clause(q)
+                clauses.append(frag)
+                params.extend(frag_params)
+            loc_sql, loc_params = build_location_clause(country, state, city, neighborhood)
+            if loc_sql != "1=1":
+                clauses.append(loc_sql)
+                params.extend(loc_params)
+            if person:
+                frag, frag_params = build_person_clause(person)
+                clauses.append(frag)
+                params.extend(frag_params)
+
         where = "WHERE " + " AND ".join(clauses)
 
         if album_id is not None:
@@ -944,6 +971,12 @@ class Database:
         untitled_only: bool = False,
         time_pattern: str | None = None,
         time_expand: int = 0,
+        q: str | None = None,
+        country: str | None = None,
+        state: str | None = None,
+        city: str | None = None,
+        neighborhood: str | None = None,
+        person: str | None = None,
         limit: int = 120,
         offset: int = 0,
     ) -> list[dict]:
@@ -957,6 +990,12 @@ class Database:
             untitled_only,
             time_pattern,
             time_expand,
+            q,
+            country,
+            state,
+            city,
+            neighborhood,
+            person,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         rows = self.conn.execute(
@@ -990,6 +1029,12 @@ class Database:
         untitled_only: bool = False,
         time_pattern: str | None = None,
         time_expand: int = 0,
+        q: str | None = None,
+        country: str | None = None,
+        state: str | None = None,
+        city: str | None = None,
+        neighborhood: str | None = None,
+        person: str | None = None,
     ) -> int:
         """Return total photo count for the given library filters."""
         where, params = self._library_where(
@@ -1001,6 +1046,12 @@ class Database:
             untitled_only,
             time_pattern,
             time_expand,
+            q,
+            country,
+            state,
+            city,
+            neighborhood,
+            person,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         row = self.conn.execute(
@@ -1018,6 +1069,12 @@ class Database:
         untitled_only: bool = False,
         time_pattern: str | None = None,
         time_expand: int = 0,
+        q: str | None = None,
+        country: str | None = None,
+        state: str | None = None,
+        city: str | None = None,
+        neighborhood: str | None = None,
+        person: str | None = None,
     ) -> list[int]:
         """Return all photo IDs matching the filters (no limit — used by bulk-edit)."""
         where, params = self._library_where(
@@ -1029,6 +1086,12 @@ class Database:
             untitled_only,
             time_pattern,
             time_expand,
+            q,
+            country,
+            state,
+            city,
+            neighborhood,
+            person,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         rows = self.conn.execute(
@@ -1036,6 +1099,51 @@ class Database:
             params,
         ).fetchall()
         return [r["id"] for r in rows]
+
+    def location_data(self) -> dict:
+        """Return nested dict {country: {state: {city: [neighborhoods]}}} for non-deleted photos.
+        Photos where place_country is NULL or empty are excluded.
+        Empty-string neighborhoods are excluded from neighborhood lists.
+        All levels sorted alphabetically."""
+        rows = self.conn.execute(
+            "SELECT place_country, place_state, place_city, place_neighborhood "
+            "FROM photos "
+            "WHERE flickr_deleted = 0 "
+            "  AND place_country IS NOT NULL AND place_country != ''"
+        ).fetchall()
+
+        tree: dict = {}
+        for r in rows:
+            country = (r["place_country"] or "").strip()
+            state = (r["place_state"] or "").strip()
+            city = (r["place_city"] or "").strip()
+            nbhd = (r["place_neighborhood"] or "").strip()
+            if not country:
+                continue
+            tree.setdefault(country, {})
+            tree[country].setdefault(state, {})
+            tree[country][state].setdefault(city, set())
+            if nbhd:
+                tree[country][state][city].add(nbhd)
+
+        return {
+            c: {
+                s: {ci: sorted(nbhds) for ci, nbhds in sorted(cities.items())}
+                for s, cities in sorted(states.items())
+            }
+            for c, states in sorted(tree.items())
+        }
+
+    def person_names(self) -> list[str]:
+        """Return distinct person names from apple_persons JSON arrays,
+        excluding '_UNKNOWN_', sorted alphabetically."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT j.value "
+            "FROM photos p, json_each(p.apple_persons) j "
+            "WHERE j.value != '_UNKNOWN_' AND p.flickr_deleted = 0 "
+            "ORDER BY j.value"
+        ).fetchall()
+        return [r["value"] for r in rows]
 
     def get_all_albums(self) -> list[dict]:
         """Return all non-deleted albums ordered by name."""
