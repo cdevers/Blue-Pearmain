@@ -199,3 +199,35 @@ class TestMapPhotosApi:
             assert p["flickr_url"] is None
         finally:
             app_module._config = orig_config
+
+
+@pytest.fixture()
+def client_with_deleted():
+    """One live geotagged photo and one deleted geotagged photo."""
+    with tempfile.TemporaryDirectory() as tmp:
+        test_db = Database(Path(tmp) / "test.db")
+        live = test_db.upsert_photo(
+            _photo(20, latitude=42.38, longitude=-71.10, photos_title="Live photo")
+        )
+        deleted = test_db.upsert_photo(
+            _photo(
+                21, latitude=42.39, longitude=-71.09, photos_title="Deleted photo", flickr_deleted=1
+            )
+        )
+        app_module._db = test_db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+        with app_module.app.test_client() as c:
+            yield c, live, deleted
+        app_module._db = None
+
+
+class TestMapPhotosDeletedFilter:
+    def test_deleted_photos_excluded_from_map(self, client_with_deleted):
+        c, live, deleted = client_with_deleted
+        r = c.get("/api/map-photos")
+        assert r.status_code == 200
+        data = r.get_json()
+        ids = [p["id"] for p in data]
+        assert live in ids
+        assert deleted not in ids

@@ -109,6 +109,14 @@ def truncate_tags(tags: list, n: int = 8) -> str:
     return f"{s} +{rest}" if rest > 0 else s
 
 
+def _parse_float(v: str | None) -> float | None:
+    """Parse a query-string value to float. Returns None on missing or non-numeric input."""
+    try:
+        return float(v) if v is not None else None
+    except ValueError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Routes — pages
 # ---------------------------------------------------------------------------
@@ -826,7 +834,7 @@ def api_map_photos() -> Response:
             "SELECT p.id, p.latitude, p.longitude, p.photos_title, p.flickr_title, "
             "       p.date_taken, p.flickr_id "
             "FROM photos p "
-            f"WHERE p.latitude IS NOT NULL AND p.longitude IS NOT NULL{extra_where}",
+            f"WHERE p.latitude IS NOT NULL AND p.longitude IS NOT NULL AND p.flickr_deleted = 0{extra_where}",
             extra_params,
         )
         .fetchall()
@@ -879,6 +887,27 @@ def library() -> str:
         date_from = date_from or date_alias
         date_to = date_to or (date_alias + "T23:59:59")
 
+    lat_min = _parse_float(request.args.get("lat_min"))
+    lat_max = _parse_float(request.args.get("lat_max"))
+    lon_min = _parse_float(request.args.get("lon_min"))
+    lon_max = _parse_float(request.args.get("lon_max"))
+    # Require all four; ignore a partial set
+    if not all(v is not None for v in (lat_min, lat_max, lon_min, lon_max)):
+        lat_min = lat_max = lon_min = lon_max = None
+    else:
+        assert lat_min is not None and lat_max is not None
+        assert lon_min is not None and lon_max is not None
+        # Clamp to valid geographic bounds
+        lat_min = max(-90.0, min(90.0, lat_min))
+        lat_max = max(-90.0, min(90.0, lat_max))
+        lon_min = max(-180.0, min(180.0, lon_min))
+        lon_max = max(-180.0, min(180.0, lon_max))
+        # Normalise ordering — silently swap inverted values
+        if lat_min > lat_max:
+            lat_min, lat_max = lat_max, lat_min
+        if lon_min > lon_max:
+            lon_min, lon_max = lon_max, lon_min
+
     photos = db().library_photos(
         date_from=date_from,
         date_to=date_to,
@@ -894,6 +923,10 @@ def library() -> str:
         city=city,
         neighborhood=neighborhood,
         person=person,
+        lat_min=lat_min,
+        lat_max=lat_max,
+        lon_min=lon_min,
+        lon_max=lon_max,
         limit=per_page,
         offset=offset,
     )
@@ -912,6 +945,10 @@ def library() -> str:
         city=city,
         neighborhood=neighborhood,
         person=person,
+        lat_min=lat_min,
+        lat_max=lat_max,
+        lon_min=lon_min,
+        lon_max=lon_max,
     )
     location_tree = db().location_data()
     person_list = db().person_names()
@@ -947,6 +984,10 @@ def library() -> str:
             "city": city or "",
             "neighborhood": neighborhood or "",
             "person": person or "",
+            "lat_min": f"{lat_min:.5f}" if lat_min is not None else "",
+            "lat_max": f"{lat_max:.5f}" if lat_max is not None else "",
+            "lon_min": f"{lon_min:.5f}" if lon_min is not None else "",
+            "lon_max": f"{lon_max:.5f}" if lon_max is not None else "",
         },
     )
 
@@ -1267,6 +1308,12 @@ def api_bulk_edit() -> _JsonResp:
 
     if _filter is not None:
         filter_json = json.dumps(_filter)
+        lat_min_f = _parse_float(_filter.get("lat_min"))
+        lat_max_f = _parse_float(_filter.get("lat_max"))
+        lon_min_f = _parse_float(_filter.get("lon_min"))
+        lon_max_f = _parse_float(_filter.get("lon_max"))
+        if not all(v is not None for v in (lat_min_f, lat_max_f, lon_min_f, lon_max_f)):
+            lat_min_f = lat_max_f = lon_min_f = lon_max_f = None
         photo_ids = db().library_photo_ids(
             date_from=_filter.get("date_from"),
             date_to=_filter.get("date_to"),
@@ -1282,6 +1329,10 @@ def api_bulk_edit() -> _JsonResp:
             city=_filter.get("city") or None,
             neighborhood=_filter.get("neighborhood") or None,
             person=_filter.get("person") or None,
+            lat_min=lat_min_f,
+            lat_max=lat_max_f,
+            lon_min=lon_min_f,
+            lon_max=lon_max_f,
         )
     elif isinstance(data.get("photo_ids"), list):
         photo_ids = [int(i) for i in data["photo_ids"]]
