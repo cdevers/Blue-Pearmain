@@ -124,32 +124,31 @@ def parse_pattern(
     if pattern.startswith("holiday:"):
         key = pattern[8:]
         if expand_days == 0:
-            # Exact dates: use equality
+            # Exact day: use strftime to strip time component from date_taken
             dates: list[str] = []
-            for year in years:
-                d = holiday_date(year, key)
-                if d is not None:
-                    dates.append(str(d))
-            if not dates:
-                return "1=1", []
-            placeholders = ",".join("?" * len(dates))
-            return f"(p.date_taken IN ({placeholders}))", dates
-        else:
-            # Date ranges: use BETWEEN
-            ranges: list[tuple[str, str]] = []
             for year in years:
                 d = holiday_date(year, key)
                 if d is None:
                     continue
-                d_lo = d - datetime.timedelta(days=expand_days)
-                d_hi = d + datetime.timedelta(days=expand_days)
-                ranges.append((str(d_lo), str(d_hi)))
-            if not ranges:
+                dates.append(str(d))
+            if not dates:
                 return "1=1", []
-            clauses = " OR ".join("(p.date_taken BETWEEN ? AND ?)" for _ in ranges)
-            params: list[str] = []
-            for lo, hi in ranges:
+            placeholders = ",".join("?" * len(dates))
+            return f"(strftime('%Y-%m-%d', p.date_taken) IN ({placeholders}))", dates
+        else:
+            # Date range with expansion: use BETWEEN with time-aware upper bound
+            clauses_list: list[str] = []
+            params: list = []
+            for year in years:
+                d = holiday_date(year, key)
+                if d is None:
+                    continue
+                lo = str(d - datetime.timedelta(days=expand_days))
+                hi = str(d + datetime.timedelta(days=expand_days)) + " 23:59:59"
+                clauses_list.append("(p.date_taken BETWEEN ? AND ?)")
                 params.extend([lo, hi])
-            return f"({clauses})", params
+            if not clauses_list:
+                return "1=1", []
+            return f"({' OR '.join(clauses_list)})", params
 
     return "1=1", []

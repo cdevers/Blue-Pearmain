@@ -117,20 +117,22 @@ class TestParsePattern:
     # Holidays — no expansion
     def test_holiday_exact_thanksgiving_2023(self):
         sql, params = parse_pattern("holiday:thanksgiving", 0, [2023])
+        assert "strftime('%Y-%m-%d', p.date_taken)" in sql
         assert "2023-11-23" in params
         assert "BETWEEN" not in sql
 
     def test_holiday_exact_two_years(self):
         sql, params = parse_pattern("holiday:thanksgiving", 0, [2022, 2023])
+        assert "strftime('%Y-%m-%d', p.date_taken)" in sql
         assert "2022-11-24" in params  # Thanksgiving 2022 = Nov 24
         assert "2023-11-23" in params
 
     # Holidays — with expansion
     def test_holiday_expand_thanksgiving_2023(self):
         sql, params = parse_pattern("holiday:thanksgiving", 2, [2023])
-        # ±2 from Nov 23 → Nov 21 to Nov 25
+        # ±2 from Nov 23 → lo=Nov 21, hi=Nov 25 23:59:59
         assert "2023-11-21" in params
-        assert "2023-11-25" in params
+        assert any("2023-11-25" in p for p in params)
         assert "BETWEEN" in sql
 
     def test_holiday_expand_two_years(self):
