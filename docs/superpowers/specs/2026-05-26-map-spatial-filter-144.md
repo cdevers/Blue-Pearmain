@@ -116,12 +116,21 @@ lat_min = _parse_float(request.args.get("lat_min"))
 lat_max = _parse_float(request.args.get("lat_max"))
 lon_min = _parse_float(request.args.get("lon_min"))
 lon_max = _parse_float(request.args.get("lon_max"))
-# Only treat as bbox if all four are present
+# Only treat as bbox if all four are present and in valid geographic range
 if not all(v is not None for v in (lat_min, lat_max, lon_min, lon_max)):
     lat_min = lat_max = lon_min = lon_max = None
+else:
+    # Clamp to valid geographic bounds
+    lat_min = max(-90.0, min(90.0, lat_min))
+    lat_max = max(-90.0, min(90.0, lat_max))
+    lon_min = max(-180.0, min(180.0, lon_min))
+    lon_max = max(-180.0, min(180.0, lon_max))
+    # Normalise ordering — silently swap if inverted
+    if lat_min > lat_max:
+        lat_min, lat_max = lat_max, lat_min
+    if lon_min > lon_max:
+        lon_min, lon_max = lon_max, lon_min
 ```
-
-`_parse_float` can be a module-level helper (reusable, testable).
 
 Add to `filters` dict (store as rounded strings so URL round-trip is clean):
 
@@ -384,6 +393,27 @@ def test_library_bbox_chip_shown(client_with_geo):
     r = client.get('/library?lat_min=42.35&lat_max=42.41&lon_min=-71.12&lon_max=-71.08')
     assert b'Map area' in r.data
 
+def test_library_bbox_persists_across_pagination(client_with_geo):
+    # Hidden inputs carry bbox through page=2 form submission
+    r = client.get('/library?lat_min=42.35&lat_max=42.41&lon_min=-71.12&lon_max=-71.08&page=2')
+    data = r.data.decode()
+    # All four hidden inputs must be present in the rendered form
+    assert 'name="lat_min"' in data
+    assert 'name="lat_max"' in data
+    assert 'name="lon_min"' in data
+    assert 'name="lon_max"' in data
+
+def test_library_bbox_inverted_coords_normalised(client_with_geo):
+    # lat_min > lat_max — silently swapped, photo still found
+    r = client.get('/library?lat_min=42.41&lat_max=42.35&lon_min=-71.08&lon_max=-71.12')
+    assert r.status_code == 200
+    assert b'Map area' in r.data  # bbox active
+
+def test_library_bbox_out_of_range_clamped(client_with_geo):
+    # Absurd values clamped, not rejected
+    r = client.get('/library?lat_min=-999&lat_max=999&lon_min=-999&lon_max=999')
+    assert r.status_code == 200
+
 def test_map_photos_excludes_deleted(client_with_deleted_geo):
     r = client.get('/api/map-photos')
     ids = [p['id'] for p in r.get_json()]
@@ -407,3 +437,4 @@ URL encoding: JSON-encoded array or repeated `bbox[]` params. Separate issue whe
 - Freehand polygon selection
 - Editing a drawn rectangle after creation (clear and redraw)
 - Map highlighting the active rectangle when navigating back from library
+- Shared "preserve all filters except X" Jinja2 helper — the "Map area ✕" chip is the second call site that reconstructs a filter URL excluding one param (the other is the existing clear-filters footer link). A shared macro is worth introducing when a third call site appears.
