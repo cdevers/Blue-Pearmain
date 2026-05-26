@@ -25,7 +25,7 @@ Blue Pearmain addresses both:
 - Library view with multi-select for bulk title, description, and tag editing across photo sets — changes queue as proposals before writing to Flickr; double-click any photo to open its detail page (larger image, editable title/description/tags) with a back link returning to the library
 - Album membership editing from the library view: add selected photos to existing albums or remove them from the currently-filtered album; changes queue for `bp sync-albums` — no immediate Flickr calls
 - `/albums` page (key `9`) lists all albums with photo counts and links to the filtered library view; albums can be renamed and deleted directly from this page
-- `/map` page (key `0`) plots all geotagged photos on an interactive OpenStreetMap map with clustered markers; clicking a marker opens a popup with thumbnail and links to the photo detail page or the library filtered to that day
+- `/map` page (key `0`) plots all geotagged photos on an interactive OpenStreetMap map with clustered markers; clicking a marker opens a popup with thumbnail and links to the photo detail page or the library filtered to that day; draw a rectangle on the map to select a spatial region, then open those photos in the Library view (combined with time pattern filter) for bulk tagging or album operations
 
 Nothing is written to Flickr or Apple Photos without explicit human confirmation or auto-apply rules you've opted into.
 

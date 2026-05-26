@@ -1,7 +1,7 @@
 # Map Spatial Filter — Spec
 
 **Issue:** [#144](https://github.com/cdevers/Blue-Pearmain/issues/144)
-**Status:** in progress
+**Status:** ✓ done (2026-05-26)
 
 ---
 
