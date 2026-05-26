@@ -265,3 +265,107 @@ class TestCombinedFilters:
         assert r.status_code == 200
         ids = _ids(r)
         assert len(ids) == 5
+
+
+@pytest.fixture()
+def client_geo():
+    """
+    3-photo fixture for bbox tests:
+
+    p_inside — lat=42.38, lon=-71.10 — inside the test box (42.35–42.41, -71.12–-71.08)
+               date_taken="2023-10-15T10:00:00"  (October)
+    p_outside — lat=48.86, lon=2.35 — Paris, outside the test box
+                date_taken="2023-10-20T10:00:00"  (October)
+    p_boundary — lat=42.35, lon=-71.12 — exactly on the boundary (BETWEEN is inclusive)
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        test_db = Database(Path(tmp) / "test.db")
+        p_inside = test_db.upsert_photo(
+            _photo(
+                10,
+                latitude=42.38,
+                longitude=-71.10,
+                photos_title="Inside",
+                date_taken="2023-10-15T10:00:00",
+            )
+        )
+        p_outside = test_db.upsert_photo(
+            _photo(
+                11,
+                latitude=48.86,
+                longitude=2.35,
+                photos_title="Outside",
+                date_taken="2023-10-20T10:00:00",
+            )
+        )
+        p_boundary = test_db.upsert_photo(
+            _photo(12, latitude=42.35, longitude=-71.12, photos_title="Boundary")
+        )
+        app_module._db = test_db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test-secret"
+        with app_module.app.test_client() as c:
+            yield c, p_inside, p_outside, p_boundary, test_db
+        app_module._db = None
+
+
+class TestLibraryBbox:
+    def test_bbox_returns_only_inside_photos(self, client_geo):
+        c, p_inside, p_outside, p_boundary, _ = client_geo
+        r = c.get("/library?lat_min=42.35&lat_max=42.41&lon_min=-71.12&lon_max=-71.08")
+        assert r.status_code == 200
+        data = r.data.decode()
+        assert "Inside" in data
+        assert "Boundary" in data
+        assert "Outside" not in data
+
+    def test_bbox_boundary_inclusive(self, client_geo):
+        c, _, _, p_boundary, db = client_geo
+        count = db.library_photo_count(lat_min=42.35, lat_max=42.41, lon_min=-71.12, lon_max=-71.08)
+        # p_inside + p_boundary = 2
+        assert count == 2
+
+    def test_bbox_partial_params_ignored(self, client_geo):
+        c, _, _, _, db = client_geo
+        # Only 3 of 4 params — no bbox applied, all 3 photos returned
+        count = db.library_photo_count(lat_min=42.35, lat_max=42.41, lon_min=-71.12)
+        assert count == 3
+
+    def test_bbox_plus_time_pattern(self, client_geo):
+        c, p_inside, p_outside, p_boundary, db = client_geo
+        # inside box + October
+        count = db.library_photo_count(
+            lat_min=42.35, lat_max=42.41, lon_min=-71.12, lon_max=-71.08, time_pattern="month:10"
+        )
+        assert count == 1  # only p_inside has date_taken in October
+
+    def test_bbox_filter_count_shows_1(self, client_geo):
+        c, *_ = client_geo
+        r = c.get("/library?lat_min=42.35&lat_max=42.41&lon_min=-71.12&lon_max=-71.08")
+        assert b"Filters (1)" in r.data
+
+    def test_bbox_chip_shown_in_panel(self, client_geo):
+        c, *_ = client_geo
+        r = c.get("/library?lat_min=42.35&lat_max=42.41&lon_min=-71.12&lon_max=-71.08")
+        assert b"Map area" in r.data
+
+    def test_bbox_hidden_inputs_for_pagination(self, client_geo):
+        c, *_ = client_geo
+        r = c.get("/library?lat_min=42.35&lat_max=42.41&lon_min=-71.12&lon_max=-71.08")
+        data = r.data.decode()
+        assert 'name="lat_min"' in data
+        assert 'name="lat_max"' in data
+        assert 'name="lon_min"' in data
+        assert 'name="lon_max"' in data
+
+    def test_bbox_inverted_coords_still_finds_photos(self, client_geo):
+        c, *_ = client_geo
+        # lat_min > lat_max — app.py normalises before DB call
+        r = c.get("/library?lat_min=42.41&lat_max=42.35&lon_min=-71.08&lon_max=-71.12")
+        assert b"Map area" in r.data
+
+    def test_bbox_out_of_range_clamped(self, client_geo):
+        c, *_ = client_geo
+        # Absurd values don't crash
+        r = c.get("/library?lat_min=-999&lat_max=999&lon_min=-999&lon_max=999")
+        assert r.status_code == 200

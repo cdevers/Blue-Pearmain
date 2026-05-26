@@ -889,6 +889,10 @@ class Database:
         city: str | None = None,  # #141
         neighborhood: str | None = None,  # #141
         person: str | None = None,  # #141 person filter
+        lat_min: float | None = None,  # #144 bbox
+        lat_max: float | None = None,  # #144
+        lon_min: float | None = None,  # #144
+        lon_max: float | None = None,  # #144
     ) -> tuple[str, list]:
         """Return (WHERE clause fragment, params list) for library queries."""
         clauses: list[str] = ["p.flickr_deleted = 0"]
@@ -946,6 +950,19 @@ class Database:
                 clauses.append(frag)
                 params.extend(frag_params)
 
+        # #144 — spatial bounding box
+        if (
+            lat_min is not None
+            and lat_max is not None
+            and lon_min is not None
+            and lon_max is not None
+        ):
+            from db.photo_filters import build_bbox_clause
+
+            frag, frag_params = build_bbox_clause(lat_min, lat_max, lon_min, lon_max)
+            clauses.append(frag)
+            params.extend(frag_params)
+
         where = "WHERE " + " AND ".join(clauses)
 
         if album_id is not None:
@@ -977,6 +994,10 @@ class Database:
         city: str | None = None,
         neighborhood: str | None = None,
         person: str | None = None,
+        lat_min: float | None = None,
+        lat_max: float | None = None,
+        lon_min: float | None = None,
+        lon_max: float | None = None,
         limit: int = 120,
         offset: int = 0,
     ) -> list[dict]:
@@ -996,6 +1017,10 @@ class Database:
             city=city,
             neighborhood=neighborhood,
             person=person,
+            lat_min=lat_min,
+            lat_max=lat_max,
+            lon_min=lon_min,
+            lon_max=lon_max,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         rows = self.conn.execute(
@@ -1035,6 +1060,10 @@ class Database:
         city: str | None = None,
         neighborhood: str | None = None,
         person: str | None = None,
+        lat_min: float | None = None,
+        lat_max: float | None = None,
+        lon_min: float | None = None,
+        lon_max: float | None = None,
     ) -> int:
         """Return total photo count for the given library filters."""
         where, params = self._library_where(
@@ -1052,6 +1081,10 @@ class Database:
             city=city,
             neighborhood=neighborhood,
             person=person,
+            lat_min=lat_min,
+            lat_max=lat_max,
+            lon_min=lon_min,
+            lon_max=lon_max,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         row = self.conn.execute(
@@ -1075,6 +1108,10 @@ class Database:
         city: str | None = None,
         neighborhood: str | None = None,
         person: str | None = None,
+        lat_min: float | None = None,
+        lat_max: float | None = None,
+        lon_min: float | None = None,
+        lon_max: float | None = None,
     ) -> list[int]:
         """Return all photo IDs matching the filters (no limit — used by bulk-edit)."""
         where, params = self._library_where(
@@ -1092,6 +1129,10 @@ class Database:
             city=city,
             neighborhood=neighborhood,
             person=person,
+            lat_min=lat_min,
+            lat_max=lat_max,
+            lon_min=lon_min,
+            lon_max=lon_max,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         rows = self.conn.execute(
