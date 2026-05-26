@@ -868,6 +868,17 @@ def library() -> str:
     time_pattern = request.args.get("time_pattern") or None
     time_expand = 2 if request.args.get("expand") == "1" else 0
 
+    q = request.args.get("q", "").strip() or None
+    country = request.args.get("country") or None
+    state = request.args.get("state") or None
+    city = request.args.get("city") or None
+    neighborhood = request.args.get("neighborhood") or None
+    person = request.args.get("person") or None
+    date_alias = request.args.get("date") or None
+    if date_alias:
+        date_from = date_from or date_alias
+        date_to = date_to or (date_alias + "T23:59:59")
+
     photos = db().library_photos(
         date_from=date_from,
         date_to=date_to,
@@ -877,6 +888,12 @@ def library() -> str:
         untitled_only=untitled_only,
         time_pattern=time_pattern,
         time_expand=time_expand,
+        q=q,
+        country=country,
+        state=state,
+        city=city,
+        neighborhood=neighborhood,
+        person=person,
         limit=per_page,
         offset=offset,
     )
@@ -889,7 +906,15 @@ def library() -> str:
         untitled_only=untitled_only,
         time_pattern=time_pattern,
         time_expand=time_expand,
+        q=q,
+        country=country,
+        state=state,
+        city=city,
+        neighborhood=neighborhood,
+        person=person,
     )
+    location_tree = db().location_data()
+    person_list = db().person_names()
     albums = db().get_all_albums()
 
     current_album = None
@@ -905,6 +930,8 @@ def library() -> str:
         per_page=per_page,
         total_pages=max(1, (total + per_page - 1) // per_page),
         current_album=current_album,
+        location_tree=location_tree,
+        person_list=person_list,
         filters={
             "date_from": date_from or "",
             "date_to": date_to or "",
@@ -914,6 +941,12 @@ def library() -> str:
             "untitled": untitled_only,
             "time_pattern": time_pattern or "",
             "expand": "1" if time_expand > 0 else "",
+            "q": q or "",
+            "country": country or "",
+            "state": state or "",
+            "city": city or "",
+            "neighborhood": neighborhood or "",
+            "person": person or "",
         },
     )
 
@@ -1243,6 +1276,12 @@ def api_bulk_edit() -> _JsonResp:
             untitled_only=bool(_filter.get("untitled")),
             time_pattern=_filter.get("time_pattern") or None,
             time_expand=2 if _filter.get("expand") == "1" else 0,
+            q=_filter.get("q") or None,
+            country=_filter.get("country") or None,
+            state=_filter.get("state") or None,
+            city=_filter.get("city") or None,
+            neighborhood=_filter.get("neighborhood") or None,
+            person=_filter.get("person") or None,
         )
     elif isinstance(data.get("photo_ids"), list):
         photo_ids = [int(i) for i in data["photo_ids"]]
