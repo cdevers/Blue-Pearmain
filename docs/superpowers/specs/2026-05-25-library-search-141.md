@@ -67,6 +67,10 @@ Map (future, not in this issue):
 
 All params are optional and AND-combined. Setting none leaves the full grid unchanged.
 
+**Text search semantics:** SQLite `LIKE` is case-insensitive for ASCII characters but case-sensitive for non-ASCII (e.g. accented characters). Matching is substring-only (`%q%`) and not tokenized — searching "birthday cake" matches the phrase as a whole, not photos containing "birthday" and "cake" separately. This is intentional: simple and predictable at personal-archive scale. If phrase-level results feel insufficient in practice, FTS5 is the upgrade path (explicitly deferred).
+
+**Location NULL/empty handling:** `app.py` converts all location params to `None` via `request.args.get("country") or None`. A `None` value causes `build_location_clause` to skip that level entirely — no `= ?` clause is emitted. This means `?city=Boston` without a country still works (returns all Bostons) and `?country=` (empty string) is treated as no country filter. Photos where `place_country IS NULL` in the DB are never returned when any location param is active, because `place_country = ?` cannot match NULL rows.
+
 **Page-load data** (queried once per library render, passed to template):
 
 - `location_tree` — `{country: {state: {city: [neighborhoods]}}}` nested dict; excludes photos where `place_country IS NULL`; serialised as JSON `data-` attribute on the form for cascade JS
@@ -344,9 +348,11 @@ if (filters.city) {
 ## Extension Points
 
 - **Map search** — `db/photo_filters.py` functions can be imported directly by `/api/map-photos`. Adding `?q=sunset&person=Alice` to the map endpoint requires no new abstraction.
+- **Text search: album names and person names** — `q` currently searches photo metadata only. Album names (`albums.name`) and person names (`apple_persons`) are natural future additions. Album name search would require a JOIN; person name search via `json_each` LIKE is straightforward. Both deferred from v1 to keep scope focused.
 - **Configurable expansion window** — `time_expand` in `_library_where` already accepts any integer; a future UI slider (1–10 days) is a frontend-only change.
 - **Moveable feasts** (#142 extension) — `db/time_patterns.py` lookup table path; no impact on `photo_filters.py`.
 - **Sorting controls** — a `sort` param would extend `library_photos` independently of the filter chain.
+- **FTS5** — if LIKE performance becomes a bottleneck at larger scale, SQLite FTS5 is the upgrade path. `build_text_clause` is the only function that changes; callers are unaffected.
 
 ---
 
