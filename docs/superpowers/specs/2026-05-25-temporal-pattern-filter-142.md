@@ -2,7 +2,7 @@
 
 **Issue:** #142  
 **Date:** 2026-05-25  
-**Status:** in progress
+**Status:** ✓ done
 
 ---
 
