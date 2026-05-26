@@ -225,9 +225,16 @@
   (1 if filters.state else 0) +
   (1 if filters.city else 0) +
   (1 if filters.neighborhood else 0) +
-  (1 if filters.person else 0)
+  (1 if filters.person else 0) +
+  (1 if filters.lat_min else 0)
 ) %}
 <form id="lib-filter-form" method="get" action="{{ url_for('library') }}">
+{% if filters.lat_min %}
+<input type="hidden" name="lat_min" value="{{ filters.lat_min }}">
+<input type="hidden" name="lat_max" value="{{ filters.lat_max }}">
+<input type="hidden" name="lon_min" value="{{ filters.lon_min }}">
+<input type="hidden" name="lon_max" value="{{ filters.lon_max }}">
+{% endif %}
 <!-- Search bar (always visible) -->
 <div class="lib-filter-bar">
   <input type="search" name="q" value="{{ filters.q }}"
@@ -251,6 +258,29 @@
 <!-- Collapsible filter panel (auto-opens when any non-q filter is active) -->
 <div id="lib-filter-panel" class="lib-filter-panel"
      style="display:{% if filter_count > 0 %}block{% else %}none{% endif %}">
+
+  {% if filters.lat_min %}
+  <div class="lib-filter-row">
+    <span style="font-size:12px;color:var(--muted)">📍 Map area</span>
+    <a href="{{ url_for('library',
+         q=filters.q or None,
+         date_from=filters.date_from or None,
+         date_to=filters.date_to or None,
+         album_id=filters.album_id or None,
+         tag=filters.tag or None,
+         status=filters.status or None,
+         untitled=filters.untitled or None,
+         time_pattern=filters.time_pattern or None,
+         expand=filters.expand or None,
+         country=filters.country or None,
+         state=filters.state or None,
+         city=filters.city or None,
+         neighborhood=filters.neighborhood or None,
+         person=filters.person or None) }}"
+       style="font-size:12px;color:var(--muted);text-decoration:none"
+       title="Remove map area filter">✕</a>
+  </div>
+  {% endif %}
 
   <!-- Row 1: dates, album, tag, status, untitled -->
   <div class="lib-filter-row">
@@ -788,6 +818,10 @@ function _buildPayload(dryRun) {
       city:         fd.get('city') || null,
       neighborhood: fd.get('neighborhood') || null,
       person:       fd.get('person') || null,
+      lat_min: fd.get('lat_min') ? parseFloat(fd.get('lat_min')) : null,
+      lat_max: fd.get('lat_max') ? parseFloat(fd.get('lat_max')) : null,
+      lon_min: fd.get('lon_min') ? parseFloat(fd.get('lon_min')) : null,
+      lon_max: fd.get('lon_max') ? parseFloat(fd.get('lon_max')) : null,
     };
   } else {
     payload.photo_ids = [..._selectedIds];
