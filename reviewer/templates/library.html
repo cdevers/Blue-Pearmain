@@ -1012,7 +1012,7 @@ const selNeighborhood = document.getElementById('sel-neighborhood');
 
 function rebuildSelect(sel, options, current) {
   sel.innerHTML = '<option value="">Any</option>';
-  options.sort().forEach(opt => {
+  [...options].sort().forEach(opt => {
     const o = document.createElement('option');
     o.value = o.textContent = opt;
     if (opt === current) o.selected = true;

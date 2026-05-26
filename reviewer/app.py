@@ -938,7 +938,7 @@ def library() -> str:
             "album_id": album_id,
             "tag": tag or "",
             "status": status or "",
-            "untitled": untitled_only,
+            "untitled": "1" if untitled_only else "",
             "time_pattern": time_pattern or "",
             "expand": "1" if time_expand > 0 else "",
             "q": q or "",
