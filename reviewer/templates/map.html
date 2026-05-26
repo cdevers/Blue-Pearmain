@@ -104,13 +104,17 @@ function buildMapUrl() {
   return p ? `/api/map-photos?time_pattern=${encodeURIComponent(p)}${e}` : '/api/map-photos';
 }
 
-function plotPhotos(photos) {
+let _currentRequest = 0;   // incremented on each reload; stale responses are dropped
+
+function plotPhotos(photos, requestId) {
+  if (requestId !== _currentRequest) return;   // stale response — discard
   photos.forEach(p => {
     const marker = L.marker([p.lat, p.lon]);
-    const shortTitle = p.title.length > 60 ? p.title.slice(0, 60) + '…' : p.title;
+    const title = p.title || '';
+    const shortTitle = title.length > 60 ? title.slice(0, 60) + '…' : title;
     let links = `<a href="/photo/${p.id}">Open photo</a>`;
     if (p.flickr_url) links += `<a href="${esc(p.flickr_url)}" target="_blank" rel="noopener">Flickr &#x2197;</a>`;
-    if (p.date)       links += `<a href="/library?date=${p.date}">Show this day</a>`;
+    if (p.date)       links += `<a href="/library?date=${esc(p.date)}">Show this day</a>`;
     marker.bindPopup(`
       <div class="map-popup">
         <img src="/thumb/${p.id}" alt="">
@@ -126,10 +130,12 @@ function plotPhotos(photos) {
 }
 
 function reloadMarkers() {
+  const requestId = ++_currentRequest;
   markers.clearLayers();
+  document.getElementById('map-photo-count').textContent = '';
   fetch(buildMapUrl())
     .then(r => r.json())
-    .then(plotPhotos)
+    .then(photos => plotPhotos(photos, requestId))
     .catch(() => { /* silently fail — map usable, just empty */ });
 }
 
