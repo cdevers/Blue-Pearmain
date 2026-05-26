@@ -144,7 +144,7 @@ def parse_pattern(
                 if d is None:
                     continue
                 lo = str(d - datetime.timedelta(days=expand_days))
-                hi = str(d + datetime.timedelta(days=expand_days)) + " 23:59:59"
+                hi = str(d + datetime.timedelta(days=expand_days)) + "T23:59:59"
                 clauses_list.append("(p.date_taken BETWEEN ? AND ?)")
                 params.extend([lo, hi])
             if not clauses_list:

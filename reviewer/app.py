@@ -837,6 +837,8 @@ def library() -> str:
     tag = request.args.get("tag") or None
     status = request.args.get("status") or None
     untitled_only = request.args.get("untitled") == "1"
+    time_pattern = request.args.get("time_pattern") or None
+    time_expand = 2 if request.args.get("expand") == "1" else 0
 
     photos = db().library_photos(
         date_from=date_from,
@@ -845,6 +847,8 @@ def library() -> str:
         tag=tag,
         status=status,
         untitled_only=untitled_only,
+        time_pattern=time_pattern,
+        time_expand=time_expand,
         limit=per_page,
         offset=offset,
     )
@@ -855,6 +859,8 @@ def library() -> str:
         tag=tag,
         status=status,
         untitled_only=untitled_only,
+        time_pattern=time_pattern,
+        time_expand=time_expand,
     )
     albums = db().get_all_albums()
 
@@ -878,6 +884,8 @@ def library() -> str:
             "tag": tag or "",
             "status": status or "",
             "untitled": untitled_only,
+            "time_pattern": time_pattern or "",
+            "expand": "1" if time_expand > 0 else "",
         },
     )
 
@@ -1205,6 +1213,8 @@ def api_bulk_edit() -> _JsonResp:
             tag=_filter.get("tag"),
             status=_filter.get("status"),
             untitled_only=bool(_filter.get("untitled")),
+            time_pattern=_filter.get("time_pattern") or None,
+            time_expand=2 if _filter.get("expand") == "1" else 0,
         )
     elif isinstance(data.get("photo_ids"), list):
         photo_ids = [int(i) for i in data["photo_ids"]]

@@ -881,6 +881,8 @@ class Database:
         tag: str | None,
         status: str | None,
         untitled_only: bool,
+        time_pattern: str | None = None,
+        time_expand: int = 2,
     ) -> tuple[str, list]:
         """Return (WHERE clause fragment, params list) for library queries."""
         clauses: list[str] = ["p.flickr_deleted = 0"]
@@ -908,6 +910,13 @@ class Database:
                 "OR EXISTS (SELECT 1 FROM json_each(p.photos_tags) WHERE value = ?))"
             )
             params.extend([tag, tag])
+        if time_pattern:
+            from db.time_patterns import parse_pattern
+
+            frag, frag_params = parse_pattern(time_pattern, time_expand, self._distinct_years())
+            if frag != "1=1":
+                clauses.append(frag)
+                params.extend(frag_params)
 
         where = "WHERE " + " AND ".join(clauses)
 
@@ -915,6 +924,14 @@ class Database:
             return where + " AND pa.album_id = ? AND pa.removed_at IS NULL", params + [album_id]
 
         return where, params
+
+    def _distinct_years(self) -> list[int]:
+        """Return all distinct calendar years present in photos.date_taken, sorted ascending."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT CAST(strftime('%Y', date_taken) AS INTEGER) AS y "
+            "FROM photos WHERE date_taken IS NOT NULL ORDER BY y"
+        ).fetchall()
+        return [r["y"] for r in rows if r["y"] is not None]
 
     def library_photos(
         self,
@@ -924,12 +941,21 @@ class Database:
         tag: str | None = None,
         status: str | None = None,
         untitled_only: bool = False,
+        time_pattern: str | None = None,
+        time_expand: int = 2,
         limit: int = 120,
         offset: int = 0,
     ) -> list[dict]:
         """Return photos for the library grid, newest first, with filters applied."""
         where, params = self._library_where(
-            date_from, date_to, album_id, tag, status, untitled_only
+            date_from,
+            date_to,
+            album_id,
+            tag,
+            status,
+            untitled_only,
+            time_pattern,
+            time_expand,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         rows = self.conn.execute(
@@ -961,10 +987,19 @@ class Database:
         tag: str | None = None,
         status: str | None = None,
         untitled_only: bool = False,
+        time_pattern: str | None = None,
+        time_expand: int = 2,
     ) -> int:
         """Return total photo count for the given library filters."""
         where, params = self._library_where(
-            date_from, date_to, album_id, tag, status, untitled_only
+            date_from,
+            date_to,
+            album_id,
+            tag,
+            status,
+            untitled_only,
+            time_pattern,
+            time_expand,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         row = self.conn.execute(
@@ -980,10 +1015,19 @@ class Database:
         tag: str | None = None,
         status: str | None = None,
         untitled_only: bool = False,
+        time_pattern: str | None = None,
+        time_expand: int = 2,
     ) -> list[int]:
         """Return all photo IDs matching the filters (no limit — used by bulk-edit)."""
         where, params = self._library_where(
-            date_from, date_to, album_id, tag, status, untitled_only
+            date_from,
+            date_to,
+            album_id,
+            tag,
+            status,
+            untitled_only,
+            time_pattern,
+            time_expand,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         rows = self.conn.execute(
