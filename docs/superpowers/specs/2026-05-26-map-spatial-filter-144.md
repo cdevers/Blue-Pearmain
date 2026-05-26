@@ -438,3 +438,4 @@ URL encoding: JSON-encoded array or repeated `bbox[]` params. Separate issue whe
 - Editing a drawn rectangle after creation (clear and redraw)
 - Map highlighting the active rectangle when navigating back from library
 - Shared "preserve all filters except X" Jinja2 helper — the "Map area ✕" chip is the second call site that reconstructs a filter URL excluding one param (the other is the existing clear-filters footer link). A shared macro is worth introducing when a third call site appears.
+- **Antimeridian (dateline) crossing** — if `lon_min > lon_max` after clamping (e.g. a box spanning ±180°), the current implementation silently swaps them rather than splitting into two ranges. This is deliberate: BP photos are geotagged in the Americas/Europe and the dateline case never arises in practice. A future implementation could detect the crossing and emit `(lon BETWEEN lon_min AND 180 OR lon BETWEEN -180 AND lon_max)`, but this is YAGNI for now.

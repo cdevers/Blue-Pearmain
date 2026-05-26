@@ -80,7 +80,12 @@ def build_bbox_clause(
     """Spatial bounding-box filter. Returns photos whose GPS coordinates fall
     inside the given rectangle (BETWEEN is inclusive on both ends).
     Caller must ensure all four params are non-None and that lat_min <= lat_max
-    and lon_min <= lon_max (app.py normalises these before calling)."""
+    and lon_min <= lon_max (app.py normalises these before calling).
+
+    Antimeridian note: boxes that cross ±180° longitude are not supported.
+    app.py swaps inverted lon values rather than splitting into two ranges.
+    This is intentional — BP photos are in the Americas/Europe where this
+    never occurs in practice."""
     sql = (
         "p.latitude IS NOT NULL AND p.longitude IS NOT NULL"
         " AND p.latitude BETWEEN ? AND ?"
@@ -890,23 +895,36 @@ The full `{% block extra_head %}` becomes:
 {% endblock %}
 ```
 
-- [ ] **Step 4: Add three buttons to the filter bar**
+- [ ] **Step 4: Add `.map-btn` CSS class and three buttons to the filter bar**
 
-In `reviewer/templates/map.html`, find the `.map-filter-bar` div. After `<span id="map-photo-count" ...></span>` and before `</div>`, add:
+First, add the CSS class to `{% block extra_style %}` in `reviewer/templates/map.html` (after the existing `.map-popup` rules):
+
+```css
+.map-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  cursor: pointer;
+}
+.map-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+```
+
+Then in `.map-filter-bar`, after `<span id="map-photo-count" ...></span>` and before `</div>`, add:
 
 ```html
   <button type="button" id="map-draw-btn" onclick="toggleDraw()"
-          style="margin-left:auto;background:var(--surface);border:1px solid var(--border);
-                 color:var(--text);padding:4px 10px;border-radius:var(--radius);
-                 font-size:12px;cursor:pointer">Draw selection</button>
+          class="map-btn" style="margin-left:auto">Draw selection</button>
   <button type="button" id="map-clear-btn" onclick="clearSelection()"
-          style="display:none;background:var(--surface);border:1px solid var(--border);
-                 color:var(--text);padding:4px 10px;border-radius:var(--radius);
-                 font-size:12px;cursor:pointer">✕ Clear selection</button>
+          class="map-btn" style="display:none">✕ Clear selection</button>
   <button type="button" id="map-open-lib-btn" onclick="openInLibrary()"
-          style="background:var(--accent);border:1px solid var(--accent);
-                 color:white;padding:4px 10px;border-radius:var(--radius);
-                 font-size:12px;cursor:pointer">Open in Library ↗</button>
+          class="map-btn map-btn-primary">Open in Library ↗</button>
 ```
 
 - [ ] **Step 5: Add Leaflet.draw JS script**
