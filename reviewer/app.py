@@ -785,17 +785,45 @@ def api_album_delete(album_id: int) -> _JsonResp:
 
 @app.route("/map")
 def map_view() -> str:
-    row = (
-        db()
-        .conn.execute(
-            "SELECT AVG(latitude) AS lat, AVG(longitude) AS lon "
-            "FROM photos WHERE latitude IS NOT NULL AND longitude IS NOT NULL"
+    photo_id_param = request.args.get("photo_id", type=int)
+    highlight_id: int | None = None
+    center_lat: float
+    center_lon: float
+
+    if photo_id_param is not None:
+        row = (
+            db()
+            .conn.execute(
+                "SELECT latitude, longitude FROM photos WHERE id = ? AND latitude IS NOT NULL",
+                (photo_id_param,),
+            )
+            .fetchone()
         )
-        .fetchone()
+        if row:
+            center_lat = row["latitude"]
+            center_lon = row["longitude"]
+            highlight_id = photo_id_param
+        else:
+            photo_id_param = None  # fall through to average below
+
+    if photo_id_param is None:
+        row = (
+            db()
+            .conn.execute(
+                "SELECT AVG(latitude) AS lat, AVG(longitude) AS lon "
+                "FROM photos WHERE latitude IS NOT NULL AND longitude IS NOT NULL"
+            )
+            .fetchone()
+        )
+        center_lat = row["lat"] if row["lat"] is not None else 20.0
+        center_lon = row["lon"] if row["lon"] is not None else 0.0
+
+    return render_template(
+        "map.html",
+        center_lat=center_lat,
+        center_lon=center_lon,
+        highlight_id=highlight_id,
     )
-    center_lat = row["lat"] if row["lat"] is not None else 20.0
-    center_lon = row["lon"] if row["lon"] is not None else 0.0
-    return render_template("map.html", center_lat=center_lat, center_lon=center_lon)
 
 
 @app.route("/api/map-photos")

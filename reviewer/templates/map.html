@@ -112,6 +112,8 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 }).addTo(map);
 
 const markers = L.markerClusterGroup();
+const _markerById = {};   // photo id (number) → Leaflet marker; rebuilt on each reload
+const highlightId = {{ highlight_id | default(none) | tojson }};   // null or integer from backend
 map.addLayer(markers);   // added once; reloadMarkers only calls clearLayers()
 
 function esc(s) {
