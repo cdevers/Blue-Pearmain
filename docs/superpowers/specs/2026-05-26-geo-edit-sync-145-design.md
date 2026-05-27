@@ -2,7 +2,7 @@
 
 **Issue:** [#145](https://github.com/cdevers/Blue-Pearmain/issues/145)  
 **Date:** 2026-05-26  
-**Status:** draft — revised after external review 2026-05-26
+**Status:** ✓ done
 
 ---
 

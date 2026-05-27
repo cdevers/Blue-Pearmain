@@ -26,6 +26,9 @@ Blue Pearmain addresses both:
 - Album membership editing from the library view: add selected photos to existing albums or remove them from the currently-filtered album; changes queue for `bp sync-albums` — no immediate Flickr calls
 - `/albums` page (key `9`) lists all albums with photo counts and links to the filtered library view; albums can be renamed and deleted directly from this page
 - `/map` page (key `0`) plots all geotagged photos on an interactive OpenStreetMap map with clustered markers; clicking a marker opens a popup with thumbnail and links to the photo detail page or the library filtered to that day; draw a rectangle on the map to select a spatial region, then open those photos in the Library view (combined with time pattern filter) for bulk tagging or album operations; the photo detail page embeds a mini-map for any geotagged photo, with a "Full map →" link that opens `/map` centred on that photo with its popup open
+- **Geo sync:** `bp sync-metadata` detects lat/lon discrepancies between Flickr and Photos (>1 km threshold), queues them as proposals for user-confirmed resolution. Photos intentionally without a location can be marked `geo_confirmed_none` to suppress future proposals.
+- **Library "No location" filter:** chip + badge count for photos missing coordinates; "no loc" pill on ungeotagged thumbnails throughout the library.
+- **Photo detail geo section:** shows formatted coordinates with "Edit on Flickr" and "Edit in Photos" deep links; three states: has-coords, no-location, confirmed-none.
 
 Nothing is written to Flickr or Apple Photos without explicit human confirmation or auto-apply rules you've opted into.
 
