@@ -893,6 +893,7 @@ class Database:
         lat_max: float | None = None,  # #144
         lon_min: float | None = None,  # #144
         lon_max: float | None = None,  # #144
+        no_location: bool = False,  # #145 no_location filter
     ) -> tuple[str, list]:
         """Return (WHERE clause fragment, params list) for library queries."""
         clauses: list[str] = ["p.flickr_deleted = 0"]
@@ -950,6 +951,14 @@ class Database:
                 clauses.append(frag)
                 params.extend(frag_params)
 
+        # #145 — "No location" filter: untagged + not confirmed-none
+        if no_location:
+            clauses.append(
+                "p.latitude IS NULL AND p.longitude IS NULL AND p.geo_confirmed_none = 0"
+            )
+            # Mutually exclusive with bbox — suppress it
+            lat_min = lat_max = lon_min = lon_max = None
+
         # #144 — spatial bounding box
         if (
             lat_min is not None
@@ -998,6 +1007,7 @@ class Database:
         lat_max: float | None = None,
         lon_min: float | None = None,
         lon_max: float | None = None,
+        no_location: bool = False,
         limit: int = 120,
         offset: int = 0,
     ) -> list[dict]:
@@ -1021,6 +1031,7 @@ class Database:
             lat_max=lat_max,
             lon_min=lon_min,
             lon_max=lon_max,
+            no_location=no_location,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         rows = self.conn.execute(
@@ -1029,7 +1040,7 @@ class Database:
                        p.flickr_title, p.photos_title,
                        p.flickr_tags, p.photos_tags,
                        p.is_video, p.width, p.height, p.bp_rating,
-                       p.display_rotation
+                       p.display_rotation, p.latitude, p.longitude, p.geo_confirmed_none
                 FROM photos p {join}
                 {where}
                 ORDER BY p.date_taken DESC, p.id DESC
@@ -1064,6 +1075,7 @@ class Database:
         lat_max: float | None = None,
         lon_min: float | None = None,
         lon_max: float | None = None,
+        no_location: bool = False,
     ) -> int:
         """Return total photo count for the given library filters."""
         where, params = self._library_where(
@@ -1085,6 +1097,7 @@ class Database:
             lat_max=lat_max,
             lon_min=lon_min,
             lon_max=lon_max,
+            no_location=no_location,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         row = self.conn.execute(
@@ -1112,6 +1125,7 @@ class Database:
         lat_max: float | None = None,
         lon_min: float | None = None,
         lon_max: float | None = None,
+        no_location: bool = False,
     ) -> list[int]:
         """Return all photo IDs matching the filters (no limit — used by bulk-edit)."""
         where, params = self._library_where(
@@ -1133,6 +1147,7 @@ class Database:
             lat_max=lat_max,
             lon_min=lon_min,
             lon_max=lon_max,
+            no_location=no_location,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         rows = self.conn.execute(
@@ -1140,6 +1155,16 @@ class Database:
             params,
         ).fetchall()
         return [r["id"] for r in rows]
+
+    def no_location_count(self) -> int:
+        """Count photos with no geotag that have not been confirmed as intentionally-none."""
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM photos"
+            " WHERE latitude IS NULL AND longitude IS NULL"
+            "   AND geo_confirmed_none = 0"
+            "   AND (flickr_deleted IS NULL OR flickr_deleted = 0)"
+        ).fetchone()
+        return row["n"] if row else 0
 
     def location_data(self) -> dict:
         """Return nested dict {country: {state: {city: [neighborhoods]}}} for non-deleted photos.
