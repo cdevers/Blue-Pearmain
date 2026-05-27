@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 import pytest
 from db.db import Database
-from flickr.geo_sync import sync_geo, GEO_DIVERGENCE_THRESHOLD_M
+from flickr.geo_sync import sync_geo, GEO_CREATE_THRESHOLD_M, GEO_SUPPRESS_THRESHOLD_M
 
 
 def _photo(i: int, **kwargs) -> dict:
@@ -119,7 +119,7 @@ class TestSyncGeo:
 
     def test_threshold_boundary_below_no_proposal(self, db):
         lat1, lon1 = 42.3601, -71.0589
-        dlat = (GEO_DIVERGENCE_THRESHOLD_M - 1) / 111_319.9
+        dlat = (GEO_CREATE_THRESHOLD_M - 1) / 111_319.9
         lat2 = lat1 + dlat
         pid = db.upsert_photo(
             _photo(
@@ -138,7 +138,7 @@ class TestSyncGeo:
 
     def test_threshold_boundary_above_creates_proposal(self, db):
         lat1, lon1 = 42.3601, -71.0589
-        dlat = (GEO_DIVERGENCE_THRESHOLD_M + 1) / 111_319.9
+        dlat = (GEO_CREATE_THRESHOLD_M + 1) / 111_319.9
         lat2 = lat1 + dlat
         pid = db.upsert_photo(
             _photo(
@@ -184,6 +184,7 @@ class TestSyncGeo:
         totals = sync_geo(db, dry_run=False, photo_ids=[])
         assert "proposals_created" in totals
         assert "suppressed_confirmed_none" in totals
+        assert "suppressed_in_band" in totals
         assert "suppressed_under_threshold" in totals
         assert "suppressed_both_absent" in totals
         assert "suppressed_not_linked" in totals
@@ -202,9 +203,10 @@ class TestSyncGeo:
         assert totals["suppressed_confirmed_none"] == 1
         assert totals["proposals_created"] == 0
 
-    def test_under_threshold_increments_suppressed_counter(self, db):
+    def test_in_band_increments_suppressed_in_band_counter(self, db):
         lat1, lon1 = 42.3601, -71.0589
-        dlat = (GEO_DIVERGENCE_THRESHOLD_M - 1) / 111_319.9
+        # 999m — just below the create threshold, squarely in the hysteresis band
+        dlat = (GEO_CREATE_THRESHOLD_M - 1) / 111_319.9
         pid = db.upsert_photo(
             _photo(
                 16,
@@ -215,7 +217,7 @@ class TestSyncGeo:
             )
         )
         totals = sync_geo(db, dry_run=False, photo_ids=[pid])
-        assert totals["suppressed_under_threshold"] == 1
+        assert totals["suppressed_in_band"] == 1
         assert totals["proposals_created"] == 0
 
     def test_supersede_uses_directional_key(self, db):
@@ -261,6 +263,45 @@ class TestSyncGeo:
         ).fetchone()["n"]
         assert count == 0
         assert totals["suppressed_not_linked"] == 1
+
+    def test_band_creates_no_proposal(self, db):
+        """Distance in hysteresis band (800m < dist <= 1000m): no proposal created."""
+        lat1, lon1 = 42.3601, -71.0589
+        # midpoint of the hysteresis band — stays correct if thresholds change
+        mid_m = (GEO_SUPPRESS_THRESHOLD_M + GEO_CREATE_THRESHOLD_M) // 2
+        dlat = mid_m / 111_319.9
+        pid = db.upsert_photo(
+            _photo(
+                17,
+                flickr_latitude=lat1,
+                flickr_longitude=lon1,
+                photos_latitude=lat1 + dlat,
+                photos_longitude=lon1,
+            )
+        )
+        totals = sync_geo(db, dry_run=False, photo_ids=[pid])
+        count = db.conn.execute(
+            "SELECT COUNT(*) AS n FROM metadata_proposals WHERE photo_id=?", (pid,)
+        ).fetchone()["n"]
+        assert count == 0
+        assert totals["suppressed_in_band"] == 1
+
+    def test_below_suppress_threshold_increments_suppressed_under_threshold(self, db):
+        lat1, lon1 = 42.3601, -71.0589
+        # 1m below the suppress threshold — clearly in the under-threshold zone
+        dlat = (GEO_SUPPRESS_THRESHOLD_M - 1) / 111_319.9
+        pid = db.upsert_photo(
+            _photo(
+                18,
+                flickr_latitude=lat1,
+                flickr_longitude=lon1,
+                photos_latitude=lat1 + dlat,
+                photos_longitude=lon1,
+            )
+        )
+        totals = sync_geo(db, dry_run=False, photo_ids=[pid])
+        assert totals["suppressed_under_threshold"] == 1
+        assert totals["suppressed_in_band"] == 0
 
 
 class TestSupersedeIsolation:
