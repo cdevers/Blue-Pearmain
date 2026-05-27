@@ -2001,8 +2001,10 @@ class Database:
         and is resolved automatically when the displayed proposal is actioned.
         """
         type_filter = "AND mp.conflict_type = ?" if conflict_type else ""
-        # Suppress the photos→flickr half of each collision pair from display
-        collision_filter = "AND NOT (mp.conflict_type = 'collision' AND mp.source = 'photos')"
+        # Suppress the photos→flickr half of each collision/divergence pair from display
+        collision_filter = (
+            "AND NOT (mp.conflict_type IN ('collision', 'divergence') AND mp.source = 'photos')"
+        )
         params: list = ([conflict_type] if conflict_type else []) + [limit, offset]
         rows = self.conn.execute(
             f"""SELECT mp.id, mp.photo_id, mp.field, mp.proposed_value,
@@ -2011,7 +2013,8 @@ class Database:
                        p.flickr_id, p.uuid, p.original_filename, p.thumbnail_path,
                        p.flickr_tags, p.photos_tags,
                        p.flickr_title, p.photos_title,
-                       p.flickr_description, p.photos_description
+                       p.flickr_description, p.photos_description,
+                       p.latitude, p.longitude
                 FROM metadata_proposals mp
                 JOIN photos p ON p.id = mp.photo_id
                 WHERE mp.status = 'pending' {type_filter} {collision_filter}
@@ -2036,9 +2039,15 @@ class Database:
             d = dict(r)
             d["flickr_tags"] = _json_loads_safe(d.get("flickr_tags"))
             d["photos_tags"] = _json_loads_safe(d.get("photos_tags"))
-            # proposed_value is JSON for tags, plain text for title/description
+            # proposed_value is JSON for tags/geo_location, plain text for title/description
             if d.get("field") == "tags":
                 d["proposed_value"] = _json_loads_safe(d.get("proposed_value"))
+            elif d.get("field") == "geo_location":
+                raw = d.get("proposed_value")
+                try:
+                    d["proposed_value"] = json.loads(raw) if raw else {}
+                except (json.JSONDecodeError, TypeError):
+                    d["proposed_value"] = {}
             else:
                 d["proposed_value"] = d.get("proposed_value") or ""
             result.append(d)
