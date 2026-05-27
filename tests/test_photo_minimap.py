@@ -88,3 +88,32 @@ class TestPhotoDetailMinimap:
         c, _, no_geo_id = client_detail
         html = c.get(f"/photo/{no_geo_id}").data.decode()
         assert "leaflet@1.9.4/dist/leaflet.css" not in html
+
+    def test_minimap_shown_for_photo_at_latitude_zero(self, client_detail):
+        """latitude=0 (equator) is a valid geotag — must not be treated as falsy."""
+        c, _, _ = client_detail
+        # Insert a photo at the equator/prime-meridian intersection
+        import tempfile
+        from pathlib import Path
+
+        import reviewer.app as _app
+        from db.db import Database
+
+        with tempfile.TemporaryDirectory() as tmp:
+            test_db = Database(Path(tmp) / "test.db")
+            eq_id = test_db.upsert_photo(
+                _photo(
+                    9,
+                    latitude=0.0,
+                    longitude=0.0,
+                    photos_title="Null Island",
+                )
+            )
+            _app._db = test_db
+            _app.app.config["TESTING"] = True
+            _app.app.config["SECRET_KEY"] = "test-secret"
+            with _app.app.test_client() as eq_client:
+                html = eq_client.get(f"/photo/{eq_id}").data.decode()
+            _app._db = None
+        assert 'id="mini-map"' in html
+        assert "leaflet@1.9.4/dist/leaflet.css" in html

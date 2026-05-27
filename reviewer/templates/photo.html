@@ -2,7 +2,7 @@
 {% block title %}{{ photo.original_filename or photo.flickr_id }} — Blue Pearmain{% endblock %}
 
 {% block extra_head %}
-{% if photo.latitude %}
+{% if photo.latitude is not none %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 {% endif %}
 {% endblock %}
@@ -402,7 +402,7 @@
     </div>
 
     <!-- Mini-map (geotagged photos only) -->
-    {% if photo.latitude %}
+    {% if photo.latitude is not none %}
     <div class="meta-section">
       <h3>Map</h3>
       <div id="mini-map" style="height:160px; border-radius:4px; overflow:hidden; margin-bottom:6px"></div>
@@ -515,7 +515,7 @@
 {% endblock %}
 
 {% block scripts %}
-{% if photo.latitude %}
+{% if photo.latitude is not none %}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 (function () {
