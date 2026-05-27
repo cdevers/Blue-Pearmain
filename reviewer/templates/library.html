@@ -237,6 +237,7 @@
   (1 if filters.status else 0) +
   (1 if filters.untitled else 0) +
   (1 if filters.no_location else 0) +
+  (1 if filters.confirmed_none else 0) +
   (1 if filters.time_pattern else 0) +
   (1 if filters.country else 0) +
   (1 if filters.state else 0) +
@@ -329,6 +330,14 @@
       No location
       {% if no_location_count %}
       <span style="background:var(--border);border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px">{{ no_location_count }}</span>
+      {% endif %}
+    </label>
+    <label style="display:flex;align-items:center;gap:5px">
+      <input type="checkbox" name="confirmed_none" value="1"
+             {% if filters.confirmed_none %}checked{% endif %}>
+      Reviewed: no location
+      {% if confirmed_none_count %}
+      <span style="background:var(--border);border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px">{{ confirmed_none_count }}</span>
       {% endif %}
     </label>
   </div>
@@ -472,6 +481,10 @@
   {% endif %}
   <span class="sep">│</span>
   <button onclick="markNoLocation()">Mark: no location ✓</button>
+  {% if filters.confirmed_none %}
+  <span class="sep">│</span>
+  <button onclick="clearNoLocation()">Undo: no location</button>
+  {% endif %}
   <button class="clear-btn" onclick="clearSelection()">✕ Clear</button>
 </div>
 
@@ -1047,6 +1060,25 @@ async function markNoLocation() {
   });
   if ((await r.json()).ok) location.reload();
 }
+
+{% if filters.confirmed_none %}
+// ── Undo: no location (#148) ─────────────────────────────────────────
+async function clearNoLocation() {
+  const n = _selectionCount();
+  if (n === 0) return;
+  if (n > 10 && !confirm(
+    `Undo 'no location' for ${n} photo${n === 1 ? '' : 's'}? They will re-enter the unreviewed missing-location queue.`
+  )) return;
+  const ids = _selectAllFilter ? null : Array.from(_selectedIds);
+  const body = ids ? {photo_ids: ids, clear: true} : {clear: true};
+  const r = await fetch('/api/geo_confirm_none', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+    body: JSON.stringify(body),
+  });
+  if ((await r.json()).ok) location.reload();
+}
+{% endif %}
 
 // ── Double-click → open photo detail ────────────────────────────────
 document.querySelectorAll('.lib-thumb').forEach(function(card) {
