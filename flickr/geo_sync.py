@@ -21,7 +21,10 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("blue-pearmain.geo_sync")
 
-GEO_DIVERGENCE_THRESHOLD_M: int = 1_000
+GEO_CREATE_THRESHOLD_M: int = 1_000  # create a proposal when divergence exceeds this
+GEO_SUPPRESS_THRESHOLD_M: int = (
+    800  # hysteresis band lower edge; below this → suppressed_under_threshold
+)
 
 # WGS84 equatorial radius — matches the 111_319.9 m/deg approximation used in
 # threshold boundary tests. (db.db.haversine_m uses the mean spherical radius
@@ -59,6 +62,7 @@ def sync_geo(
     totals: dict[str, int] = {
         "proposals_created": 0,
         "suppressed_confirmed_none": 0,
+        "suppressed_in_band": 0,
         "suppressed_under_threshold": 0,
         "suppressed_both_absent": 0,
         "suppressed_not_linked": 0,
@@ -137,7 +141,7 @@ def sync_geo(
             )
         elif has_flickr and has_photos:
             dist = _haversine_m(flk_lat, flk_lon, pho_lat, pho_lon)
-            if dist > GEO_DIVERGENCE_THRESHOLD_M:
+            if dist > GEO_CREATE_THRESHOLD_M:
                 proposals.extend(
                     _make_divergence_pair(
                         photo_id,
@@ -149,6 +153,10 @@ def sync_geo(
                         now=now,
                     )
                 )
+            elif dist > GEO_SUPPRESS_THRESHOLD_M:
+                # Hysteresis band: leave existing pending proposals untouched
+                totals["suppressed_in_band"] += 1
+                continue
             else:
                 totals["suppressed_under_threshold"] += 1
                 continue
@@ -163,10 +171,11 @@ def sync_geo(
             totals["proposals_created"] += len(proposals)
 
     log.debug(
-        "sync_geo done: created=%d  confirmed_none=%d  under_threshold=%d"
-        "  both_absent=%d  not_linked=%d  failed=%d",
+        "sync_geo done: created=%d  confirmed_none=%d  in_band=%d"
+        "  under_threshold=%d  both_absent=%d  not_linked=%d  failed=%d",
         totals["proposals_created"],
         totals["suppressed_confirmed_none"],
+        totals["suppressed_in_band"],
         totals["suppressed_under_threshold"],
         totals["suppressed_both_absent"],
         totals["suppressed_not_linked"],
