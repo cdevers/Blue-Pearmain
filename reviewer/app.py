@@ -1669,10 +1669,20 @@ def api_proposal_approve(proposal_id: int) -> _JsonResp:
 
 @app.route("/api/proposals/<int:proposal_id>/approve-reverse", methods=["POST"])
 def api_proposal_approve_reverse(proposal_id: int) -> _JsonResp:
-    """Write the current Photos value to Flickr, resolving the collision."""
-    from flickr.proposal_applier import apply_collision_reverse
+    """Write the current Photos value to Flickr, resolving the collision or divergence."""
+    row = (
+        db()
+        .conn.execute("SELECT field FROM metadata_proposals WHERE id=?", (proposal_id,))
+        .fetchone()
+    )
+    if row and row["field"] == "geo_location":
+        from flickr.proposal_applier import apply_geo_reverse
 
-    result = apply_collision_reverse(db(), proposal_id, flickr_client=client())
+        result = apply_geo_reverse(db(), proposal_id, flickr_client=client())
+    else:
+        from flickr.proposal_applier import apply_collision_reverse
+
+        result = apply_collision_reverse(db(), proposal_id, flickr_client=client())
     return jsonify(result)
 
 
