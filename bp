@@ -328,6 +328,7 @@ def cmd_install_daemons(args):
         "com.blue-pearmain.pipeline.plist",
         "com.blue-pearmain.reviewer.plist",
         "com.blue-pearmain.reconcile.plist",
+        "com.blue-pearmain.deduplicator.plist",
     ]
     launch_agents = home / "Library" / "LaunchAgents"
     if not args.dry_run:
@@ -366,6 +367,7 @@ def cmd_uninstall_daemons(args):
         "com.blue-pearmain.pipeline.plist",
         "com.blue-pearmain.reviewer.plist",
         "com.blue-pearmain.reconcile.plist",
+        "com.blue-pearmain.deduplicator.plist",
     ]
     launch_agents = home / "Library" / "LaunchAgents"
     any_found = False
@@ -435,6 +437,10 @@ def cmd_deduplicator(args):
         pairs.append(("--limit", str(args.limit)))
     if args.verbose:
         pairs.append(("--verbose", True))
+    if args.prune:
+        pairs.append(("--prune", True))
+    if args.apply:
+        pairs.append(("--apply", True))
     _inject_argv(args, pairs)
     dedup_main()
 
@@ -1022,6 +1028,10 @@ def main():
     p_dedup.add_argument("--limit", type=int, default=None, metavar="N",
                          help="Maximum pairs to write (recommended for first live runs)")
     p_dedup.add_argument("--verbose", "-v", action="store_true", help="Show all uncertain pairs in report")
+    p_dedup.add_argument("--prune", action="store_true",
+                         help="Clean up zombie groups and stale photo_count values (dry-run by default)")
+    p_dedup.add_argument("--apply", action="store_true",
+                         help="Execute --prune changes (default is dry-run)")
 
     # prune-proposals
     p_prune = sub.add_parser(
@@ -1068,6 +1078,8 @@ def main():
     if not hasattr(args, "older_than"):     args.older_than = 90
     if not hasattr(args, "write"):          args.write = False
     if not hasattr(args, "confirm"):        args.confirm = False
+    if not hasattr(args, "prune"):          args.prune = False
+    if not hasattr(args, "apply"):          args.apply = False
     if not hasattr(args, "out"):           args.out = None
 
     dispatch = {

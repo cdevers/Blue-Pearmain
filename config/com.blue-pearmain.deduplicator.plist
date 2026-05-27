@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.blue-pearmain.deduplicator.plist
+  launchd agent: weekly deduplicator run (Sunday 3am)
+
+  Runs 'bp deduplicator --write' then 'bp deduplicator --prune --apply' once
+  a week to link orphaned duplicate siblings and prune zombie groups.
+  Scheduled one hour after the reconcile job (Sunday 2am) to avoid overlap.
+
+  Install with bp (substitutes __REPO__, __UV__, __HOME__ automatically):
+    bp install-daemons
+
+  Or install manually after substituting tokens:
+    launchctl bootstrap gui/$(id -u) \
+       ~/Library/LaunchAgents/com.blue-pearmain.deduplicator.plist
+
+  Run now (without waiting for schedule):
+    launchctl start com.blue-pearmain.deduplicator
+
+  Uninstall:
+    launchctl bootout gui/$(id -u) \
+       ~/Library/LaunchAgents/com.blue-pearmain.deduplicator.plist
+    rm ~/Library/LaunchAgents/com.blue-pearmain.deduplicator.plist
+
+  Logs:
+    tail -f __HOME__/Library/Logs/BluePearmain/deduplicator.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.blue-pearmain.deduplicator</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>__UV__ run python __REPO__/bp deduplicator --write --config __REPO__/config/config.yml &amp;&amp; __UV__ run python __REPO__/bp deduplicator --prune --apply --config __REPO__/config/config.yml</string>
+    </array>
+
+    <!-- Run every Sunday at 3:00am (one hour after reconcile at 2am) -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- Stderr for uncaught exceptions; stdout is handled by RotatingFileHandler -->
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/BluePearmain/deduplicator.log</string>
+
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+
+    <!-- Don't thrash if it keeps crashing -->
+    <key>ThrottleInterval</key>
+    <integer>300</integer>
+</dict>
+</plist>
