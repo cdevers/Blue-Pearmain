@@ -79,8 +79,12 @@ def apply_proposal(
     if row["status"] != "pending":
         return {"ok": False, "reason": f"proposal already '{row['status']}'"}
 
-    # Apply-time staleness checks
+    # geo_location proposals bypass the text-hash staleness check
     field = row["field"]
+    if field == "geo_location":
+        return apply_geo_proposal(db, proposal_id, library_path, flickr_client=flickr_client)
+
+    # Apply-time staleness checks
     if field == "tags":
         src_hash = row["flickr_tags_hash"] if row["source"] == "flickr" else row["photos_tags_hash"]
         tgt_hash = row["photos_tags_hash"] if row["target"] == "photos" else row["flickr_tags_hash"]
@@ -135,6 +139,145 @@ def apply_proposal(
             actor="bp",
         )
     return result
+
+
+def apply_geo_proposal(
+    db: "Database",
+    proposal_id: int,
+    library_path: str,
+    flickr_client: "FlickrClient | None" = None,
+) -> dict:
+    """Apply a geo_location proposal. Called from apply_proposal() for field='geo_location'."""
+    row = db.conn.execute(
+        """SELECT mp.id, mp.photo_id, mp.field, mp.proposed_value,
+                  mp.source, mp.target, mp.conflict_type, mp.status,
+                  p.flickr_id, p.uuid
+           FROM metadata_proposals mp
+           JOIN photos p ON p.id = mp.photo_id
+           WHERE mp.id = ?""",
+        (proposal_id,),
+    ).fetchone()
+    if not row:
+        return {"ok": False, "reason": "proposal not found"}
+    if row["status"] != "pending":
+        return {"ok": False, "reason": f"proposal already '{row['status']}'"}
+
+    payload = json.loads(row["proposed_value"]) if row["proposed_value"] else {}
+    lat = payload.get("lat")
+    lon = payload.get("lon")
+    if lat is None or lon is None:
+        return {"ok": False, "reason": "proposal missing lat/lon"}
+
+    photo_id = row["photo_id"]
+    target = row["target"]
+
+    if target == "photos":
+        uuid = row["uuid"]
+        if not uuid:
+            return {"ok": False, "reason": "photo has no uuid"}
+        result = _write_geo_to_photos(db, photo_id, uuid, lat, lon)
+    elif target == "flickr":
+        if flickr_client is None:
+            return {"ok": False, "reason": "no flickr_client provided"}
+        flickr_id = row["flickr_id"]
+        if not flickr_id:
+            return {"ok": False, "reason": "photo has no flickr_id"}
+        result = _write_geo_to_flickr(db, photo_id, flickr_id, lat, lon, flickr_client)
+    else:
+        return {"ok": False, "reason": f"unknown target '{target}'"}
+
+    if not result.get("ok"):
+        reason = result.get("reason", "unknown")
+        log.warning(
+            "geo proposal %s FAILED  target=%s  photo_id=%s  reason=%s",
+            proposal_id,
+            target,
+            photo_id,
+            reason,
+        )
+        db.conn.execute(
+            "UPDATE metadata_proposals SET status='failed', resolved_at=?, resolution_note=?"
+            " WHERE id=?",
+            (_now_iso(), reason, proposal_id),
+        )
+        db.conn.commit()
+        return {"ok": False, "reason": reason, "target": target}
+
+    _mark_applied(db, proposal_id)
+    db.conn.commit()
+    log.debug(
+        "applied geo proposal %s → %s  photo_id=%s  lat=%.4f lon=%.4f",
+        proposal_id,
+        target,
+        photo_id,
+        lat,
+        lon,
+    )
+    return {"ok": True}
+
+
+def apply_geo_reverse(
+    db: "Database",
+    proposal_id: int,
+    flickr_client: "FlickrClient | None" = None,
+) -> dict:
+    """
+    Apply the Photos coords to Flickr for a geo divergence proposal.
+    Called when the user clicks "Use Photos" on a displayed flickr→photos divergence card.
+    """
+    row = db.conn.execute(
+        """SELECT mp.id, mp.photo_id, mp.proposed_value, mp.conflict_type, mp.status,
+                  p.flickr_id
+           FROM metadata_proposals mp
+           JOIN photos p ON p.id = mp.photo_id
+           WHERE mp.id = ?""",
+        (proposal_id,),
+    ).fetchone()
+    if not row:
+        return {"ok": False, "reason": "proposal not found"}
+    if row["status"] != "pending":
+        return {"ok": False, "reason": f"proposal already '{row['status']}'"}
+    if row["conflict_type"] != "divergence":
+        return {"ok": False, "reason": "apply-geo-reverse only valid for divergence proposals"}
+
+    if flickr_client is None:
+        return {"ok": False, "reason": "no flickr_client provided"}
+    flickr_id = row["flickr_id"]
+    if not flickr_id:
+        return {"ok": False, "reason": "photo has no flickr_id"}
+
+    payload = json.loads(row["proposed_value"]) if row["proposed_value"] else {}
+    lat = payload.get("current_lat")
+    lon = payload.get("current_lon")
+    if lat is None or lon is None:
+        return {"ok": False, "reason": "proposal missing current_lat/current_lon"}
+
+    result = _write_geo_to_flickr(db, row["photo_id"], flickr_id, lat, lon, flickr_client)
+    if not result.get("ok"):
+        return result
+
+    db.conn.execute(
+        "UPDATE metadata_proposals SET status='rejected', resolved_at=?, resolution_note=?"
+        " WHERE id=?",
+        (_now_iso(), "divergence reverse: Photos coords written to Flickr", proposal_id),
+    )
+    sibling = db.conn.execute(
+        """SELECT id FROM metadata_proposals
+           WHERE photo_id=? AND field='geo_location' AND source='photos' AND status='pending'
+           ORDER BY created_at DESC LIMIT 1""",
+        (row["photo_id"],),
+    ).fetchone()
+    if sibling:
+        _mark_applied(db, sibling["id"])
+    db.conn.commit()
+    log.debug(
+        "geo-reverse proposal %s → Flickr  photo_id=%s  lat=%.4f lon=%.4f",
+        proposal_id,
+        row["photo_id"],
+        lat,
+        lon,
+    )
+    return {"ok": True}
 
 
 def _count_pending(db: "Database", conflict_types: list[str] | None = None) -> int:
@@ -457,6 +600,63 @@ def _write_tags_to_flickr(
         ),
     )
     return {"ok": True, "truncated": truncated}
+
+
+def _write_geo_to_photos(db: "Database", photo_id: int, uuid: str, lat: float, lon: float) -> dict:
+    """Write coordinates to Photos.app and update the DB cache."""
+    if not _photos_is_responsive():
+        return {"ok": False, "reason": "Photos not responding"}
+    try:
+        import photoscript
+    except ImportError:
+        return {"ok": False, "reason": "photoscript not installed"}
+
+    def _do_write() -> dict:
+        try:
+            photo = photoscript.Photo(uuid)
+        except Exception as e:
+            if "invalid photo id" in str(e).lower():
+                return {"ok": False, "reason": "stale_uuid", "stale_uuid": True}
+            return {"ok": False, "reason": f"photo not found: {e}"}
+        try:
+            photo.location = (lat, lon)
+        except Exception as e:
+            return {"ok": False, "reason": f"write failed: {e}"}
+        return {"ok": True}
+
+    result = _run_with_timeout(_do_write)
+    if not result.get("ok"):
+        return result
+
+    now = _now_iso()
+    db.conn.execute(
+        "UPDATE photos SET photos_latitude=?, photos_longitude=?,"
+        " latitude=?, longitude=?, updated_at=? WHERE id=?",
+        (lat, lon, lat, lon, now, photo_id),
+    )
+    return {"ok": True}
+
+
+def _write_geo_to_flickr(
+    db: "Database",
+    photo_id: int,
+    flickr_id: str,
+    lat: float,
+    lon: float,
+    flickr_client: "FlickrClient",
+) -> dict:
+    """Write coordinates to Flickr and update the DB cache."""
+    try:
+        flickr_client.set_location(flickr_id, lat, lon)
+    except Exception as e:
+        return {"ok": False, "reason": f"Flickr API error: {e}"}
+    now = _now_iso()
+    db.conn.execute(
+        "UPDATE photos SET flickr_latitude=?, flickr_longitude=?,"
+        " latitude=?, longitude=?, updated_at=? WHERE id=?",
+        (lat, lon, lat, lon, now, photo_id),
+    )
+    return {"ok": True}
 
 
 def _apply_to_photos(db: "Database", row, new_tags: list[str], library_path: str) -> dict:

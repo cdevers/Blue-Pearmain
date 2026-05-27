@@ -124,6 +124,19 @@ def main() -> int:
         f"{suffix}"
     )
 
+    # Geo sync: diff flickr_latitude vs photos_latitude, write geo_location proposals
+    from flickr.geo_sync import sync_geo
+
+    geo_ids = photo_ids if args.photo_id else None
+    geo_totals = sync_geo(db, dry_run=args.dry_run, photo_ids=geo_ids)
+    print(
+        f"  geo sync: {geo_totals['proposals_created']} proposals created"
+        f"  ({geo_totals['suppressed_confirmed_none']} confirmed-none,"
+        f" {geo_totals['suppressed_under_threshold']} under threshold,"
+        f" {geo_totals['suppressed_both_absent']} both absent,"
+        f" {geo_totals['failed']} failed)"
+    )
+
     db.close()
     return 1 if totals["failed"] else 0
 

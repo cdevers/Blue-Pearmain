@@ -144,7 +144,8 @@ def run_sync_engine(
                 # drop because the source hash hasn't changed.
                 db.conn.execute(
                     "UPDATE metadata_proposals SET status='superseded', resolved_at=?"
-                    " WHERE photo_id=? AND status='pending'",
+                    " WHERE photo_id=? AND status='pending'"
+                    " AND field IN ('title', 'description', 'tags')",
                     (now, photo_id),
                 )
                 for p in proposals:

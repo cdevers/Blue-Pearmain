@@ -384,6 +384,17 @@ class FlickrClient:
             http_method="POST",
         )
 
+    def set_location(self, photo_id: str, lat: float, lon: float) -> None:
+        """Set the geotag on a Flickr photo via flickr.photos.geo.setLocation.
+
+        Uses accuracy=16 (street level). Raises FlickrError on failure.
+        """
+        self._call(
+            "flickr.photos.geo.setLocation",
+            {"photo_id": photo_id, "lat": lat, "lon": lon, "accuracy": 16},
+            http_method="POST",
+        )
+
     def rotate(self, photo_id: str, degrees: int) -> dict:
         """Rotate a photo on Flickr clockwise by 90, 180, or 270 degrees.
         DESTRUCTIVE and irreversible — re-encodes the stored image."""

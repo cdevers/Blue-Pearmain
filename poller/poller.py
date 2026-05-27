@@ -241,6 +241,8 @@ def flickr_photo_to_db(photo: dict, info: dict | None = None) -> dict:
         try:
             row["latitude"] = float(lat)
             row["longitude"] = float(lon)
+            row["flickr_latitude"] = float(lat)  # geo cache — #145
+            row["flickr_longitude"] = float(lon)  # geo cache — #145
         except (TypeError, ValueError):
             pass
 
@@ -292,8 +294,12 @@ def _enrich_from_info(row: dict, info: dict):
     location = photo.get("location", {})
     if location:
         try:
-            row["latitude"] = float(location.get("latitude", row.get("latitude", 0)))
-            row["longitude"] = float(location.get("longitude", row.get("longitude", 0)))
+            lat = float(location.get("latitude", row.get("latitude", 0)))
+            lon = float(location.get("longitude", row.get("longitude", 0)))
+            row["latitude"] = lat
+            row["longitude"] = lon
+            row["flickr_latitude"] = lat  # geo cache — #145
+            row["flickr_longitude"] = lon  # geo cache — #145
         except (TypeError, ValueError):
             pass
         row["place_city"] = (location.get("locality") or {}).get("_content", "")

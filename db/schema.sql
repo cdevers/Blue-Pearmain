@@ -39,6 +39,12 @@ CREATE TABLE IF NOT EXISTS photos (
     -- Location
     latitude                REAL,
     longitude               REAL,
+    -- Geo cache columns for migration 024 (#145)
+    geo_confirmed_none      INTEGER NOT NULL DEFAULT 0,  -- user confirmed no location available
+    flickr_latitude         REAL,                         -- last latitude from Flickr
+    flickr_longitude        REAL,                         -- last longitude from Flickr
+    photos_latitude         REAL,                         -- last latitude from Apple Photos
+    photos_longitude        REAL,                         -- last longitude from Apple Photos
     place_city              TEXT,
     place_state             TEXT,
     place_country           TEXT,
@@ -308,7 +314,7 @@ CREATE TABLE IF NOT EXISTS metadata_proposals (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
     photo_id                INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
     field                   TEXT NOT NULL
-                                CHECK(field IN ('title', 'description', 'tags')),
+                                CHECK(field IN ('title', 'description', 'tags', 'geo_location')),
     proposed_value          TEXT,                   -- JSON for tags, plain text for title/description
     source                  TEXT NOT NULL
                                 CHECK(source IN ('flickr', 'photos', 'manual')),

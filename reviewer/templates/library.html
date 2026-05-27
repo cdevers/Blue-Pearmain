@@ -211,6 +211,22 @@
   padding: 12px 16px; font-size: 13px; color: var(--muted);
 }
 .lib-pagination a { color: var(--accent); }
+
+/* ── No-location pill (#145) ────────────────────── */
+.no-loc-pill {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  background: rgba(0,0,0,0.65);
+  color: #ccc;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 5px;
+  border-radius: 3px;
+  pointer-events: none;
+}
 {% endblock %}
 
 {% block content %}
@@ -220,6 +236,7 @@
   (1 if filters.tag else 0) +
   (1 if filters.status else 0) +
   (1 if filters.untitled else 0) +
+  (1 if filters.no_location else 0) +
   (1 if filters.time_pattern else 0) +
   (1 if filters.country else 0) +
   (1 if filters.state else 0) +
@@ -306,6 +323,13 @@
     <label style="display:flex;align-items:center;gap:5px">
       <input type="checkbox" name="untitled" value="1" {% if filters.untitled %}checked{% endif %}>
       Untitled only
+    </label>
+    <label style="display:flex;align-items:center;gap:5px">
+      <input type="checkbox" name="no_location" value="1" {% if filters.no_location %}checked{% endif %}>
+      No location
+      {% if no_location_count %}
+      <span style="background:var(--border);border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px">{{ no_location_count }}</span>
+      {% endif %}
     </label>
   </div>
 
@@ -446,6 +470,8 @@
     <button class="confirm-no" onclick="hideRemoveConfirm()">Cancel</button>
   </span>
   {% endif %}
+  <span class="sep">│</span>
+  <button onclick="markNoLocation()">Mark: no location ✓</button>
   <button class="clear-btn" onclick="clearSelection()">✕ Clear</button>
 </div>
 
@@ -513,6 +539,9 @@
     {% set title = photo.flickr_title or photo.photos_title %}
     {% if title %}
       <div class="thumb-title">{{ title }}</div>
+    {% endif %}
+    {% if photo.latitude is none and not photo.geo_confirmed_none %}
+    <div class="no-loc-pill">no loc</div>
     {% endif %}
   </div>
 {% else %}
@@ -1001,6 +1030,23 @@ async function confirmAlbumRemove() {
   }
 }
 {% endif %}
+
+// ── Mark: no location (#145) ─────────────────────────────────────────
+async function markNoLocation() {
+  const n = _selectionCount();
+  if (n === 0) return;
+  if (n > 10 && !confirm(
+    `Mark ${n} photos as having no location? This will suppress future location sync proposals for all of them.`
+  )) return;
+  const ids = _selectAllFilter ? null : Array.from(_selectedIds);
+  const body = ids ? {photo_ids: ids} : {};
+  const r = await fetch('/api/geo_confirm_none', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+    body: JSON.stringify(body),
+  });
+  if ((await r.json()).ok) location.reload();
+}
 
 // ── Double-click → open photo detail ────────────────────────────────
 document.querySelectorAll('.lib-thumb').forEach(function(card) {

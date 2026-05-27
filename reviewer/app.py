@@ -299,11 +299,15 @@ def photo_detail(photo_id: int) -> str:
     )
 
     flickr_url = None
+    flickr_edit_url: str | None = None
     if photo.get("flickr_id"):
         flickr_username = _config.get("flickr", {}).get("username") or _config.get(
             "flickr", {}
         ).get("user_nsid", "")
-        flickr_url = f"https://www.flickr.com/photos/{flickr_username}/{photo['flickr_id']}"
+        flickr_base = f"https://www.flickr.com/photos/{flickr_username}/{photo['flickr_id']}"
+        flickr_url = flickr_base
+        if flickr_username:
+            flickr_edit_url = f"{flickr_base}/edit/"
 
     albums = db().get_photo_albums(photo_id)
 
@@ -311,6 +315,7 @@ def photo_detail(photo_id: int) -> str:
         "photo.html",
         photo=photo,
         flickr_url=flickr_url,
+        flickr_edit_url=flickr_edit_url,
         prev_id=prev_id,
         next_id=next_id,
         state=state,
@@ -901,6 +906,7 @@ def library() -> str:
     tag = request.args.get("tag") or None
     status = request.args.get("status") or None
     untitled_only = request.args.get("untitled") == "1"
+    no_location = request.args.get("no_location") == "1"
     time_pattern = request.args.get("time_pattern") or None
     time_expand = 2 if request.args.get("expand") == "1" else 0
 
@@ -943,6 +949,7 @@ def library() -> str:
         tag=tag,
         status=status,
         untitled_only=untitled_only,
+        no_location=no_location,
         time_pattern=time_pattern,
         time_expand=time_expand,
         q=q,
@@ -965,6 +972,7 @@ def library() -> str:
         tag=tag,
         status=status,
         untitled_only=untitled_only,
+        no_location=no_location,
         time_pattern=time_pattern,
         time_expand=time_expand,
         q=q,
@@ -978,6 +986,7 @@ def library() -> str:
         lon_min=lon_min,
         lon_max=lon_max,
     )
+    no_location_count = db().no_location_count()
     location_tree = db().location_data()
     person_list = db().person_names()
     albums = db().get_all_albums()
@@ -997,6 +1006,7 @@ def library() -> str:
         current_album=current_album,
         location_tree=location_tree,
         person_list=person_list,
+        no_location_count=no_location_count,
         filters={
             "date_from": date_from or "",
             "date_to": date_to or "",
@@ -1004,6 +1014,7 @@ def library() -> str:
             "tag": tag or "",
             "status": status or "",
             "untitled": "1" if untitled_only else "",
+            "no_location": "1" if no_location else "",
             "time_pattern": time_pattern or "",
             "expand": "1" if time_expand > 0 else "",
             "q": q or "",
@@ -1669,10 +1680,20 @@ def api_proposal_approve(proposal_id: int) -> _JsonResp:
 
 @app.route("/api/proposals/<int:proposal_id>/approve-reverse", methods=["POST"])
 def api_proposal_approve_reverse(proposal_id: int) -> _JsonResp:
-    """Write the current Photos value to Flickr, resolving the collision."""
-    from flickr.proposal_applier import apply_collision_reverse
+    """Write the current Photos value to Flickr, resolving the collision or divergence."""
+    row = (
+        db()
+        .conn.execute("SELECT field FROM metadata_proposals WHERE id=?", (proposal_id,))
+        .fetchone()
+    )
+    if row and row["field"] == "geo_location":
+        from flickr.proposal_applier import apply_geo_reverse
 
-    result = apply_collision_reverse(db(), proposal_id, flickr_client=client())
+        result = apply_geo_reverse(db(), proposal_id, flickr_client=client())
+    else:
+        from flickr.proposal_applier import apply_collision_reverse
+
+        result = apply_collision_reverse(db(), proposal_id, flickr_client=client())
     return jsonify(result)
 
 
@@ -1892,6 +1913,52 @@ def api_set_photo_text(photo_id: int) -> _JsonResp:
         return jsonify(result)
     status = 404 if result.get("reason") == "photo not found" else 502
     return jsonify(result), status
+
+
+@app.route("/api/geo_confirm_none", methods=["POST"])
+def api_geo_confirm_none() -> _JsonResp:
+    """Set or clear geo_confirmed_none for one or more photos.
+
+    Body: {"photo_ids": [1, 2, 3], "clear": false}
+    clear=true  → geo_confirmed_none = 0 (undo)
+    clear=false → geo_confirmed_none = 1 (mark as no location)
+
+    When setting (clear=false), any pending geo_location proposals are rejected.
+    """
+    data = request.get_json() or {}
+    photo_ids = data.get("photo_ids")
+    if not isinstance(photo_ids, list) or not photo_ids:
+        return (
+            jsonify({"ok": False, "reason": "photo_ids must be a non-empty list"}),
+            400,
+        )
+    try:
+        photo_ids = [int(i) for i in photo_ids]
+    except (TypeError, ValueError):
+        return (
+            jsonify({"ok": False, "reason": "photo_ids must be integers"}),
+            400,
+        )
+
+    clear = bool(data.get("clear", False))
+    new_val = 0 if clear else 1
+    _db = db()
+    placeholders = ",".join("?" * len(photo_ids))
+    _db.conn.execute(
+        f"UPDATE photos SET geo_confirmed_none = ?, updated_at = datetime('now')"
+        f" WHERE id IN ({placeholders})",
+        [new_val] + photo_ids,
+    )
+    if not clear:
+        # Cancel any pending geo proposals for the affected photos
+        _db.conn.execute(
+            f"UPDATE metadata_proposals SET status='rejected', resolved_at=datetime('now')"
+            f" WHERE photo_id IN ({placeholders})"
+            f"   AND field='geo_location' AND status='pending'",
+            photo_ids,
+        )
+    _db.conn.commit()
+    return jsonify({"ok": True, "updated": len(photo_ids)})
 
 
 @app.route("/api/poll", methods=["POST"])

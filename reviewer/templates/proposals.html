@@ -407,14 +407,64 @@
     <div class="body">
       <div class="card-header">
         <span class="type-pill pill-{{ p.conflict_type | replace('_','-') }}">{{ p.conflict_type | replace('_',' ') }}</span>
-        {% if p.field != 'tags' %}
+        {% if p.field == 'geo_location' %}
+        <span style="background:#1a1a2e; color:#99a; border:1px solid #334; border-radius:3px; padding:1px 6px; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.05em">Location</span>
+        {% elif p.field != 'tags' %}
         <span style="background:#1a1a2e; color:#99a; border:1px solid #334; border-radius:3px; padding:1px 6px; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.05em">{{ p.field }}</span>
         {% endif %}
         <span class="filename">{{ p.original_filename or p.flickr_id or '?' }}</span>
         <a href="{{ url_for('photo_detail', photo_id=p.photo_id) }}" target="_blank">view ↗</a>
       </div>
 
-      {% if p.field == 'tags' %}
+      {% if p.field == 'geo_location' %}
+      {# ── Geo location card ── #}
+      {% set pv = p.proposed_value %}
+      <div class="tag-comparison" style="margin-bottom:12px">
+        <div class="tag-side flickr">
+          <div class="side-label">{{ p.source | capitalize }} → {{ p.target | capitalize }}</div>
+          <div style="font-size:12px; color:var(--text); line-height:1.6; padding-top:2px">
+            {% if pv.lat is defined %}
+              {{ "%.4f"|format(pv.lat|abs) }}°{{ 'N' if pv.lat >= 0 else 'S' }},
+              {{ "%.4f"|format(pv.lon|abs) }}°{{ 'E' if pv.lon >= 0 else 'W' }}
+            {% endif %}
+          </div>
+        </div>
+        {% if pv.distance_m is defined %}
+        <div class="tag-side photos">
+          <div class="side-label">Current ({{ p.target | capitalize }})</div>
+          <div style="font-size:12px; color:var(--text); line-height:1.6; padding-top:2px">
+            {% if pv.current_lat is defined %}
+              {{ "%.4f"|format(pv.current_lat|abs) }}°{{ 'N' if pv.current_lat >= 0 else 'S' }},
+              {{ "%.4f"|format(pv.current_lon|abs) }}°{{ 'E' if pv.current_lon >= 0 else 'W' }}
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      {% if pv.distance_m is defined %}
+      <div class="proposed-action">
+        <strong>~{{ "{:,}".format((pv.distance_m / 1000) | int) }} km apart</strong>
+        — choose which side wins
+        &nbsp;·&nbsp;
+        <a href="/map?photo_id={{ p.photo_id }}" style="color:var(--muted)">View on map</a>
+      </div>
+      {% else %}
+      <div class="proposed-action">
+        Copy <strong>{{ p.source }}</strong> location → <strong>{{ p.target }}</strong>
+        &nbsp;·&nbsp;
+        <a href="/map?photo_id={{ p.photo_id }}" style="color:var(--muted)">View on map</a>
+      </div>
+      {% endif %}
+      <div class="card-actions">
+        {% if p.conflict_type == 'divergence' %}
+        <button class="btn-approve" onclick="approveProposal({{ p.id }}, this)">Use Flickr ✓</button>
+        <button class="btn-approve" onclick="approveReverse({{ p.id }}, this)">Use Photos ✓</button>
+        {% else %}
+        <button class="btn-approve" onclick="approveProposal({{ p.id }}, this)">Approve ✓</button>
+        {% endif %}
+        <button class="btn-reject" onclick="rejectProposal({{ p.id }}, this)">Reject ✕</button>
+      </div>
+      {% elif p.field == 'tags' %}
       <div class="tag-comparison">
         <div class="tag-side flickr">
           <div class="side-label">Flickr ({{ p.flickr_tags | length }} tags)</div>
@@ -475,6 +525,7 @@
       </div>
       {% endif %}
 
+      {% if p.field != 'geo_location' %}
       <div class="card-actions">
         {% if p.conflict_type == 'collision' %}
         <button class="btn-approve" onclick="approveProposal({{ p.id }}, this)">Use Flickr ✓</button>
@@ -488,6 +539,7 @@
         <button class="btn-reject"  onclick="rejectProposal({{ p.id }}, this)">Reject ✕</button>
         {% endif %}
       </div>
+      {% endif %}
 
       {% if p.conflict_type == 'collision' and p.field == 'tags' %}
       <div class="merge-editor" id="merge-{{ p.id }}" style="display:none">

@@ -109,6 +109,8 @@ def photos_record_to_db(photo) -> dict:
     if photo.latitude is not None:
         row["latitude"] = photo.latitude
         row["longitude"] = photo.longitude
+        row["photos_latitude"] = photo.latitude  # geo cache — #145
+        row["photos_longitude"] = photo.longitude  # geo cache — #145
 
     place = photo.place
     if place:
