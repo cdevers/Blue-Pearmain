@@ -299,11 +299,15 @@ def photo_detail(photo_id: int) -> str:
     )
 
     flickr_url = None
+    flickr_edit_url: str | None = None
     if photo.get("flickr_id"):
         flickr_username = _config.get("flickr", {}).get("username") or _config.get(
             "flickr", {}
         ).get("user_nsid", "")
-        flickr_url = f"https://www.flickr.com/photos/{flickr_username}/{photo['flickr_id']}"
+        flickr_base = f"https://www.flickr.com/photos/{flickr_username}/{photo['flickr_id']}"
+        flickr_url = flickr_base
+        if flickr_username:
+            flickr_edit_url = f"{flickr_base}/edit/"
 
     albums = db().get_photo_albums(photo_id)
 
@@ -311,6 +315,7 @@ def photo_detail(photo_id: int) -> str:
         "photo.html",
         photo=photo,
         flickr_url=flickr_url,
+        flickr_edit_url=flickr_edit_url,
         prev_id=prev_id,
         next_id=next_id,
         state=state,

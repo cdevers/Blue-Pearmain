@@ -415,6 +415,70 @@
     </div>
     {% endif %}
 
+    <!-- Geo location section — 3-state (#145) -->
+    <div class="meta-section">
+      <h3>Location</h3>
+      {% if photo.latitude is not none %}
+      {# State 1: has-coords #}
+      <div class="meta-row">
+        <span class="label">Coords</span>
+        <span class="value">
+          {{ "%.4f"|format(photo.latitude|abs) }}°{{ 'N' if photo.latitude >= 0 else 'S' }},
+          {{ "%.4f"|format(photo.longitude|abs) }}°{{ 'E' if photo.longitude >= 0 else 'W' }}
+        </span>
+      </div>
+      <div class="meta-row">
+        <span class="label">Actions</span>
+        <span class="value">
+          <a href="/map?photo_id={{ photo.id }}">View on map</a>
+          {% if flickr_edit_url %}
+          · <a href="{{ flickr_edit_url }}" target="_blank" rel="noopener">Edit on Flickr ↗</a>
+          {% endif %}
+          {% if photo.uuid %}
+          · <a href="photos://uuid/{{ photo.uuid }}">Edit in Photos</a>
+          {% endif %}
+        </span>
+      </div>
+      {% elif photo.geo_confirmed_none %}
+      {# State 3: intentionally-none #}
+      <div class="meta-row">
+        <span class="label">Location</span>
+        <span class="value" style="color:var(--muted)">No location (confirmed)</span>
+      </div>
+      <div class="meta-row">
+        <span class="label">Actions</span>
+        <span class="value">
+          {% if flickr_edit_url %}
+          <a href="{{ flickr_edit_url }}" target="_blank" rel="noopener">Edit on Flickr ↗</a>
+          {% endif %}
+          {% if photo.uuid %}
+          · <a href="photos://uuid/{{ photo.uuid }}">Edit in Photos</a>
+          {% endif %}
+          · <a href="#" onclick="geoConfirmNone({{ photo.id }}, true); return false"
+               style="color:var(--muted)">Undo: clear confirmation</a>
+        </span>
+      </div>
+      {% else %}
+      {# State 2: missing-unreviewed #}
+      <div class="meta-row">
+        <span class="label">Location</span>
+        <span class="value" style="color:var(--muted)">No location</span>
+      </div>
+      <div class="meta-row">
+        <span class="label">Actions</span>
+        <span class="value">
+          {% if flickr_edit_url %}
+          <a href="{{ flickr_edit_url }}" target="_blank" rel="noopener">Edit on Flickr ↗</a>
+          {% endif %}
+          {% if photo.uuid %}
+          · <a href="photos://uuid/{{ photo.uuid }}">Edit in Photos</a>
+          {% endif %}
+          · <a href="#" onclick="geoConfirmNone({{ photo.id }}, false); return false">Mark as correct (no location needed)</a>
+        </span>
+      </div>
+      {% endif %}
+    </div>
+
     <!-- Flickr rotation — only shown when photo is on Flickr -->
     {% if photo.flickr_id %}
     <div class="meta-section">
@@ -654,6 +718,15 @@ async function rotateFlickr(degrees) {
   } else {
     toast('Rotate failed: ' + (d.error || 'unknown'), 'err');
   }
+}
+
+async function geoConfirmNone(photoId, clear) {
+  const r = await fetch('/api/geo_confirm_none', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+    body: JSON.stringify({photo_ids: [photoId], clear: clear}),
+  });
+  if ((await r.json()).ok) location.reload();
 }
 
 document.addEventListener('keydown', e => {
