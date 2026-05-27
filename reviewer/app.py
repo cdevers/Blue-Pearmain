@@ -1904,6 +1904,52 @@ def api_set_photo_text(photo_id: int) -> _JsonResp:
     return jsonify(result), status
 
 
+@app.route("/api/geo_confirm_none", methods=["POST"])
+def api_geo_confirm_none() -> _JsonResp:
+    """Set or clear geo_confirmed_none for one or more photos.
+
+    Body: {"photo_ids": [1, 2, 3], "clear": false}
+    clear=true  → geo_confirmed_none = 0 (undo)
+    clear=false → geo_confirmed_none = 1 (mark as no location)
+
+    When setting (clear=false), any pending geo_location proposals are rejected.
+    """
+    data = request.get_json() or {}
+    photo_ids = data.get("photo_ids")
+    if not isinstance(photo_ids, list) or not photo_ids:
+        return (
+            jsonify({"ok": False, "reason": "photo_ids must be a non-empty list"}),
+            400,
+        )
+    try:
+        photo_ids = [int(i) for i in photo_ids]
+    except (TypeError, ValueError):
+        return (
+            jsonify({"ok": False, "reason": "photo_ids must be integers"}),
+            400,
+        )
+
+    clear = bool(data.get("clear", False))
+    new_val = 0 if clear else 1
+    _db = db()
+    placeholders = ",".join("?" * len(photo_ids))
+    _db.conn.execute(
+        f"UPDATE photos SET geo_confirmed_none = ?, updated_at = datetime('now')"
+        f" WHERE id IN ({placeholders})",
+        [new_val] + photo_ids,
+    )
+    if not clear:
+        # Cancel any pending geo proposals for the affected photos
+        _db.conn.execute(
+            f"UPDATE metadata_proposals SET status='rejected', resolved_at=datetime('now')"
+            f" WHERE photo_id IN ({placeholders})"
+            f"   AND field='geo_location' AND status='pending'",
+            photo_ids,
+        )
+    _db.conn.commit()
+    return jsonify({"ok": True, "updated": len(photo_ids)})
+
+
 @app.route("/api/poll", methods=["POST"])
 def api_poll() -> _JsonResp:
     """Trigger a manual Flickr poll in-process (quick, last 24h only)."""
