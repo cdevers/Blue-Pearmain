@@ -906,6 +906,7 @@ def library() -> str:
     tag = request.args.get("tag") or None
     status = request.args.get("status") or None
     untitled_only = request.args.get("untitled") == "1"
+    no_location = request.args.get("no_location") == "1"
     time_pattern = request.args.get("time_pattern") or None
     time_expand = 2 if request.args.get("expand") == "1" else 0
 
@@ -948,6 +949,7 @@ def library() -> str:
         tag=tag,
         status=status,
         untitled_only=untitled_only,
+        no_location=no_location,
         time_pattern=time_pattern,
         time_expand=time_expand,
         q=q,
@@ -970,6 +972,7 @@ def library() -> str:
         tag=tag,
         status=status,
         untitled_only=untitled_only,
+        no_location=no_location,
         time_pattern=time_pattern,
         time_expand=time_expand,
         q=q,
@@ -983,6 +986,7 @@ def library() -> str:
         lon_min=lon_min,
         lon_max=lon_max,
     )
+    no_location_count = db().no_location_count()
     location_tree = db().location_data()
     person_list = db().person_names()
     albums = db().get_all_albums()
@@ -1002,6 +1006,7 @@ def library() -> str:
         current_album=current_album,
         location_tree=location_tree,
         person_list=person_list,
+        no_location_count=no_location_count,
         filters={
             "date_from": date_from or "",
             "date_to": date_to or "",
@@ -1009,6 +1014,7 @@ def library() -> str:
             "tag": tag or "",
             "status": status or "",
             "untitled": "1" if untitled_only else "",
+            "no_location": "1" if no_location else "",
             "time_pattern": time_pattern or "",
             "expand": "1" if time_expand > 0 else "",
             "q": q or "",
