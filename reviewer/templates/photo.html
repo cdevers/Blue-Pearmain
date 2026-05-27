@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ photo.original_filename or photo.flickr_id }} — Blue Pearmain{% endblock %}
 
+{% block extra_head %}
+{% if photo.latitude %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+{% endif %}
+{% endblock %}
+
 {% block extra_style %}
 .detail-layout {
   display: grid;
@@ -395,6 +401,20 @@
       {% endif %}
     </div>
 
+    <!-- Mini-map (geotagged photos only) -->
+    {% if photo.latitude %}
+    <div class="meta-section">
+      <h3>Map</h3>
+      <div id="mini-map" style="height:160px; border-radius:4px; overflow:hidden; margin-bottom:6px"></div>
+      <div style="font-size:11px; color:var(--muted)">
+        {{ "%.4f"|format(photo.latitude|abs) }}°{{ 'N' if photo.latitude >= 0 else 'S' }},
+        {{ "%.4f"|format(photo.longitude|abs) }}°{{ 'E' if photo.longitude >= 0 else 'W' }}
+        &nbsp;·&nbsp;
+        <a href="{{ url_for('map_view', photo_id=photo.id) }}">Full map →</a>
+      </div>
+    </div>
+    {% endif %}
+
     <!-- Flickr rotation — only shown when photo is on Flickr -->
     {% if photo.flickr_id %}
     <div class="meta-section">
@@ -495,6 +515,25 @@
 {% endblock %}
 
 {% block scripts %}
+{% if photo.latitude %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+  const miniMap = L.map('mini-map', {
+    zoomControl: false,
+    dragging: false,
+    scrollWheelZoom: false,
+    doubleClickZoom: false,
+    attributionControl: false,
+  }).setView([{{ photo.latitude }}, {{ photo.longitude }}], 15);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+  }).addTo(miniMap);
+  L.marker([{{ photo.latitude }}, {{ photo.longitude }}]).addTo(miniMap);
+  requestAnimationFrame(() => miniMap.invalidateSize());
+}());
+</script>
+{% endif %}
 <script>
 const PHOTO_ID = {{ photo.id }};
 
