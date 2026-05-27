@@ -61,10 +61,12 @@ class TestApplyGeoProposal:
     def test_apply_flickr_to_photos_calls_photoscript(self, db):
         pid = db.upsert_photo(_photo(1))
         prop_id = _insert_proposal(db, pid, source="flickr", target="photos")
+        mock_ps = MagicMock()
         mock_photo = MagicMock()
+        mock_ps.Photo.return_value = mock_photo
         with (
             patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
-            patch("photoscript.Photo", return_value=mock_photo),
+            patch.dict("sys.modules", {"photoscript": mock_ps}),
         ):
             result = apply_proposal(db, prop_id, library_path="/tmp")
         assert result["ok"] is True
@@ -72,10 +74,11 @@ class TestApplyGeoProposal:
     def test_apply_flickr_to_photos_marks_applied(self, db):
         pid = db.upsert_photo(_photo(2))
         prop_id = _insert_proposal(db, pid, source="flickr", target="photos")
-        mock_photo = MagicMock()
+        mock_ps = MagicMock()
+        mock_ps.Photo.return_value = MagicMock()
         with (
             patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
-            patch("photoscript.Photo", return_value=mock_photo),
+            patch.dict("sys.modules", {"photoscript": mock_ps}),
         ):
             apply_proposal(db, prop_id, library_path="/tmp")
         row = db.conn.execute(
@@ -107,10 +110,11 @@ class TestApplyGeoProposal:
         prop_id = _insert_proposal(
             db, pid, source="flickr", target="photos", conflict_type="non_conflict"
         )
-        mock_photo = MagicMock()
+        mock_ps = MagicMock()
+        mock_ps.Photo.return_value = MagicMock()
         with (
             patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
-            patch("photoscript.Photo", return_value=mock_photo),
+            patch.dict("sys.modules", {"photoscript": mock_ps}),
         ):
             result = apply_proposal(db, prop_id, library_path="/tmp")
         assert result["ok"] is True
@@ -120,10 +124,11 @@ class TestApplyGeoProposal:
         prop_id = _insert_proposal(
             db, pid, source="flickr", target="photos", lat=42.3601, lon=-71.0589
         )
-        mock_photo = MagicMock()
+        mock_ps = MagicMock()
+        mock_ps.Photo.return_value = MagicMock()
         with (
             patch("flickr.proposal_applier._photos_is_responsive", return_value=True),
-            patch("photoscript.Photo", return_value=mock_photo),
+            patch.dict("sys.modules", {"photoscript": mock_ps}),
         ):
             apply_proposal(db, prop_id, library_path="/tmp")
         row = db.conn.execute(

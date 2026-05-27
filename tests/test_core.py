@@ -8030,7 +8030,7 @@ class TestInstallDaemons(unittest.TestCase):
             ):
                 bp.cmd_install_daemons(self._args())
             installed = list(fake_agents.glob("*.plist"))
-            self.assertEqual(len(installed), 4)
+            self.assertEqual(len(installed), 5)
             for f in installed:
                 text = f.read_text()
                 self.assertNotIn("__REPO__", text)
@@ -8112,6 +8112,49 @@ class TestInstallDaemons(unittest.TestCase):
                 text = f.read_text()
                 self.assertNotIn("com.cdevers.blue-pearmain", text)
 
+    def test_deduplicator_plist_runs_write_and_prune(self):
+        """Installed deduplicator plist chains --write then --prune --apply."""
+        import tempfile
+
+        bp = self._import_bp()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_home = Path(tmpdir) / "home"
+            fake_agents = fake_home / "Library" / "LaunchAgents"
+            fake_agents.mkdir(parents=True)
+            with (
+                unittest.mock.patch("shutil.which", return_value="/fake/uv"),
+                unittest.mock.patch.object(Path, "home", return_value=fake_home),
+            ):
+                bp.cmd_install_daemons(self._args())
+            dedup = fake_agents / "com.blue-pearmain.deduplicator.plist"
+            self.assertTrue(dedup.exists(), "deduplicator plist not installed")
+            text = dedup.read_text()
+            self.assertIn("deduplicator", text)
+            self.assertIn("--write", text)
+            self.assertIn("--prune", text)
+            self.assertIn("--apply", text)
+
+    def test_deduplicator_plist_has_sunday_3am_schedule(self):
+        """Installed deduplicator plist runs on Sunday at 3am."""
+        import tempfile
+
+        bp = self._import_bp()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_home = Path(tmpdir) / "home"
+            fake_agents = fake_home / "Library" / "LaunchAgents"
+            fake_agents.mkdir(parents=True)
+            with (
+                unittest.mock.patch("shutil.which", return_value="/fake/uv"),
+                unittest.mock.patch.object(Path, "home", return_value=fake_home),
+            ):
+                bp.cmd_install_daemons(self._args())
+            dedup = fake_agents / "com.blue-pearmain.deduplicator.plist"
+            text = dedup.read_text()
+            self.assertIn("StartCalendarInterval", text)
+            self.assertIn("Weekday", text)
+            # Hour 3 appears as <integer>3</integer>
+            self.assertIn("<integer>3</integer>", text)
+
 
 class TestUninstallDaemons(unittest.TestCase):
     """bp uninstall-daemons: removes installed plists, dry-run leaves them."""
@@ -8139,6 +8182,7 @@ class TestUninstallDaemons(unittest.TestCase):
             "com.blue-pearmain.pipeline.plist",
             "com.blue-pearmain.reviewer.plist",
             "com.blue-pearmain.reconcile.plist",
+            "com.blue-pearmain.deduplicator.plist",
         ]
         for name in plists:
             (fake_agents / name).write_text("<plist/>")
