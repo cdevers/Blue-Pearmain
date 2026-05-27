@@ -894,6 +894,7 @@ class Database:
         lon_min: float | None = None,  # #144
         lon_max: float | None = None,  # #144
         no_location: bool = False,  # #145 no_location filter
+        confirmed_none: bool = False,  # #148 confirmed-none filter
     ) -> tuple[str, list]:
         """Return (WHERE clause fragment, params list) for library queries."""
         clauses: list[str] = ["p.flickr_deleted = 0"]
@@ -951,6 +952,10 @@ class Database:
                 clauses.append(frag)
                 params.extend(frag_params)
 
+        # #145/#148 — no_location and confirmed_none are complementary but mutually exclusive
+        if no_location and confirmed_none:
+            raise ValueError("confirmed_none and no_location are mutually exclusive")
+
         # #145 — "No location" filter: untagged + not confirmed-none
         if no_location:
             clauses.append(
@@ -958,6 +963,10 @@ class Database:
             )
             # Mutually exclusive with bbox — suppress it
             lat_min = lat_max = lon_min = lon_max = None
+
+        # #148 — "Reviewed: no location" filter: confirmed-none photos
+        if confirmed_none:
+            clauses.append("p.geo_confirmed_none = 1")
 
         # #144 — spatial bounding box
         if (
@@ -1008,6 +1017,7 @@ class Database:
         lon_min: float | None = None,
         lon_max: float | None = None,
         no_location: bool = False,
+        confirmed_none: bool = False,
         limit: int = 120,
         offset: int = 0,
     ) -> list[dict]:
@@ -1032,6 +1042,7 @@ class Database:
             lon_min=lon_min,
             lon_max=lon_max,
             no_location=no_location,
+            confirmed_none=confirmed_none,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         rows = self.conn.execute(
@@ -1076,6 +1087,7 @@ class Database:
         lon_min: float | None = None,
         lon_max: float | None = None,
         no_location: bool = False,
+        confirmed_none: bool = False,
     ) -> int:
         """Return total photo count for the given library filters."""
         where, params = self._library_where(
@@ -1098,6 +1110,7 @@ class Database:
             lon_min=lon_min,
             lon_max=lon_max,
             no_location=no_location,
+            confirmed_none=confirmed_none,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         row = self.conn.execute(
@@ -1126,6 +1139,7 @@ class Database:
         lon_min: float | None = None,
         lon_max: float | None = None,
         no_location: bool = False,
+        confirmed_none: bool = False,
     ) -> list[int]:
         """Return all photo IDs matching the filters (no limit — used by bulk-edit)."""
         where, params = self._library_where(
@@ -1148,6 +1162,7 @@ class Database:
             lon_min=lon_min,
             lon_max=lon_max,
             no_location=no_location,
+            confirmed_none=confirmed_none,
         )
         join = "JOIN photo_albums pa ON pa.photo_id = p.id" if album_id is not None else ""
         rows = self.conn.execute(
@@ -1162,6 +1177,15 @@ class Database:
             "SELECT COUNT(*) AS n FROM photos"
             " WHERE latitude IS NULL AND longitude IS NULL"
             "   AND geo_confirmed_none = 0"
+            "   AND (flickr_deleted IS NULL OR flickr_deleted = 0)"
+        ).fetchone()
+        return row["n"] if row else 0
+
+    def confirmed_none_count(self) -> int:
+        """Count photos marked as intentionally having no location (geo_confirmed_none=1)."""
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM photos"
+            " WHERE geo_confirmed_none = 1"
             "   AND (flickr_deleted IS NULL OR flickr_deleted = 0)"
         ).fetchone()
         return row["n"] if row else 0
