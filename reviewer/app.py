@@ -794,7 +794,7 @@ def map_view() -> str:
         row = (
             db()
             .conn.execute(
-                "SELECT latitude, longitude FROM photos WHERE id = ? AND latitude IS NOT NULL",
+                "SELECT latitude, longitude FROM photos WHERE id = ? AND latitude IS NOT NULL AND longitude IS NOT NULL",
                 (photo_id_param,),
             )
             .fetchone()

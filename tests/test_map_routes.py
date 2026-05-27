@@ -282,18 +282,17 @@ class TestMapPhotoIdParam:
     def test_highlight_id_is_null_when_no_photo_id(self, client_geo):
         c, *_ = client_geo
         html = c.get("/map").data.decode()
-        assert "highlightId" in html
-        assert "null" in html
+        assert "highlightId = null" in html
 
     def test_falls_back_to_average_when_photo_has_no_coords(self, client_geo):
         c, p1, p2, p3, p4, _ = client_geo
         # p4 has no latitude/longitude
         html = c.get(f"/map?photo_id={p4}").data.decode()
-        assert "null" in html  # highlight_id falls back to None → null
+        assert "highlightId = null" in html  # highlight_id falls back to None → null
 
     def test_falls_back_gracefully_when_photo_id_missing(self, client_geo):
         c, *_ = client_geo
         resp = c.get("/map?photo_id=99999")
         assert resp.status_code == 200
         html = resp.data.decode()
-        assert "null" in html  # highlight_id = None → null
+        assert "highlightId = null" in html  # highlight_id = None → null
