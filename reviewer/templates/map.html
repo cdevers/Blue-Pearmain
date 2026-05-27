@@ -116,10 +116,12 @@ const _markerById = {};   // photo id (number) → Leaflet marker; rebuilt on ea
 const highlightId = {{ highlight_id | default(none) | tojson }};   // null or integer from backend
 map.addLayer(markers);   // added once; reloadMarkers only calls clearLayers()
 
+let _highlightDone = false;
 function tryHighlight() {
-  if (!highlightId) return;
+  if (!highlightId || _highlightDone) return;
   const marker = _markerById[highlightId];
   if (!marker) return;
+  _highlightDone = true;
   markers.zoomToShowLayer(marker, () => marker.openPopup());
 }
 
@@ -167,6 +169,7 @@ function plotPhotos(photos, requestId) {
 function reloadMarkers() {
   const requestId = ++_currentRequest;
   markers.clearLayers();
+  // Clear by deleting keys (not reassignment) so any closures holding the ref stay valid
   Object.keys(_markerById).forEach(k => delete _markerById[k]);
   document.getElementById('map-photo-count').textContent = '';
   fetch(buildMapUrl())

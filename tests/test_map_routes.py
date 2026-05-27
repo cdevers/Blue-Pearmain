@@ -312,12 +312,15 @@ class TestMapHighlightJS:
     def test_marker_by_id_cleared_on_reload(self, client_geo):
         c, *_ = client_geo
         html = c.get("/map").data.decode()
-        assert "_markerById" in html
-        # clearing pattern uses delete or reassignment
-        assert "delete _markerById" in html or "Object.keys(_markerById)" in html
+        assert "Object.keys(_markerById).forEach(k => delete _markerById[k])" in html
 
     def test_try_highlight_called_after_plot(self, client_geo):
         c, *_ = client_geo
         html = c.get("/map").data.decode()
         # tryHighlight() is called inside plotPhotos after markers are added
         assert "tryHighlight()" in html
+
+    def test_highlight_done_guard_present(self, client_geo):
+        c, *_ = client_geo
+        html = c.get("/map").data.decode()
+        assert "_highlightDone" in html
