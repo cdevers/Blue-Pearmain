@@ -116,6 +116,13 @@ const _markerById = {};   // photo id (number) → Leaflet marker; rebuilt on ea
 const highlightId = {{ highlight_id | default(none) | tojson }};   // null or integer from backend
 map.addLayer(markers);   // added once; reloadMarkers only calls clearLayers()
 
+function tryHighlight() {
+  if (!highlightId) return;
+  const marker = _markerById[highlightId];
+  if (!marker) return;
+  markers.zoomToShowLayer(marker, () => marker.openPopup());
+}
+
 function esc(s) {
   return String(s)
     .replace(/&/g, '&amp;')
@@ -150,14 +157,17 @@ function plotPhotos(photos, requestId) {
       </div>
     `, { maxWidth: 200 });
     markers.addLayer(marker);
+    _markerById[p.id] = marker;
   });
   document.getElementById('map-photo-count').textContent =
     photos.length === 1 ? '1 photo' : `${photos.length} photos`;
+  tryHighlight();
 }
 
 function reloadMarkers() {
   const requestId = ++_currentRequest;
   markers.clearLayers();
+  Object.keys(_markerById).forEach(k => delete _markerById[k]);
   document.getElementById('map-photo-count').textContent = '';
   fetch(buildMapUrl())
     .then(r => r.json())
