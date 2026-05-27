@@ -136,7 +136,7 @@ A new `sync_geo(db, dry_run, photo_ids)` function runs after the existing title/
 
 In this phase both cases create `non_conflict` proposals and require user confirmation. The asymmetry is documented for a future auto-apply phase.
 
-**Superseding:** Before creating a new proposal, any existing `pending` geo proposal for the same `(photo_id, field='geo_location')` is marked `superseded` — same pattern as the existing text field logic.
+**Superseding:** Because geo proposals carry explicit directionality, the supersede key is `(photo_id, field='geo_location', source, target)` — not just `(photo_id, field)`. A new flickr→photos proposal supersedes any existing pending flickr→photos proposal for that photo, but does **not** touch an existing photos→flickr proposal. This prevents the two opposing proposals in a divergence pair from accidentally cancelling each other out during a re-sync run.
 
 **Invocation:** `bp sync-metadata` (no new CLI flags needed). The `--photo-id` and `--dry-run` flags apply to `sync_geo` as well.
 
@@ -302,11 +302,11 @@ Request body:
 ## Testing
 
 - Migration: idempotency test for the `metadata_proposals` table recreation; `geo_confirmed_none` column exists after migration
-- `sync_geo()`: unit tests for all five detection cases (flickr-only, photos-only, diverge, agree, both-absent); threshold boundary at `GEO_DIVERGENCE_THRESHOLD_M - 1` m and `GEO_DIVERGENCE_THRESHOLD_M + 1` m; verify `distance_m` is stored in divergence proposals; verify `geo_confirmed_none = 1` photos are skipped
+- `sync_geo()`: unit tests for all five detection cases (flickr-only, photos-only, diverge, agree, both-absent); threshold boundary at `GEO_DIVERGENCE_THRESHOLD_M - 1` m and `GEO_DIVERGENCE_THRESHOLD_M + 1` m; verify `distance_m` is stored in divergence proposals; verify `geo_confirmed_none = 1` photos are skipped; verify supersede uses `(photo_id, field, source, target)` key — a re-sync of a flickr→photos proposal does not supersede a photos→flickr proposal for the same photo
 - `apply_geo_proposal()`: mock flickr_client and photoscript; assert correct call for flickr target and photos target; assert `distance_m` not required for application (apply uses `lat`/`lon` only)
 - `set_location()`: mock API call; assert `FlickrApiError` on failure
 - Library filter: route test with a mix of geotagged, ungeotagged, and confirmed-none photos
-- `/api/geo_confirm_none`: set and clear; verify proposal cancellation on set; verify bulk confirmation prompt threshold (>10 photos) is enforced client-side
+- `/api/geo_confirm_none`: set and clear; verify proposal cancellation on set; verify bulk confirmation prompt threshold (>10 photos) is enforced client-side; **state-transition tests** — explicitly cover: `missing-unreviewed → intentionally-none` (set), `intentionally-none → missing-unreviewed` (clear), `set → clear → set` round-trip; assert proposals are cancelled on set and not recreated until next sync run
 - Map `?photo_id=`: ✓ tested in #146
 
 ---
@@ -318,3 +318,15 @@ Request body:
 - Batch geo editing from the library (no location picker UI yet)
 - iPhoto archive photos (not in Photos.app, no `uuid`)
 - Geo history / audit log
+
+---
+
+## Future directions (not planned)
+
+These are worth keeping in mind when implementing, but require no action now:
+
+**Threshold tiering** — the single `GEO_DIVERGENCE_THRESHOLD_M` constant is intentional. A future phase could introduce tiers (e.g. <100 m ignore, 100 m–1 km low-confidence, >100 km bad-geotag alarm) by replacing the constant with a small lookup. The current code should not bake `1000` inline — the named constant is the only change needed to support tiering later.
+
+**Coordinate provenance** — the system is naturally heading toward `coords_source` (`flickr | photos | manual`) and `coords_updated_at` columns on `photos`. Not needed for this phase, but worth not painting into a corner (e.g. avoid collapsing source identity into proposal state).
+
+**Geo diff card** — as geo proposals grow richer than text proposals (distance delta, directionality, map preview), a dedicated rendering component in the proposals UI will be cleaner than stretching the generic proposal row template. This phase can share the existing renderer; a follow-on can extract the component once the pattern is clear.
