@@ -9,7 +9,10 @@ import pytest
 
 
 def _fresh_db_up_to_023() -> sqlite3.Connection:
-    """Create an in-memory DB that looks like a post-023 installation."""
+    """Create an in-memory DB that looks like a post-023 installation.
+
+    Includes all indexes from migrate_007, migrate_010, and migrate_023.
+    """
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     conn.executescript("""
@@ -51,6 +54,21 @@ def _fresh_db_up_to_023() -> sqlite3.Connection:
             resolution_note         TEXT,
             batch_id                INTEGER REFERENCES bulk_batches(id)
         );
+        -- Indexes from migrate_007 and later migrations
+        CREATE INDEX idx_proposals_photo
+            ON metadata_proposals(photo_id);
+        CREATE INDEX idx_proposals_pending
+            ON metadata_proposals(status)
+            WHERE status = 'pending';
+        CREATE INDEX idx_proposals_field_target
+            ON metadata_proposals(field, target, status)
+            WHERE status = 'pending';
+        CREATE UNIQUE INDEX idx_proposals_identity
+            ON metadata_proposals(photo_id, field, proposed_value, target, source)
+            WHERE status = 'pending';
+        CREATE INDEX idx_proposals_batch
+            ON metadata_proposals(batch_id)
+            WHERE batch_id IS NOT NULL;
         -- Seed one existing proposal row
         INSERT INTO photos (uuid) VALUES ('test-uuid-1');
         INSERT INTO metadata_proposals (photo_id, field, source, target, conflict_type, created_at)
@@ -139,3 +157,49 @@ class TestMigrate024:
             "SELECT name FROM schema_migrations WHERE name='migrate_024_geo_sync'"
         ).fetchone()
         assert row is not None
+
+    def test_proposal_indexes_recreated(self):
+        """Verify all five indexes are preserved after migration.
+
+        The migration recreates the metadata_proposals table, which requires
+        manually recreating all its indexes. This test ensures we don't
+        accidentally drop any of them.
+        """
+        conn = _fresh_db_up_to_023()
+        # Get indexes before migration
+        before_idx_rows = conn.execute("PRAGMA index_list(metadata_proposals)").fetchall()
+        before_indexes = {row[1] for row in before_idx_rows}
+        assert len(before_indexes) == 5, (
+            f"Expected 5 pre-migration indexes, got {len(before_indexes)}: {before_indexes}"
+        )
+
+        _run_migration(conn)
+
+        # Get indexes after migration
+        after_idx_rows = conn.execute("PRAGMA index_list(metadata_proposals)").fetchall()
+        after_indexes = {row[1] for row in after_idx_rows}
+
+        # All five indexes must exist after migration
+        expected_indexes = {
+            "idx_proposals_photo",
+            "idx_proposals_pending",
+            "idx_proposals_field_target",
+            "idx_proposals_identity",
+            "idx_proposals_batch",
+        }
+        assert after_indexes == expected_indexes, (
+            f"Index mismatch. Expected {expected_indexes}, got {after_indexes}"
+        )
+
+        # Verify the unique constraint still works by inserting a non-duplicate row
+        # and checking that a true duplicate (with non-NULL proposed_value) fails
+        conn.execute(
+            "INSERT INTO metadata_proposals (photo_id, field, proposed_value, source, target, conflict_type, created_at)"
+            " VALUES (1, 'title', 'Unique Value', 'flickr', 'photos', 'non_conflict', '2026-01-02T00:00:00')"
+        )
+        # Try to insert the same (photo_id, field, proposed_value, source, target) tuple again
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO metadata_proposals (photo_id, field, proposed_value, source, target, conflict_type, created_at, status)"
+                " VALUES (1, 'title', 'Unique Value', 'flickr', 'photos', 'non_conflict', '2026-01-03T00:00:00', 'pending')"
+            )

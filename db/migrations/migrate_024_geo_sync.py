@@ -47,8 +47,16 @@ def _now_iso() -> str:
 
 
 def run_on_conn(conn: sqlite3.Connection) -> None:
-    """Run migration on an existing connection (used by tests and run())."""
-    conn.row_factory = sqlite3.Row
+    """Run migration on an existing connection (used by tests and run()).
+
+    Caller is responsible for setting conn.row_factory and enabling
+    PRAGMA foreign_keys if needed (run() and tests both do this).
+    We set it here defensively to avoid subtle bugs if called from contexts
+    that forget to set it beforehand.
+    """
+    if conn.row_factory is None:
+        conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
 
     # Idempotency check
     try:
@@ -109,7 +117,26 @@ def run_on_conn(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE metadata_proposals")
     conn.execute("ALTER TABLE metadata_proposals_new RENAME TO metadata_proposals")
 
-    # Recreate indexes
+    # Recreate indexes (all must match the originals from migrate_007 and migrate_023)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_proposals_photo
+        ON metadata_proposals(photo_id)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_proposals_pending
+        ON metadata_proposals(status)
+        WHERE status = 'pending'
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_proposals_field_target
+        ON metadata_proposals(field, target, status)
+        WHERE status = 'pending'
+    """)
+    conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_proposals_identity
+        ON metadata_proposals(photo_id, field, proposed_value, target, source)
+        WHERE status = 'pending'
+    """)
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_proposals_batch
         ON metadata_proposals(batch_id)
@@ -125,25 +152,13 @@ def run_on_conn(conn: sqlite3.Connection) -> None:
 
 def run(db_path: str, dry_run: bool = False) -> None:
     conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-
-    try:
-        row = conn.execute(
-            "SELECT id FROM schema_migrations WHERE name = ?", (MIGRATION_NAME,)
-        ).fetchone()
-        if row is not None:
-            print("  Skipped:  migration already applied")
-            conn.close()
-            return
-    except Exception:
-        pass
 
     if dry_run:
         print("  [dry-run] Would add geo columns to photos and recreate metadata_proposals")
         conn.close()
         return
 
+    # Idempotency check is performed inside run_on_conn()
     run_on_conn(conn)
     conn.close()
     print("  Applied:  migrate_024_geo_sync")
