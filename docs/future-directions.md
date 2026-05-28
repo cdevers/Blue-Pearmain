@@ -94,7 +94,7 @@ These ideas came out of studying [Iris Photos](https://irisphotos.app/) (launche
 
 The map currently shows all geotagged photos as independent dots. A "Photo Trails" mode would connect photos chronologically — within a single day, or within a user-selected date range — drawing a path across the map that shows where you went and in what order. Clicking a segment would show the photos taken along it. This is a natural extension of the existing Leaflet map and the temporal filter already present. Exploratory value is high: it's one thing to see *where* you took photos; it's another to see the *journey*.
 
-### Person birthdays and birthday-aware filtering ([#152](https://github.com/cdevers/Blue-Pearmain/issues/152)) `size:M` · [spec](superpowers/specs/2026-05-27-person-birthdays-152.md)
+### Person birthdays and birthday-aware filtering ([#152](https://github.com/cdevers/Blue-Pearmain/issues/152)) `size:M` · [spec](superpowers/specs/2026-05-27-person-birthdays-152.md) · ✓ done
 
 Storing a known birthday for named people (in a `people` table or similar) enables several useful features:
 - Display age-at-time in the photo detail view ("Chris, age 8")

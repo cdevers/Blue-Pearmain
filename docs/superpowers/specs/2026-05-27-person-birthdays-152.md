@@ -1,6 +1,6 @@
 # Spec: Person birthdays — store, display age-at-time, birthday filtering (#152)
 
-_Status: spec — not yet implemented_
+_Status: ✓ done — shipped 7977dce (2026-05-27)_
 
 ---
 
