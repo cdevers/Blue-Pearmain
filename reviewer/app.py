@@ -857,6 +857,7 @@ class SharedFilters(TypedDict):
     person: str
     status: str
     expand: str
+    tag: str  # "" when absent; whitespace-stripped
 
 
 # Valid status values — mirrors _STATUS_STATES in db.py
@@ -866,7 +867,7 @@ _VALID_STATUSES: frozenset[str] = frozenset(
 
 
 def normalize_shared_filters() -> SharedFilters:
-    """Parse and normalize the five shared filter params from request.args.
+    """Parse and normalize the six shared filter params from request.args.
 
     Single normalization entry point for both library() and map_view().
     Centralizes: int parsing, year-bound swap, status validation, whitespace
@@ -897,6 +898,7 @@ def normalize_shared_filters() -> SharedFilters:
         person=(request.args.get("person") or "").strip(),
         status=status,
         expand=(request.args.get("expand") or "").strip(),
+        tag=(request.args.get("tag") or "").strip(),
     )
 
 

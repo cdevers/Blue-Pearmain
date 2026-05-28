@@ -213,6 +213,7 @@ class TestNormalizeSharedFilters:
         assert f["person"] == ""
         assert f["status"] == ""
         assert f["expand"] == ""
+        assert f["tag"] == ""
 
     def test_unknown_status_becomes_empty(self):
         from reviewer.app import app, normalize_shared_filters
@@ -481,3 +482,36 @@ class TestTagNames:
         assert "" not in result
         assert "   " not in result
         assert result == ["boston"]
+
+
+# ── normalize_shared_filters() — tag field ────────────────────────────────────
+
+
+class TestNormalizeSharedFiltersTag:
+    def test_tag_present(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/?tag=boston"):
+            f = normalize_shared_filters()
+        assert f["tag"] == "boston"
+
+    def test_tag_whitespace_stripped(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/?tag=+boston+"):
+            f = normalize_shared_filters()
+        assert f["tag"] == "boston"
+
+    def test_tag_absent_gives_empty_string(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/"):
+            f = normalize_shared_filters()
+        assert f["tag"] == ""
+
+    def test_tag_empty_string_stays_empty(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/?tag="):
+            f = normalize_shared_filters()
+        assert f["tag"] == ""
