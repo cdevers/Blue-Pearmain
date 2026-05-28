@@ -128,6 +128,21 @@ class TestYearRangeFilter:
         assert p19 in ids
         assert p23 in ids
 
+    def test_response_ordered_by_date(self, client_years):
+        c, p16, p19, p23, _ = client_years
+        resp = c.get("/api/map-photos")
+        photos = resp.get_json()
+        dates = [p["date"] for p in photos if p["date"]]
+        assert dates == sorted(dates), "API must return photos in date_taken order"
+
+    def test_null_date_photos_present_as_dots(self, client_years):
+        # Photos with NULL date_taken must appear in the response (valid map dots)
+        c, p16, p19, p23, db = client_years
+        p_nodate = db.upsert_photo(_photo(99, latitude=35.7, longitude=139.7))
+        resp = c.get("/api/map-photos")
+        ids = _ids(resp)
+        assert p_nodate in ids, "NULL date_taken photo must appear as a map dot"
+
     def test_non_numeric_year_ignored(self, client_years):
         c, p16, p19, p23, _ = client_years
         resp = c.get("/api/map-photos?year_from=abc&year_to=xyz")
@@ -274,7 +289,13 @@ def api_map_photos() -> Response:
             "       p.date_taken, p.flickr_id, p.privacy_state "
             "FROM photos p "
             f"WHERE p.latitude IS NOT NULL AND p.longitude IS NOT NULL "
-            f"AND p.flickr_deleted = 0{extra_where}",
+            f"AND p.flickr_deleted = 0{extra_where} "
+            "ORDER BY p.date_taken, p.id",
+            # NOTE: ORDER BY date_taken, id ensures deterministic ordering for trail/animation.
+            # Do NOT add a date_taken IS NOT NULL filter here — photos with NULL dates are valid
+            # map dots and must appear in the response; they are excluded from trail/animation
+            # client-side (plotTrail and animatePOC both filter .date before using).
+            # The secondary sort on p.id breaks ties so reloads never jitter.
             where_params,
         )
         .fetchall()
@@ -700,6 +721,9 @@ New:
   font-size: 11px;
   color: #1a5fbf;
   white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .map-chip-anim {
   background: #fff0d0;
@@ -1053,12 +1077,15 @@ New opening:
 function animatePOC(photos) {
   const privacySel = document.getElementById('map-privacy-select').value;
   const PUBLIC_STATES = new Set(['approved_public', 'already_public']);
-  let pts = photos.filter(p => p.lat != null && p.lon != null);
+  // Keep only geotagged photos with a date (same exclusion as plotTrail)
+  let pts = photos.filter(p => p.lat != null && p.lon != null && p.date);
   if (privacySel === 'public') {
     pts = pts.filter(p => PUBLIC_STATES.has(p.privacy_state));
   } else if (privacySel === 'private') {
     pts = pts.filter(p => !PUBLIC_STATES.has(p.privacy_state));
   }
+  // Sort deterministically by date then id — matches ORDER BY in the API and plotTrail sort
+  pts.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id);
   if (pts.length < 2) return;  // button was disabled; safety guard
 ```
 
