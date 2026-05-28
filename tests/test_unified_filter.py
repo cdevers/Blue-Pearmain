@@ -180,3 +180,138 @@ class TestMapStatusFilter:
         c, p_pub, p_friend, p_priv, p_pend = client_map_status
         resp = c.get("/api/map-photos")
         assert len(resp.get_json()) == 4
+
+
+# ── normalize_shared_filters() ─────────────────────────────────────────────
+
+
+class TestNormalizeSharedFilters:
+    def test_year_swap_produces_canonical_order(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/?year_from=2025&year_to=2010"):
+            f = normalize_shared_filters()
+        assert f["year_from"] == 2010
+        assert f["year_to"] == 2025
+
+    def test_invalid_album_id_becomes_none(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/?album_id=notanint"):
+            f = normalize_shared_filters()
+        assert f["album_id"] is None
+
+    def test_empty_request_gives_clean_defaults(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/"):
+            f = normalize_shared_filters()
+        assert f["time_pattern"] == ""
+        assert f["year_from"] is None
+        assert f["year_to"] is None
+        assert f["album_id"] is None
+        assert f["person"] == ""
+        assert f["status"] == ""
+        assert f["expand"] == ""
+
+    def test_unknown_status_becomes_empty(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/?status=bogus"):
+            f = normalize_shared_filters()
+        assert f["status"] == ""
+
+    def test_single_year_bound_preserved(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/?year_from=2018"):
+            f = normalize_shared_filters()
+        assert f["year_from"] == 2018
+        assert f["year_to"] is None
+
+
+# ── /library year_from / year_to ──────────────────────────────────────────
+
+
+@pytest.fixture()
+def client_lib_years():
+    """DB with library photos in 2016, 2019, 2023."""
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(Path(tmp) / "test.db")
+        p16 = db.upsert_photo(
+            _photo(60, date_taken="2016-08-15T10:00:00", privacy_state="approved_public")
+        )
+        p19 = db.upsert_photo(
+            _photo(61, date_taken="2019-12-20T10:00:00", privacy_state="needs_review")
+        )
+        p23 = db.upsert_photo(
+            _photo(62, date_taken="2023-07-04T10:00:00", privacy_state="keep_private")
+        )
+        app_module._db = db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test"
+        with app_module.app.test_client() as c:
+            yield c, p16, p19, p23
+        app_module._db = None
+
+
+def _lib_ids(resp) -> set[int]:
+    import re
+
+    body = resp.data.decode()
+    return {int(m) for m in re.findall(r'data-id="(\d+)"', body)}
+
+
+class TestLibraryYearFilter:
+    def test_year_from_excludes_earlier(self, client_lib_years):
+        c, p16, p19, p23 = client_lib_years
+        resp = c.get("/library?year_from=2019")
+        assert resp.status_code == 200
+        ids = _lib_ids(resp)
+        assert p16 not in ids
+        assert p19 in ids
+        assert p23 in ids
+
+    def test_year_to_excludes_later(self, client_lib_years):
+        c, p16, p19, p23 = client_lib_years
+        resp = c.get("/library?year_to=2019")
+        ids = _lib_ids(resp)
+        assert p16 in ids
+        assert p19 in ids
+        assert p23 not in ids
+
+    def test_year_range_both_bounds(self, client_lib_years):
+        c, p16, p19, p23 = client_lib_years
+        resp = c.get("/library?year_from=2019&year_to=2019")
+        ids = _lib_ids(resp)
+        assert p16 not in ids
+        assert p19 in ids
+        assert p23 not in ids
+
+    def test_year_swap_when_from_greater_than_to(self, client_lib_years):
+        c, p16, p19, p23 = client_lib_years
+        resp = c.get("/library?year_from=2023&year_to=2016")
+        ids = _lib_ids(resp)
+        assert p16 in ids
+        assert p19 in ids
+        assert p23 in ids
+
+    def test_year_does_not_override_explicit_date_from(self, client_lib_years):
+        c, p16, p19, p23 = client_lib_years
+        resp = c.get("/library?date_from=2020-01-01&year_from=2016")
+        ids = _lib_ids(resp)
+        assert p16 not in ids
+        assert p19 not in ids
+        assert p23 in ids
+
+    def test_nonnumeric_year_ignored(self, client_lib_years):
+        c, p16, p19, p23 = client_lib_years
+        resp = c.get("/library?year_from=abc&year_to=xyz")
+        assert resp.status_code == 200
+        assert len(_lib_ids(resp)) == 3
+
+    def test_out_of_range_year_ignored(self, client_lib_years):
+        c, p16, p19, p23 = client_lib_years
+        resp = c.get("/library?year_from=1700&year_to=3000")
+        assert resp.status_code == 200
+        assert len(_lib_ids(resp)) == 3

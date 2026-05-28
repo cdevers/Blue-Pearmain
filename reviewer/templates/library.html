@@ -423,7 +423,7 @@
       <input type="text" name="person" value="{{ filters.person }}"
              list="person-datalist" placeholder="person name…" style="width:200px">
       <datalist id="person-datalist">
-        {% for name in person_list %}
+        {% for name in person_names %}
         <option value="{{ name }}">
         {% endfor %}
       </datalist>

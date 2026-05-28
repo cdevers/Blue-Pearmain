@@ -29,7 +29,7 @@ import sys
 import threading
 from datetime import date as _date
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import yaml
 from flask import (
@@ -837,6 +837,69 @@ def api_album_delete(album_id: int) -> _JsonResp:
     return jsonify({"ok": True})
 
 
+def _safe_year(key: str) -> int | None:
+    """Parse a year from request.args[key]; return None if missing/invalid/out-of-range."""
+    raw = request.args.get(key)
+    if not raw:
+        return None
+    try:
+        y = int(raw)
+    except ValueError:
+        return None
+    return y if 1800 <= y <= 2099 else None
+
+
+class SharedFilters(TypedDict):
+    time_pattern: str
+    year_from: int | None
+    year_to: int | None
+    album_id: int | None
+    person: str
+    status: str
+    expand: str
+
+
+# Valid status values — mirrors _STATUS_STATES in db.py
+_VALID_STATUSES: frozenset[str] = frozenset(
+    ["public", "friends", "family", "friends_family", "private", "pending"]
+)
+
+
+def normalize_shared_filters() -> SharedFilters:
+    """Parse and normalize the five shared filter params from request.args.
+
+    Single normalization entry point for both library() and map_view().
+    Centralizes: int parsing, year-bound swap, status validation, whitespace
+    stripping, and empty-string normalization. Call within a Flask request
+    context.
+    """
+    year_from = _safe_year("year_from")
+    year_to = _safe_year("year_to")
+    if year_from is not None and year_to is not None and year_from > year_to:
+        year_from, year_to = year_to, year_from
+
+    album_id: int | None = None
+    raw_album = (request.args.get("album_id") or "").strip()
+    if raw_album:
+        try:
+            album_id = int(raw_album)
+        except ValueError:
+            pass
+
+    raw_status = (request.args.get("status") or "").strip()
+    status = raw_status if raw_status in _VALID_STATUSES else ""
+
+    return SharedFilters(
+        time_pattern=(request.args.get("time_pattern") or "").strip(),
+        year_from=year_from,
+        year_to=year_to,
+        album_id=album_id,
+        person=(request.args.get("person") or "").strip(),
+        status=status,
+        expand=(request.args.get("expand") or "").strip(),
+    )
+
+
 @app.route("/map")
 def map_view() -> str:
     photo_id_param = request.args.get("photo_id", type=int)
@@ -909,16 +972,6 @@ def api_map_photos() -> Response:
     time_expand = 2 if request.args.get("expand") == "1" else 0
 
     # ── New filter params ────────────────────────────────────────────────
-    def _safe_year(key: str) -> int | None:
-        raw = request.args.get(key)
-        if not raw:
-            return None
-        try:
-            y = int(raw)
-        except ValueError:
-            return None
-        return y if 1800 <= y <= 2099 else None
-
     year_from = _safe_year("year_from")
     year_to = _safe_year("year_to")
     if year_from is not None and year_to is not None and year_from > year_to:
@@ -1066,22 +1119,29 @@ def library() -> str:
 
     date_from = request.args.get("date_from") or None
     date_to = request.args.get("date_to") or None
-    album_id_raw = request.args.get("album_id")
-    album_id = int(album_id_raw) if album_id_raw else None
     tag = request.args.get("tag") or None
-    status = request.args.get("status") or None
     untitled_only = request.args.get("untitled") == "1"
     no_location = request.args.get("no_location") == "1"
     confirmed_none = request.args.get("confirmed_none") == "1"
-    time_pattern = request.args.get("time_pattern") or None
-    time_expand = 2 if request.args.get("expand") == "1" else 0
+
+    sf = normalize_shared_filters()
+    album_id = sf["album_id"]
+    person: str | None = sf["person"] or None
+    status: str | None = sf["status"] or None
+    time_pattern: str | None = sf["time_pattern"] or None
+    time_expand = 2 if sf["expand"] == "1" else 0
+
+    # Apply year→ISO date only if no explicit date_from/date_to was provided
+    if sf["year_from"] is not None and not date_from:
+        date_from = f"{sf['year_from']:04d}-01-01"
+    if sf["year_to"] is not None and not date_to:
+        date_to = f"{sf['year_to'] + 1:04d}-01-01T00:00:00"
 
     q = request.args.get("q", "").strip() or None
     country = request.args.get("country") or None
     state = request.args.get("state") or None
     city = request.args.get("city") or None
     neighborhood = request.args.get("neighborhood") or None
-    person = request.args.get("person") or None
     date_alias = request.args.get("date") or None
     if date_alias:
         date_from = date_from or date_alias
@@ -1174,7 +1234,7 @@ def library() -> str:
         total_pages=max(1, (total + per_page - 1) // per_page),
         current_album=current_album,
         location_tree=location_tree,
-        person_list=person_list,
+        person_names=person_list,
         no_location_count=no_location_count,
         confirmed_none_count=confirmed_none_count,
         filters={
@@ -1194,6 +1254,8 @@ def library() -> str:
             "city": city or "",
             "neighborhood": neighborhood or "",
             "person": person or "",
+            "year_from": sf["year_from"] if sf["year_from"] is not None else "",
+            "year_to": sf["year_to"] if sf["year_to"] is not None else "",
             "lat_min": f"{lat_min:.5f}" if lat_min is not None else "",
             "lat_max": f"{lat_max:.5f}" if lat_max is not None else "",
             "lon_min": f"{lon_min:.5f}" if lon_min is not None else "",
