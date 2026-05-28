@@ -424,3 +424,60 @@ class TestLibraryTemplateIntegration:
         assert "year_to=2019" in map_url
         assert "Alice" in map_url
         assert "status=public" in map_url
+
+
+# ── db.tag_names() ────────────────────────────────────────────────────────────
+
+
+@pytest.fixture()
+def db_tags():
+    """DB with two photos sharing a tag and one unique tag each."""
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(Path(tmp) / "test.db")
+        db.upsert_photo(_photo(80, photos_tags=["boston", "travel"]))
+        db.upsert_photo(_photo(81, photos_tags=["concert", "boston"]))
+        yield db
+
+
+@pytest.fixture()
+def db_tags_with_deleted():
+    """DB with one live photo and one flickr_deleted photo."""
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(Path(tmp) / "test.db")
+        db.upsert_photo(_photo(82, photos_tags=["boston"]))
+        p2 = db.upsert_photo(_photo(83, photos_tags=["deleted-tag"]))
+        db.conn.execute("UPDATE photos SET flickr_deleted = 1 WHERE id = ?", (p2,))
+        db.conn.commit()
+        yield db
+
+
+@pytest.fixture()
+def db_blank_tags():
+    """DB with a photo whose photos_tags contains blank entries."""
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(Path(tmp) / "test.db")
+        db.upsert_photo(_photo(84, photos_tags=["", "   ", "boston"]))
+        yield db
+
+
+class TestTagNames:
+    def test_returns_sorted_deduplicated_list(self, db_tags):
+        result = db_tags.tag_names()
+        assert result == ["boston", "concert", "travel"]
+
+    def test_excludes_flickr_deleted_photos(self, db_tags_with_deleted):
+        result = db_tags_with_deleted.tag_names()
+        assert "deleted-tag" not in result
+        assert "boston" in result
+
+    def test_returns_empty_when_no_tags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(Path(tmp) / "test.db")
+            db.upsert_photo(_photo(85))
+            assert db.tag_names() == []
+
+    def test_excludes_blank_values(self, db_blank_tags):
+        result = db_blank_tags.tag_names()
+        assert "" not in result
+        assert "   " not in result
+        assert result == ["boston"]

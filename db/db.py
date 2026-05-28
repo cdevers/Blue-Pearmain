@@ -1284,6 +1284,25 @@ class Database:
         ).fetchall()
         return [r["value"] for r in rows]
 
+    def tag_names(self) -> list[str]:
+        """Return distinct tag values from photos_tags JSON arrays, sorted alphabetically.
+
+        Excludes blank/whitespace-only values that can appear when Apple Photos
+        exports empty keyword entries. Source is photos_tags only (human-readable
+        Apple Photos keywords); flickr_tags includes machine tags and is not used
+        for the datalist.
+        """
+        rows = self.conn.execute(
+            "SELECT DISTINCT j.value "
+            "FROM photos p, json_each(p.photos_tags) j "
+            "WHERE p.photos_tags IS NOT NULL "
+            "  AND p.photos_tags NOT IN ('null', '[]', '') "
+            "  AND p.flickr_deleted = 0 "
+            "  AND trim(j.value) != '' "
+            "ORDER BY j.value"
+        ).fetchall()
+        return [r["value"] for r in rows]
+
     def get_all_albums(self) -> list[dict]:
         """Return all non-deleted albums ordered by name."""
         rows = self.conn.execute(
