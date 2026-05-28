@@ -315,3 +315,32 @@ class TestLibraryYearFilter:
         resp = c.get("/library?year_from=1700&year_to=3000")
         assert resp.status_code == 200
         assert len(_lib_ids(resp)) == 3
+
+
+# ── map_view() initial_filters ────────────────────────────────────────────
+
+
+@pytest.fixture()
+def client_map_view():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(Path(tmp) / "test.db")
+        app_module._db = db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test"
+        with app_module.app.test_client() as c:
+            yield c
+        app_module._db = None
+
+
+class TestMapViewInitialFilters:
+    @pytest.mark.xfail(strict=False, reason="pre-populates form via shared macro added in Task 7")
+    def test_map_view_passes_initial_filters_to_template(self, client_map_view):
+        c = client_map_view
+        resp = c.get(
+            "/map?time_pattern=month:08&year_from=2015&year_to=2019&person=Marcin&status=public"
+        )
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert 'value="2015"' in body
+        assert 'value="2019"' in body
+        assert 'value="Marcin"' in body

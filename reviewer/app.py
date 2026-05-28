@@ -954,6 +954,17 @@ def map_view() -> str:
     )
     person_names = [r[0] for r in person_names_rows]
 
+    sf = normalize_shared_filters()
+    initial_filters = {
+        "time_pattern": sf["time_pattern"],
+        "year_from": sf["year_from"] if sf["year_from"] is not None else "",
+        "year_to": sf["year_to"] if sf["year_to"] is not None else "",
+        "album_id": sf["album_id"],
+        "person": sf["person"],
+        "status": sf["status"],
+        "expand": sf["expand"],
+    }
+
     return render_template(
         "map.html",
         center_lat=center_lat,
@@ -962,6 +973,7 @@ def map_view() -> str:
         birthday_people=db().get_person_birthdays(),
         albums=albums,
         person_names=person_names,
+        initial_filters=initial_filters,
     )
 
 
