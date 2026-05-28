@@ -89,6 +89,9 @@
   <label id="map-expand-label" style="display:none;align-items:center;gap:5px">
     <input type="checkbox" id="map-expand-cb"> ±2 days
   </label>
+  <label id="map-trail-label" style="display:none;align-items:center;gap:5px">
+    <input type="checkbox" id="map-trail-cb"> Show trail
+  </label>
   <span id="map-photo-count" style="font-size:12px;color:var(--muted)"></span>
   <button type="button" id="map-draw-btn" onclick="toggleDraw()"
           class="map-btn" style="margin-left:auto">Draw selection</button>
@@ -118,6 +121,8 @@ const _markerById = {};   // photo id (number) → Leaflet marker; rebuilt on ea
 const highlightId = {{ highlight_id | default(none) | tojson }};   // null or integer from backend
 map.addLayer(markers);   // added once; reloadMarkers only calls clearLayers()
 
+let _lastPhotos = [];    // last-fetched photo array; used to redraw trail without a network round-trip
+let _trailLayer  = null; // current L.polyline, or null
 let _highlightDone = false;
 function tryHighlight() {
   if (!highlightId || _highlightDone) return;
@@ -125,6 +130,21 @@ function tryHighlight() {
   if (!marker) return;
   _highlightDone = true;
   markers.zoomToShowLayer(marker, () => marker.openPopup());
+}
+
+function plotTrail(photos) {
+  if (_trailLayer) { map.removeLayer(_trailLayer); _trailLayer = null; }
+  if (!document.getElementById('map-trail-cb').checked) return;
+  const sorted = photos
+    .filter(p => p.lat != null && p.lon != null && p.date)
+    .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  if (sorted.length < 2) return;
+  _trailLayer = L.polyline(sorted.map(p => [p.lat, p.lon]), {
+    color: '#e06820',
+    weight: 2,
+    opacity: 0.65,
+  }).addTo(map);
+  _trailLayer.bringToBack();
 }
 
 function esc(s) {
@@ -165,6 +185,8 @@ function plotPhotos(photos, requestId) {
   });
   document.getElementById('map-photo-count').textContent =
     photos.length === 1 ? '1 photo' : `${photos.length} photos`;
+  _lastPhotos = photos;
+  plotTrail(photos);
   tryHighlight();
 }
 
@@ -186,8 +208,19 @@ document.getElementById('map-time-select').addEventListener('change', function (
   const isHoliday = this.value.startsWith('holiday:');
   lbl.style.display = isHoliday ? 'flex' : 'none';
   if (!isHoliday) cb.checked = false;
+
+  const trailLbl = document.getElementById('map-trail-label');
+  const trailCb  = document.getElementById('map-trail-cb');
+  const isAnyPattern = !!this.value;
+  trailLbl.style.display = isAnyPattern ? 'flex' : 'none';
+  if (!isAnyPattern) {
+    trailCb.checked = false;
+    if (_trailLayer) { map.removeLayer(_trailLayer); _trailLayer = null; }
+  }
+
   reloadMarkers();
 });
+document.getElementById('map-trail-cb').addEventListener('change', () => plotTrail(_lastPhotos));
 document.getElementById('map-expand-cb').addEventListener('change', reloadMarkers);
 
 reloadMarkers();   // initial load
