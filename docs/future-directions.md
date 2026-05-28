@@ -84,6 +84,40 @@ Run `deduplicator --write` as part of the poller's regular cycle (or as a separa
 
 ---
 
+## Discovery and memory
+
+*Features that make BP a richer tool for exploring and revisiting the archive — not just managing it.*
+
+These ideas came out of studying [Iris Photos](https://irisphotos.app/) (launched 2026-05-27), which is doing similar work in the local-first photo library space. They are listed roughly in order of how concrete and near-term they feel.
+
+### Photo Trails — trip retracing on the map ([#151](https://github.com/cdevers/Blue-Pearmain/issues/151)) `size:M`
+
+The map currently shows all geotagged photos as independent dots. A "Photo Trails" mode would connect photos chronologically — within a single day, or within a user-selected date range — drawing a path across the map that shows where you went and in what order. Clicking a segment would show the photos taken along it. This is a natural extension of the existing Leaflet map and the temporal filter already present. Exploratory value is high: it's one thing to see *where* you took photos; it's another to see the *journey*.
+
+### Person birthdays and birthday-aware filtering
+
+Storing a known birthday for named people (in a `people` table or similar) enables several useful features:
+- Display age-at-time in the photo detail view ("Chris, age 8")
+- Filter the library or map by "photos taken on a person's birthday"
+- Filter by "photos where an identified person appears" for any named person
+- Eventually: "photos taken within a week of someone's birthday" for fuzzy milestone browsing
+
+Not immediate — needs a people schema that BP doesn't have yet — but a coherent direction worth designing for.
+
+### Approximate / fuzzy dates for historical photos
+
+Pre-digital or scanned photos often have only a year, or a decade, or "sometime in the 1970s." The DB currently treats `date_taken` as either a precise timestamp or NULL. A `date_precision` field (`exact`, `day`, `month`, `year`, `decade`, `unknown`) alongside a `date_approximate` flag would let BP represent and surface these photos without either lying about their date or discarding the approximate information entirely. Useful for iPhoto migrations and scanned film.
+
+### Command palette (⌘K) for the reviewer UI
+
+A keyboard-driven command palette — jump to photo, filter by person, open map, navigate to date — would meaningfully speed up the review workflow. BP's web UI is currently mouse-heavy; this would let power users drive it without reaching for the mouse. Relatively self-contained as a JS feature.
+
+### Native macOS / iOS client
+
+Iris ships native apps across Mac, iPhone, iPad, and Apple TV. BP's reviewer is a local web UI served over Flask, which works well enough for Mac and passably on iPad over LAN. A native client would give better platform integration (keyboard shortcuts, share sheets, Continuity Camera, widgets) but represents a much larger engineering surface. Not a current line of thinking — the web UI meets immediate needs — but worth noting as the project matures.
+
+---
+
 ## What we are intentionally *not* building
 
 These directions were considered and declined. Recording the reasoning here prevents re-litigating them later.
