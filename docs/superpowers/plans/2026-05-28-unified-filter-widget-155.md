@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> ⚠️ **Implementation note (2026-05-28):** Tasks 1 and 2 were implemented before the plan received external review — an error in the workflow. Tasks 1 (`_STATUS_STATES` refinement, commit `4844f06`) and 2 (`api_map_photos()` status filter, commit `a7c2cd8`) are **already done and tested** (1514 tests passing). External review of the full plan is happening now, before Tasks 3–8 are executed. If the reviewer identifies issues with Tasks 1–2, they will need to be addressed retroactively.
+
 **Goal:** Extract the five shared filter dimensions (time pattern, year range, album, person, privacy) into a Jinja macro used by both `/library` and `/map`; give both pages identical instant-apply behaviour and cross-page navigation that preserves filter state.
 
 **Architecture:** A new `_filter_bar.html` macro owns the canonical HTML for the five shared controls. `db.py`'s `_STATUS_STATES` dict is refined to give friends/family their own buckets. Both pages use `name=`-based form field access; `library.html` gains instant-apply JS (no Apply button); `map.html` collapses to a compact bar + collapsible panel; cross-page links carry all five shared params.
