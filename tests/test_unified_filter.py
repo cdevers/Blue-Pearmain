@@ -344,3 +344,84 @@ class TestMapViewInitialFilters:
         assert 'value="2015"' in body
         assert 'value="2019"' in body
         assert 'value="Marcin"' in body
+
+
+# ── Template integration: shared macro + library UI ───────────────────────
+
+
+@pytest.fixture()
+def client_template():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(Path(tmp) / "test.db")
+        db.upsert_photo(_photo(70, apple_persons=["Alice W"]))
+        db.upsert_album("uuid-t1", "Japan 2019")
+        app_module._db = db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test"
+        with app_module.app.test_client() as c:
+            yield c
+        app_module._db = None
+
+
+class TestLibraryTemplateIntegration:
+    def test_shared_macro_controls_in_library(self, client_template):
+        c = client_template
+        resp = c.get("/library")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert 'name="time_pattern"' in body
+        assert 'name="year_from"' in body
+        assert 'name="year_to"' in body
+        assert 'name="album_id"' in body
+        assert 'name="person"' in body
+        assert 'name="status"' in body
+
+    def test_library_has_no_apply_button(self, client_template):
+        c = client_template
+        resp = c.get("/library")
+        body = resp.data.decode()
+        assert "Apply filters" not in body
+
+    def test_library_has_view_on_map_link(self, client_template):
+        c = client_template
+        resp = c.get("/library?time_pattern=month:08&year_from=2015&person=Alice+W")
+        body = resp.data.decode()
+        assert "/map" in body
+        assert "time_pattern=month%3A08" in body or "time_pattern=month:08" in body
+        assert "year_from=2015" in body
+        assert "Alice" in body
+
+    def test_library_chip_row_present(self, client_template):
+        c = client_template
+        resp = c.get("/library")
+        body = resp.data.decode()
+        assert "lib-filter-chips" in body
+
+    def test_shared_macro_in_map(self, client_template):
+        c = client_template
+        resp = c.get("/map")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert 'name="time_pattern"' in body
+        assert 'name="status"' in body
+
+    def test_library_to_map_roundtrip_preserves_filters(self, client_template):
+        """View-on-map link from library carries all shared filter params."""
+        c = client_template
+        resp = c.get(
+            "/library?time_pattern=month:08&year_from=2015&year_to=2019"
+            "&person=Alice+W&status=public"
+        )
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        import re
+
+        map_links = re.findall(r'href="(/map[^"]*)"', body)
+        assert map_links, "No /map link found in library response"
+        # nav bar also has a bare /map link; find the View-on-map link with filter params
+        map_url = next((u for u in map_links if "time_pattern" in u), None)
+        assert map_url is not None, "No /map link with filter params found"
+        assert "year_from=2015" in map_url
+        assert "year_to=2019" in map_url
+        assert "Alice" in map_url
+        assert "status=public" in map_url
