@@ -96,6 +96,14 @@ The map currently shows all geotagged photos as independent dots. A "Photo Trail
 
 ### Person birthdays and birthday-aware filtering ([#152](https://github.com/cdevers/Blue-Pearmain/issues/152)) `size:M` · [spec](superpowers/specs/2026-05-27-person-birthdays-152.md) · ✓ done
 
+### Animated map trail — Indiana Jones-style route animation ([#153](https://github.com/cdevers/Blue-Pearmain/issues/153)) `size:L`
+
+Animate the photo trail so the route draws itself: a moving point traces the journey and leaves a growing line behind it. BP already has the data (#151 computes the ordered sequence); the question is rendering.
+
+Three phases: (1) in-browser Leaflet animation as proof-of-concept — an Animate button progressively draws the polyline with a moving icon, user screen-records; (2) headless Playwright + ffmpeg for automated MP4 export; (3) pure-Python raster rendering with OSM tiles + Pillow for full cinematic control.
+
+**Privacy**: the trail is just lat/lon — no faces — but thumbnail overlays must respect the privacy model. A public version filters to `approved_public`/`already_public` photos; a family version includes private photos for local/restricted sharing. Album membership is a natural scope boundary ("animate this album's photos").
+
 Storing a known birthday for named people (in a `people` table or similar) enables several useful features:
 - Display age-at-time in the photo detail view ("Chris, age 8")
 - Filter the library or map by "photos taken on a person's birthday"
