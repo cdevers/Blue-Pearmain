@@ -364,7 +364,7 @@
             {% if person != '_UNKNOWN_' %}
               <a href="{{ url_for('review', state=state, person=person) }}"
                  onclick="event.stopPropagation()"
-                 title="Review all photos of {{ person }}">{{ person }}</a>
+                 title="Review all photos of {{ person }}">{{ person }}</a>{% if person_ages.get(person) is not none %} <span style="color:var(--muted);font-size:11px">(age {{ person_ages[person] }})</span>{% endif %}
             {% else %}
               <span style="color:var(--muted)">unknown</span>
             {% endif %}

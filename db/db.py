@@ -751,6 +751,44 @@ class Database:
         self.conn.commit()
 
     # -----------------------------------------------------------------------
+    # Person birthdays
+    # -----------------------------------------------------------------------
+
+    def get_person_birthdays(self) -> dict[str, str]:
+        """Return {person_name: birthday} for all rows in person_birthdays.
+
+        birthday is stored as 'MM-DD' (recurring annual) or 'YYYY-MM-DD' (full known date).
+        Returns an empty dict if the table does not yet exist.
+        """
+        try:
+            rows = self.conn.execute(
+                "SELECT person_name, birthday FROM person_birthdays"
+            ).fetchall()
+            return {r["person_name"]: r["birthday"] for r in rows}
+        except Exception:
+            return {}
+
+    def set_person_birthday(self, person_name: str, birthday: str) -> None:
+        """Upsert a birthday for person_name.
+
+        birthday must be 'MM-DD' or 'YYYY-MM-DD'. No format validation here;
+        callers are responsible for validation.
+        """
+        now = _now_iso()
+        self.conn.execute(
+            """INSERT INTO person_birthdays (person_name, birthday, created_at, updated_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(person_name) DO UPDATE SET birthday=excluded.birthday, updated_at=excluded.updated_at""",
+            (person_name, birthday, now, now),
+        )
+        self.conn.commit()
+
+    def delete_person_birthday(self, person_name: str) -> None:
+        """Remove the birthday for person_name. No-op if absent."""
+        self.conn.execute("DELETE FROM person_birthdays WHERE person_name = ?", (person_name,))
+        self.conn.commit()
+
+    # -----------------------------------------------------------------------
     # Review queue queries
     # -----------------------------------------------------------------------
 
@@ -923,13 +961,25 @@ class Database:
             )
             params.extend([tag, tag])
         if time_pattern:
-            from db.time_patterns import parse_pattern
+            from db.time_patterns import parse_pattern, birthday_clause
 
-            years = self._distinct_years() if time_pattern.startswith("holiday:") else []
-            frag, frag_params = parse_pattern(time_pattern, time_expand, years)
-            if frag != "1=1":
-                clauses.append(frag)
-                params.extend(frag_params)
+            if time_pattern.startswith("birthday:"):
+                person_name = time_pattern[9:]
+                bday_rows = self.get_person_birthdays()
+                bday = bday_rows.get(person_name)
+                if bday:
+                    all_years = self._distinct_years()
+                    month, day = (int(x) for x in bday[-5:].split("-"))
+                    frag, frag_params = birthday_clause(month, day, time_expand, all_years)
+                    if frag != "1=1":
+                        clauses.append(frag)
+                        params.extend(frag_params)
+            else:
+                years = self._distinct_years() if time_pattern.startswith("holiday:") else []
+                frag, frag_params = parse_pattern(time_pattern, time_expand, years)
+                if frag != "1=1":
+                    clauses.append(frag)
+                    params.extend(frag_params)
 
         # #141 — text, location, person
         if q or country or state or city or neighborhood or person:

@@ -84,6 +84,13 @@
         <option value="holiday:thanksgiving">Thanksgiving (4th Thu Nov)</option>
         <option value="holiday:christmas">Christmas (Dec 25)</option>
       </optgroup>
+      {% if birthday_people %}
+      <optgroup label="Birthdays">
+        {% for name in birthday_people | sort %}
+        <option value="birthday:{{ name | e }}">{{ name }}'s birthday</option>
+        {% endfor %}
+      </optgroup>
+      {% endif %}
     </select>
   </label>
   <label id="map-expand-label" style="display:none;align-items:center;gap:5px">

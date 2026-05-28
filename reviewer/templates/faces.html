@@ -83,6 +83,36 @@
 .btn-policy:hover { border-color: var(--red); color: var(--red); }
 .btn-policy.active { border-color: var(--red); color: var(--red); background: rgba(229,115,115,0.08); }
 
+.birthday-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.birthday-row input[type="text"] {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 3px 7px;
+  font-size: 12px;
+  width: 120px;
+  background: var(--bg);
+  color: var(--text);
+}
+.birthday-row .btn-bday {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.birthday-row .btn-bday:hover { border-color: var(--accent); color: var(--accent); }
+.birthday-row .btn-bday-clear { color: var(--red); border-color: transparent; }
+.birthday-row .btn-bday-clear:hover { border-color: var(--red); }
+
 .unknown-row {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -188,6 +218,19 @@
           onclick="togglePersonPolicy(this)">
           {% if person_policies.get(person.person) == 'always_private' %}Remove policy{% else %}Always private{% endif %}
         </button>
+      </div>
+      <div class="birthday-row">
+        <span>🎂</span>
+        <input type="text" class="bday-input"
+               data-person="{{ person.person | e }}"
+               value="{{ birthdays.get(person.person, '') }}"
+               placeholder="MM-DD or YYYY-MM-DD"
+               title="Birthday for {{ person.person | e }}">
+        <button class="btn-bday" onclick="saveBirthday(this)">Save</button>
+        <button class="btn-bday btn-bday-clear"
+                onclick="clearBirthday(this)"
+                {% if not birthdays.get(person.person) %}style="display:none"{% endif %}>✕</button>
+        <span class="bday-status" style="font-size:11px;color:var(--muted)"></span>
       </div>
     </div>
     {% endfor %}
@@ -337,6 +380,45 @@ async function togglePersonPolicy(btn) {
 
   // Reload the page so the badge and button state reflect the new policy
   window.location.reload();
+}
+
+async function saveBirthday(btn) {
+  const row = btn.closest('.birthday-row');
+  const input = row.querySelector('.bday-input');
+  const status = row.querySelector('.bday-status');
+  const clearBtn = row.querySelector('.btn-bday-clear');
+  const person_name = input.dataset.person;
+  const birthday = input.value.trim();
+  if (!birthday) { clearBirthday(btn); return; }
+  const resp = await fetch('/api/person-birthday', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({person_name, birthday}),
+  });
+  const data = await resp.json();
+  if (!data.ok) {
+    status.textContent = data.error || 'Error';
+    status.style.color = 'var(--red)';
+  } else {
+    status.textContent = 'Saved';
+    status.style.color = 'var(--green)';
+    clearBtn.style.display = '';
+    setTimeout(() => { status.textContent = ''; }, 2000);
+  }
+}
+
+async function clearBirthday(btn) {
+  const row = btn.closest('.birthday-row');
+  const input = row.querySelector('.bday-input');
+  const status = row.querySelector('.bday-status');
+  const clearBtn = row.querySelector('.btn-bday-clear');
+  const person_name = input.dataset.person;
+  await fetch(`/api/person-birthday/${encodeURIComponent(person_name)}`, {method: 'DELETE'});
+  input.value = '';
+  clearBtn.style.display = 'none';
+  status.textContent = 'Cleared';
+  status.style.color = 'var(--muted)';
+  setTimeout(() => { status.textContent = ''; }, 2000);
 }
 </script>
 {% endblock %}

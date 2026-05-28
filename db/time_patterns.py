@@ -121,6 +121,12 @@ def parse_pattern(
             return "strftime('%w', p.date_taken) NOT IN (?,?)", ["0", "6"]
         return "1=1", []
 
+    if pattern.startswith("birthday:"):
+        # birthday: patterns are resolved by callers that have DB access.
+        # parse_pattern itself is DB-free; return a safe no-op here so any
+        # caller that forgets to pre-resolve gets a harmless result.
+        return "1=1", []
+
     if pattern.startswith("holiday:"):
         key = pattern[8:]
         if expand_days == 0:
@@ -152,3 +158,50 @@ def parse_pattern(
             return f"({' OR '.join(clauses_list)})", params
 
     return "1=1", []
+
+
+def birthday_clause(
+    month: int,
+    day: int,
+    expand_days: int,
+    years: list[int],
+) -> tuple[str, list]:
+    """
+    Return (sql_fragment, params) matching photos taken on a given MM-DD birthday
+    across all supplied years.
+
+    Args:
+        month:       Birthday month (1–12).
+        day:         Birthday day (1–31).
+        expand_days: Expand window by ±this many calendar days (0 = exact day only).
+        years:       Calendar years to generate date matches for.
+
+    Returns (sql_fragment, params) referencing 'p.date_taken'.
+    Returns ("1=1", []) when years is empty or all dates are invalid (e.g. Feb 29 on non-leap year).
+    """
+    if expand_days == 0:
+        dates: list[str] = []
+        for y in years:
+            try:
+                dates.append(str(datetime.date(y, month, day)))
+            except ValueError:
+                pass  # Feb 29 in non-leap year — skip
+        if not dates:
+            return "1=1", []
+        placeholders = ",".join("?" * len(dates))
+        return f"(strftime('%Y-%m-%d', p.date_taken) IN ({placeholders}))", dates
+    else:
+        clauses: list[str] = []
+        params: list = []
+        for y in years:
+            try:
+                d = datetime.date(y, month, day)
+            except ValueError:
+                continue
+            lo = str(d - datetime.timedelta(days=expand_days))
+            hi = str(d + datetime.timedelta(days=expand_days)) + "T23:59:59"
+            clauses.append("(p.date_taken BETWEEN ? AND ?)")
+            params.extend([lo, hi])
+        if not clauses:
+            return "1=1", []
+        return f"({' OR '.join(clauses)})", params

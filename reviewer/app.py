@@ -23,9 +23,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import threading
+from datetime import date as _date
 from pathlib import Path
 from typing import Any
 
@@ -311,6 +313,24 @@ def photo_detail(photo_id: int) -> str:
 
     albums = db().get_photo_albums(photo_id)
 
+    # Compute age-at-time for each named person with a known birthday (#152)
+    person_ages: dict[str, int | None] = {}
+    date_taken_str = photo.get("date_taken") or ""
+    if date_taken_str:
+        try:
+            photo_date = _date.fromisoformat(date_taken_str[:10])
+            for name in photo.get("apple_persons") or []:
+                bday = db().get_person_birthdays().get(name)
+                if bday and len(bday) == 10:  # only YYYY-MM-DD allows age calculation
+                    birth_year = int(bday[:4])
+                    month, day = int(bday[5:7]), int(bday[8:10])
+                    age = photo_date.year - birth_year
+                    if (photo_date.month, photo_date.day) < (month, day):
+                        age -= 1
+                    person_ages[name] = age
+        except (ValueError, TypeError):
+            pass
+
     return render_template(
         "photo.html",
         photo=photo,
@@ -321,6 +341,7 @@ def photo_detail(photo_id: int) -> str:
         state=state,
         person_filter=person_filter,
         albums=albums,
+        person_ages=person_ages,
     )
 
 
@@ -376,6 +397,7 @@ def faces() -> str:
         unknown_photos=unknown_photos,
         stats=db().stats(),
         person_policies=db().get_person_policies(),
+        birthdays=db().get_person_birthdays(),
     )
 
 
@@ -454,6 +476,33 @@ def api_get_person_policy(person_name: str) -> _JsonResp:
     """Return the current policy for a named person, or null if none."""
     policies = db().get_person_policies()
     return jsonify({"person": person_name, "policy": policies.get(person_name)})
+
+
+_BIRTHDAY_RE = re.compile(r"^\d{2}-\d{2}$|^\d{4}-\d{2}-\d{2}$")
+
+
+@app.route("/api/person-birthday", methods=["POST"])
+def api_set_person_birthday() -> _JsonResp:
+    """Upsert a birthday for a named person.
+
+    Body: {"person_name": str, "birthday": "MM-DD" | "YYYY-MM-DD"}
+    """
+    data = request.get_json(force=True) or {}
+    person_name = (data.get("person_name") or "").strip()
+    birthday = (data.get("birthday") or "").strip()
+    if not person_name or not birthday:
+        return jsonify({"ok": False, "error": "person_name and birthday required"}), 400
+    if not _BIRTHDAY_RE.match(birthday):
+        return jsonify({"ok": False, "error": "birthday must be MM-DD or YYYY-MM-DD"}), 400
+    db().set_person_birthday(person_name, birthday)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/person-birthday/<path:person_name>", methods=["DELETE"])
+def api_delete_person_birthday(person_name: str) -> _JsonResp:
+    """Remove the birthday for a named person."""
+    db().delete_person_birthday(person_name)
+    return jsonify({"ok": True})
 
 
 @app.route("/duplicates")
@@ -828,6 +877,7 @@ def map_view() -> str:
         center_lat=center_lat,
         center_lon=center_lon,
         highlight_id=highlight_id,
+        birthday_people=db().get_person_birthdays(),
     )
 
 
@@ -840,26 +890,46 @@ def api_map_photos() -> Response:
     extra_where = ""
     extra_params: list = []
     if time_pattern:
-        from db.time_patterns import parse_pattern
+        from db.time_patterns import parse_pattern, birthday_clause
 
-        years = (
-            [
-                r[0]
-                for r in db()
-                .conn.execute(
-                    "SELECT DISTINCT CAST(strftime('%Y', date_taken) AS INTEGER) AS y "
-                    "FROM photos WHERE date_taken IS NOT NULL ORDER BY y"
-                )
-                .fetchall()
-                if r[0] is not None
-            ]
-            if time_pattern.startswith("holiday:")
-            else []
-        )
-        frag, frag_params = parse_pattern(time_pattern, time_expand, years)
-        if frag != "1=1":
-            extra_where = f" AND {frag}"
-            extra_params = frag_params
+        if time_pattern.startswith("birthday:"):
+            person_name = time_pattern[9:]
+            bday = db().get_person_birthdays().get(person_name)
+            if bday:
+                all_years = [
+                    r[0]
+                    for r in db()
+                    .conn.execute(
+                        "SELECT DISTINCT CAST(strftime('%Y', date_taken) AS INTEGER) AS y "
+                        "FROM photos WHERE date_taken IS NOT NULL ORDER BY y"
+                    )
+                    .fetchall()
+                    if r[0] is not None
+                ]
+                month, day = (int(x) for x in bday[-5:].split("-"))
+                frag, frag_params = birthday_clause(month, day, time_expand, all_years)
+                if frag != "1=1":
+                    extra_where = f" AND {frag}"
+                    extra_params = frag_params
+        else:
+            years = (
+                [
+                    r[0]
+                    for r in db()
+                    .conn.execute(
+                        "SELECT DISTINCT CAST(strftime('%Y', date_taken) AS INTEGER) AS y "
+                        "FROM photos WHERE date_taken IS NOT NULL ORDER BY y"
+                    )
+                    .fetchall()
+                    if r[0] is not None
+                ]
+                if time_pattern.startswith("holiday:")
+                else []
+            )
+            frag, frag_params = parse_pattern(time_pattern, time_expand, years)
+            if frag != "1=1":
+                extra_where = f" AND {frag}"
+                extra_params = frag_params
 
     rows = (
         db()
