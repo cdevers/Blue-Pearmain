@@ -103,13 +103,15 @@
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
 <script>
-const map = L.map('map').setView([{{ center_lat }}, {{ center_lon }}], 5);
+const map = L.map('map').setView([{{ center_lat }}, {{ center_lon }}], {{ 14 if highlight_id else 5 }});
 requestAnimationFrame(() => map.invalidateSize());  // re-measure after layout settles
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
   maxZoom: 19,
 }).addTo(map);
+
+L.control.scale({ metric: true, imperial: true, position: 'bottomleft' }).addTo(map);
 
 const markers = L.markerClusterGroup();
 const _markerById = {};   // photo id (number) → Leaflet marker; rebuilt on each reload
