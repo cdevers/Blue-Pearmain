@@ -104,7 +104,7 @@ The map filter bar gains four new dimensions that AND with the existing time-pat
 
 Extracted the five shared filter dimensions (time pattern, year range, album, person, privacy/status) into a reusable Jinja macro (`_filter_bar.html`) used by both `/library` and `/map`. Library gains instant-apply JS (no Apply button), a filter chip row, and a View-on-map link that preserves filter state. Map gets a compact bar + collapsible panel with deep-link support. `normalize_shared_filters()` is the single normalization entry point for both routes.
 
-### Unified filter widget: tags dimension ([#156](https://github.com/cdevers/Blue-Pearmain/issues/156)) `size:S`
+### Unified filter widget: tags dimension ([#156](https://github.com/cdevers/Blue-Pearmain/issues/156)) `size:S` · ✓ done
 
 Add a tag type-ahead to the shared `_filter_bar.html` macro. Tags are already in the DB; this wires them as a sixth filter dimension on both `/library` and `/map`, with the same chip-row, deep-link, and cross-page nav treatment as the other dimensions. Single-tag filter to start; multi-tag OR can follow separately.
 
