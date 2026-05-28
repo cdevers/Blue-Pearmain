@@ -25,6 +25,43 @@
 
 ---
 
+## Filter lifecycle (state flow)
+
+Each request follows this sequence. Implementors should be able to point to where their code sits in this chain.
+
+1. **URL / request args** — all filter state lives in URL params (library) or JS reads from named form fields (map). No localStorage.
+2. **Route normalization** — `_safe_year()` parses int; year bounds are swapped if `year_from > year_to`; year→ISO date conversion happens before passing to db layer. `normalize_shared_filters()` is the long-term home for this; for now the logic is in `library()` and `map_view()` — see Known Trade-off below.
+3. **DB query** — `library_photos()` / `library_photo_ids()` receive cleaned `date_from`/`date_to`, `status`, `album_id`, `person`, `time_pattern`. SQL WHERE clauses built from these.
+4. **Template render** — route passes `filters` dict (library) or `initial_filters` dict (map) to Jinja; macro uses these to pre-populate `selected`/`value` attributes. Rendered HTML always reflects canonical (normalised) state.
+5. **JS hydration** — map JS reads field values via `document.querySelector('[name=X]')`; library JS reads from `libFilters` (JSON-serialised `filters`). Event listeners attached once.
+6. **User interaction** — selects trigger immediately; text fields debounce (details below); year inputs fire on `blur`/`Enter` only.
+7. **URL sync** — library: `buildLibraryUrl()` serializes all form fields → `location.href` (full reload; browser history push). Map: `buildMapUrl()` passes params to `fetch()`; URL bar updated via `history.replaceState()` (no extra history entries during exploration).
+
+### Known trade-off — normalization duplication
+
+`_safe_year()` at module level in `app.py` is the shared year-parsing function. The status enum is validated via `_STATUS_STATES` dict lookup in `db.py`. The map API mirrors these in `_MAP_STATUS_CLAUSES`. This is a small, tracked duplication — a future `normalize_shared_filters()` helper could eliminate it, but that refactor is deferred post-#155.
+
+---
+
+## Interaction model invariants
+
+| Control type | Library behaviour | Map behaviour |
+|---|---|---|
+| `<select>` (time, album, status) | navigate immediately | fetch immediately |
+| `<input type=text>` (person) | debounce 500 ms | debounce 300 ms |
+| `<input type=number>` (year) | fire on `blur` or `Enter` only | fire on `blur` or `Enter` only |
+| `<input type=checkbox>` (untitled, no_location, confirmed_none) | navigate immediately | n/a |
+
+**Year swap:** if `year_from > year_to`, the route swaps them before generating `date_from`/`date_to`. Because library instant-apply does a full page reload, the form re-renders with the canonical (swapped) URL values — the inputs self-correct visually. The map does the same: year values reach `buildMapUrl()` after the route has canonicalized them via `initial_filters`.
+
+**Pagination reset:** every library filter mutation calls `params.delete('page')` before navigating. This is implemented in `buildLibraryUrl()` and is non-negotiable — applying a restrictive filter while on page 14 must not produce a 404.
+
+**History:** library uses `location.href` (adds a browser history entry per filter application — acceptable for explicit choices; year blur+Enter prevents per-keystroke entries). Map uses `history.replaceState()` so exploration doesn't pollute history.
+
+**In-flight requests:** library full-page reload means no cancellation is needed (browser aborts previous request automatically). Map's `reloadMarkers()` issues `fetch()` calls; concurrent responses may arrive out of order but the last one wins (acceptable given small response size; explicit AbortController cancellation is a future enhancement).
+
+---
+
 ### Task 1: db.py — refine `_STATUS_STATES`
 
 > ✅ **ALREADY IMPLEMENTED** (commit `4844f06`) — do NOT re-run Steps 1–6. This section is kept for reference and retroactive review only. Verify the implementation looks correct; if you spot a problem, fix it and note it — don't revert and redo.
@@ -442,6 +479,8 @@ class TestLibraryYearFilter:
         assert resp.status_code == 200
         assert len(_lib_ids(resp)) == 3
 ```
+
+> **Note:** The JS `buildLibraryUrl()` always calls `params.delete('page')`, so pagination is reset on every filter change. There is no server-side test for this (it's a client-side invariant enforced in JS), but it is an explicit design invariant — any filter mutation must land on page 1.
 
 - [ ] **Step 2: Run to confirm failures**
 
@@ -1299,7 +1338,9 @@ function buildMapUrl() {
   if (person) params.set('person', person);
   const status = document.querySelector('[name=status]')?.value || '';
   if (status) params.set('status', status);
+  // Sync URL bar without adding a browser history entry (exploration ≠ navigation)
   const s = params.toString();
+  history.replaceState(null, '', s ? `/map?${s}` : '/map');
   return s ? `/api/map-photos?${s}` : '/api/map-photos';
 }
 ```
@@ -1571,5 +1612,8 @@ git push --tags
 | Tests: View on map link + roundtrip preserves filters | Task 6 |
 | `expand` in `initial_filters` (holiday deep-link) | Task 4 |
 | Bulk ops respect year range (year→date in `_buildPayload`) | Task 6 |
+| Map URL bar syncs via `history.replaceState` | Task 7 |
+| Pagination reset invariant (`params.delete('page')`) | Task 6 (JS) |
+| State flow + interaction model documented | Plan header |
 | README update | Task 8 |
 | Issue closed with retrospective | Task 8 |
