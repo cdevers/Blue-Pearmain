@@ -96,6 +96,10 @@ The map currently shows all geotagged photos as independent dots. A "Photo Trail
 
 ### Person birthdays and birthday-aware filtering ([#152](https://github.com/cdevers/Blue-Pearmain/issues/152)) `size:M` · [spec](superpowers/specs/2026-05-27-person-birthdays-152.md) · ✓ done
 
+### Map filter scoping — year range, album, person, privacy ([#154](https://github.com/cdevers/Blue-Pearmain/issues/154)) `size:M` · [spec](superpowers/specs/2026-05-28-map-filter-scoping-154.md)
+
+The map filter bar gains four new dimensions that AND with the existing time-pattern dropdown: year range (from/to, either optional), album, person (type-ahead against `apple_persons`), and an animation-only privacy toggle (All / Public only / Private only). All filters affect map dots, trail, and animation; privacy affects animation only. Enables workflows like "every place I've met Marcin" or "find which August trip included Spain, then animate it."
+
 ### Animated map trail — Indiana Jones-style route animation ([#153](https://github.com/cdevers/Blue-Pearmain/issues/153)) `size:L` · [spec](superpowers/specs/2026-05-27-map-trail-animation-153.md) · ✓ Phase 1 done
 
 Animate the photo trail so the route draws itself: a moving point traces the journey and leaves a growing line behind it. BP already has the data (#151 computes the ordered sequence); the question is rendering.
