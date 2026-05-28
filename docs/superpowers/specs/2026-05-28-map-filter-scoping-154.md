@@ -1,6 +1,6 @@
 # Spec: Map filter — year range, album, person, and animation privacy (#154)
 
-_Status: spec — awaiting implementation plan_
+_Status: ✓ done — shipped 2026-05-28_
 
 ---
 
