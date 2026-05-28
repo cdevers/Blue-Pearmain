@@ -587,6 +587,7 @@ In `map_view()`, before the `return render_template(...)` call, add:
         "album_id":     _safe_album_id,
         "person":       request.args.get("person", ""),
         "status":       request.args.get("status", ""),
+        "expand":       request.args.get("expand", ""),  # holiday ±2 day expansion
     }
 ```
 
@@ -840,6 +841,24 @@ class TestLibraryTemplateIntegration:
         body = resp.data.decode()
         assert 'name="time_pattern"' in body
         assert 'name="status"' in body
+
+    def test_library_to_map_roundtrip_preserves_filters(self, client_template):
+        """View-on-map link from library carries all shared filter params."""
+        c = client_template
+        resp = c.get("/library?time_pattern=month:08&year_from=2015&year_to=2019"
+                     "&person=Alice+W&status=public")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        # The "View on map" link must include each shared filter param
+        import re
+        map_links = re.findall(r'href="(/map[^"]*)"', body)
+        assert map_links, "No /map link found in library response"
+        map_url = map_links[0]
+        assert "time_pattern" in map_url
+        assert "year_from=2015" in map_url
+        assert "year_to=2019" in map_url
+        assert "Alice" in map_url
+        assert "status=public" in map_url
 ```
 
 - [ ] **Step 2: Run to confirm failures**
@@ -858,8 +877,8 @@ Make the following changes to `reviewer/templates/library.html`:
 
 ```jinja
 {% set filter_count = (
-  (1 if filters.date_from or filters.date_to else 0) +
-  (1 if filters.year_from or filters.year_to else 0) +
+  (1 if filters.date_from or filters.date_to
+        or filters.year_from or filters.year_to else 0) +
   (1 if filters.album_id else 0) +
   (1 if filters.tag else 0) +
   (1 if filters.status else 0) +
@@ -875,6 +894,8 @@ Make the following changes to `reviewer/templates/library.html`:
   (1 if filters.lat_min else 0)
 ) %}
 ```
+
+> `date_from`/`date_to` and `year_from`/`year_to` are the same conceptual filter ("date range"); they're combined into one counter so the badge doesn't inflate when both are set by the route layer.
 
 **3b. Add macro import** directly before the `<form id="lib-filter-form"...>` tag:
 
@@ -959,7 +980,9 @@ Add CSS (in the `<style>` block at the top of the template):
 }
 ```
 
-**3k. Add instant-apply JS + chip row JS** in the `<script>` block near the bottom of the file (before `</script>` of the second script block):
+**3k. Before adding the new JS block: search `library.html` for any pre-existing event listeners on `time_pattern`, `album_id`, `status`, `tag`, `untitled`, `no_location`, `confirmed_none`.** If any exist (from before this refactor), remove them now. Adding new listeners on top of old ones causes duplicate navigation and racey URL mutations. Full-page reloads mask the symptom — check the source, not the behaviour.
+
+Then add instant-apply JS + chip row JS in the `<script>` block near the bottom of the file (before `</script>` of the second script block):
 
 ```js
 // ── Instant-apply filter navigation (#155) ───────────────────────────────
@@ -1056,15 +1079,28 @@ for (const cb of document.querySelectorAll('[name=untitled],[name=no_location],[
 
 > **Note:** `libFilters` is already set earlier in the template as `const libFilters = {{ filters | tojson }};`. The chip JS relies on that existing variable.
 
-- [ ] **Step 4: Update `_buildPayload` in `library.html`** — add `year_from`/`year_to` to the bulk-filter object (search for `_buildPayload` around line 837):
+- [ ] **Step 4: Update `_buildPayload` in `library.html`** — convert year params to ISO dates for the bulk endpoint (search for `_buildPayload` around line 837).
+
+> The `/api/bulk-edit` endpoint calls `library_photo_ids()` which accepts `date_from`/`date_to` but has no `year_from`/`year_to` parameter. Sending raw year ints would silently be ignored, leaving bulk ops to apply to the wrong photo set. We convert year→ISO date client-side here, mirroring the same logic the library route already does server-side.
 
 ```js
+    // Convert year_from/year_to → date_from/date_to for the bulk endpoint,
+    // which uses library_photo_ids() and only understands ISO date strings.
+    // Explicit date_from/date_to (if set) take priority.
+    let _yearFrom = fd.get('year_from') ? parseInt(fd.get('year_from'), 10) : null;
+    let _yearTo   = fd.get('year_to')   ? parseInt(fd.get('year_to'),   10) : null;
+    if (_yearFrom !== null && _yearTo !== null && _yearFrom > _yearTo) {
+      [_yearFrom, _yearTo] = [_yearTo, _yearFrom];
+    }
+    const _dateFrom = fd.get('date_from') ||
+                      (_yearFrom !== null ? String(_yearFrom).padStart(4,'0') + '-01-01' : null);
+    const _dateTo   = fd.get('date_to') ||
+                      (_yearTo   !== null ? String(_yearTo + 1).padStart(4,'0') + '-01-01T00:00:00' : null);
+
     payload.filter = {
-      date_from:    fd.get('date_from') || null,
-      date_to:      fd.get('date_to') || null,
-      year_from:    fd.get('year_from') ? parseInt(fd.get('year_from')) : null,
-      year_to:      fd.get('year_to')   ? parseInt(fd.get('year_to'))   : null,
-      album_id:     fd.get('album_id') ? parseInt(fd.get('album_id')) : null,
+      date_from:    _dateFrom,
+      date_to:      _dateTo,
+      album_id:     fd.get('album_id') ? parseInt(fd.get('album_id'), 10) : null,
       tag:          fd.get('tag') || null,
       status:       fd.get('status') || null,
       untitled:     fd.get('untitled') === '1',
@@ -1383,16 +1419,20 @@ _updateFilterChips();
 _updateFilterBadge();
 ```
 
-- [ ] **Step 7: Run template integration tests**
+- [ ] **Step 7: Remove the transitional `xfail` marker from `TestMapViewInitialFilters`**
+
+In `tests/test_unified_filter.py`, remove the `@pytest.mark.xfail(...)` decorator from `test_map_view_passes_initial_filters_to_template`. The macro is now in place and the test should pass unconditionally.
+
+- [ ] **Step 8: Run template integration tests**
 
 ```
 python -m pytest tests/test_unified_filter.py::TestLibraryTemplateIntegration::test_shared_macro_in_map -v
 python -m pytest tests/test_unified_filter.py::TestMapViewInitialFilters -v
 ```
 
-Expected: both PASS now.
+Expected: both PASS now (no xfail, straight pass).
 
-- [ ] **Step 8: Run full suite**
+- [ ] **Step 9: Run full suite**
 
 ```
 python -m pytest tests/ -q
@@ -1400,10 +1440,10 @@ python -m pytest tests/ -q
 
 Expected: all passing.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add reviewer/templates/map.html
+git add reviewer/templates/map.html tests/test_unified_filter.py
 git commit -m "feat(#155): map.html — compact bar + collapsible panel, shared macro, name-based JS
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
@@ -1528,6 +1568,8 @@ git push --tags
 | Tests: all new status values | Task 1, 2 |
 | Tests: library year range | Task 3 |
 | Tests: template integration (macro on both pages) | Task 6 |
-| Tests: View on map link | Task 6 |
+| Tests: View on map link + roundtrip preserves filters | Task 6 |
+| `expand` in `initial_filters` (holiday deep-link) | Task 4 |
+| Bulk ops respect year range (year→date in `_buildPayload`) | Task 6 |
 | README update | Task 8 |
 | Issue closed with retrospective | Task 8 |
