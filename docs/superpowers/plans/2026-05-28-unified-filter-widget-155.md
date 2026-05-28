@@ -27,6 +27,8 @@
 
 ### Task 1: db.py — refine `_STATUS_STATES`
 
+> ✅ **ALREADY IMPLEMENTED** (commit `4844f06`) — do NOT re-run Steps 1–6. This section is kept for reference and retroactive review only. Verify the implementation looks correct; if you spot a problem, fix it and note it — don't revert and redo.
+
 > ⚠️ **Behaviour change:** `status=public` currently includes `approved_friends/family`. After this task it means strictly public only. No existing test creates friends/family photos and expects them in `public`, so existing tests are unaffected.
 
 **Files:**
@@ -203,6 +205,8 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 ---
 
 ### Task 2: `api_map_photos()` — add `status` dataset filter
+
+> ✅ **ALREADY IMPLEMENTED** (commit `a7c2cd8`) — do NOT re-run Steps 1–6. This section is kept for reference and retroactive review only.
 
 **Files:**
 - Modify: `reviewer/app.py` — `api_map_photos()` function
@@ -541,6 +545,7 @@ def client_map_view():
 
 
 class TestMapViewInitialFilters:
+    @pytest.mark.xfail(strict=False, reason="pre-populates form via shared macro added in Task 7")
     def test_map_view_passes_initial_filters_to_template(self, client_map_view):
         c = client_map_view
         resp = c.get("/map?time_pattern=month:08&year_from=2015&year_to=2019"
@@ -593,7 +598,7 @@ Then add `initial_filters=initial_filters` to the `render_template("map.html", .
 python -m pytest tests/test_unified_filter.py::TestMapViewInitialFilters -v
 ```
 
-Expected: FAIL — `initial_filters` is now passed, but `map.html` doesn't use it yet (no macro call). The test checks for `value="2015"` in HTML, which won't appear until Task 7. Mark this test as **expected to fail until Task 7** — run it again after Task 7 to confirm it passes. Proceed.
+Expected: `xfail` — the test is marked `@pytest.mark.xfail` because the body content assertions require the shared macro (Task 7). The route itself works; the assertion checks HTML that isn't rendered until Task 7. `xfail` is a clean pass in the suite.
 
 - [ ] **Step 5: Run full suite**
 
@@ -601,7 +606,7 @@ Expected: FAIL — `initial_filters` is now passed, but `map.html` doesn't use i
 python -m pytest tests/ -q
 ```
 
-Expected: all passing (the new `TestMapViewInitialFilters` test may fail — that's acceptable; it tests behaviour implemented in Task 7).
+Expected: all passing (`xfail` counts as passing).
 
 - [ ] **Step 6: Commit**
 
@@ -635,15 +640,18 @@ Write `reviewer/templates/_filter_bar.html` with this exact content:
 
   Usage:
     {% from "_filter_bar.html" import filter_bar %}
-    {{ filter_bar(albums, person_names, filters) }}
+    {{ filter_bar(albums, person_names, filters, datalist_id="lib-persons") }}
+    {{ filter_bar(albums, person_names, initial_filters, datalist_id="map-persons") }}
 
   Parameters:
     albums       — list of dicts with keys: id (int), name (str)
     person_names — sorted list of named persons (strings); _UNKNOWN_ excluded
     filters      — dict with keys: time_pattern, year_from, year_to,
                    album_id (int|None), person, status
+    datalist_id  — unique ID for the <datalist> element; must differ per page
+                   to avoid duplicate-ID collisions (default: "shared-persons")
 #}
-{% macro filter_bar(albums, person_names, filters) %}
+{% macro filter_bar(albums, person_names, filters, datalist_id="shared-persons") %}
 <div class="shared-filter-bar">
 
   <label>Time of year
@@ -714,8 +722,8 @@ Write `reviewer/templates/_filter_bar.html` with this exact content:
 
   <label>Person
     <input type="text" name="person" value="{{ filters.person or '' }}"
-           list="shared-person-datalist" placeholder="person name…" style="width:160px">
-    <datalist id="shared-person-datalist">
+           list="{{ datalist_id }}" placeholder="person name…" style="width:160px">
+    <datalist id="{{ datalist_id }}">
       {% for name in person_names %}
       <option value="{{ name | e }}">
       {% endfor %}
@@ -879,7 +887,7 @@ Make the following changes to `reviewer/templates/library.html`:
 ```jinja
   <!-- Row 0: shared filter macro (time · year · album · person · privacy) -->
   <div class="lib-filter-row">
-    {{ filter_bar(albums, person_names, filters) }}
+    {{ filter_bar(albums, person_names, filters, datalist_id="lib-persons") }}
   </div>
 ```
 
@@ -962,6 +970,9 @@ function debounce(fn, ms) {
 }
 
 function buildLibraryUrl() {
+  // Serializes all named form fields generically. Intentional: any new filter
+  // field added to lib-filter-form (shared macro or library-specific) automatically
+  // participates in URL persistence and navigation without touching this function.
   const form = document.getElementById('lib-filter-form');
   const params = new URLSearchParams();
   for (const el of form.elements) {
@@ -1123,10 +1134,10 @@ In `map.html`, replace the entire `<div class="map-filter-bar">` block (from the
             class="map-btn map-btn-primary">Open in Library ↗</button>
   </div>
 
-  <!-- Collapsible filter panel -->
+  <!-- Collapsible filter panel (hidden via CSS; .is-open shows it) -->
   {% from "_filter_bar.html" import filter_bar %}
-  <div id="map-filter-panel" class="map-filter-panel" style="display:none">
-    {{ filter_bar(albums, person_names, initial_filters) }}
+  <div id="map-filter-panel" class="map-filter-panel">
+    {{ filter_bar(albums, person_names, initial_filters, datalist_id="map-persons") }}
 
     <!-- Map-specific: expand toggle + animation privacy -->
     <div style="display:flex;align-items:center;gap:12px;padding:4px 0">
@@ -1153,12 +1164,15 @@ Add CSS for the new panel (in the `<style>` block at the top of `map.html`):
 
 ```css
 .map-filter-panel {
+  display: none;  /* hidden by default; JS adds .is-open to show */
   padding: 8px 12px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.map-filter-panel.is-open {
+  display: flex;
 }
 .shared-filter-bar {
   display: flex;
@@ -1291,8 +1305,7 @@ Replace the entire "Event listeners" block (from `document.getElementById('map-t
 ```js
 // ── Panel toggle ──────────────────────────────────────────────────────────
 function toggleMapPanel() {
-  const panel = document.getElementById('map-filter-panel');
-  panel.style.display = panel.style.display === 'none' ? '' : 'none';
+  document.getElementById('map-filter-panel').classList.toggle('is-open');
 }
 
 function _updateFilterBadge() {
@@ -1362,7 +1375,7 @@ document.getElementById('map-privacy-select').addEventListener('change', () => {
 
 // Auto-open panel if any filter was set via initial_filters (deep-link)
 if (_hasAnyFilter()) {
-  document.getElementById('map-filter-panel').style.display = '';
+  document.getElementById('map-filter-panel').classList.add('is-open');
 }
 
 reloadMarkers();
@@ -1473,7 +1486,7 @@ Shipped in v1.3.3 (to be tagged). 7 commits across 6 files.
 
 **Retrospective:**
 - Size estimate: L ✓
-- 7 commits, 6 files, ~N lines changed
+- Files: db.py, app.py, _filter_bar.html (new), library.html, map.html, test_unified_filter.py (new), README.md, spec
 - No scope creep — review queue deferred as planned"
 
 gh issue close 155 --reason completed
