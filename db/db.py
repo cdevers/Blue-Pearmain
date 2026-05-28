@@ -900,15 +900,12 @@ class Database:
     # -----------------------------------------------------------------------
 
     _STATUS_STATES: dict[str, tuple[str, ...]] = {
-        "public": (
-            "already_public",
-            "approved_public",
-            "approved_friends",
-            "approved_family",
-            "approved_friends_family",
-        ),
+        "public": ("already_public", "approved_public"),
+        "friends": ("approved_friends",),
+        "family": ("approved_family",),
+        "friends_family": ("approved_friends_family",),
         "private": ("auto_private", "keep_private"),
-        "pending": ("needs_review", "candidate_public", "skipped"),
+        "pending": ("needs_review", "candidate_public"),
     }
 
     def _library_where(
