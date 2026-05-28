@@ -90,7 +90,7 @@ Run `deduplicator --write` as part of the poller's regular cycle (or as a separa
 
 These ideas came out of studying [Iris Photos](https://irisphotos.app/) (launched 2026-05-27), which is doing similar work in the local-first photo library space. They are listed roughly in order of how concrete and near-term they feel.
 
-### Photo Trails — trip retracing on the map ([#151](https://github.com/cdevers/Blue-Pearmain/issues/151)) `size:M` · [spec](superpowers/specs/2026-05-27-photo-trails-151.md)
+### Photo Trails — trip retracing on the map ([#151](https://github.com/cdevers/Blue-Pearmain/issues/151)) `size:M` · [spec](superpowers/specs/2026-05-27-photo-trails-151.md) · ✓ done
 
 The map currently shows all geotagged photos as independent dots. A "Photo Trails" mode would connect photos chronologically — within a single day, or within a user-selected date range — drawing a path across the map that shows where you went and in what order. Clicking a segment would show the photos taken along it. This is a natural extension of the existing Leaflet map and the temporal filter already present. Exploratory value is high: it's one thing to see *where* you took photos; it's another to see the *journey*.
 
