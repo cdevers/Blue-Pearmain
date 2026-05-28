@@ -872,12 +872,33 @@ def map_view() -> str:
         center_lat = row["lat"] if row["lat"] is not None else 20.0
         center_lon = row["lon"] if row["lon"] is not None else 0.0
 
+    # Gather template vars for filter bar dropdowns
+    albums = db().get_all_albums()
+
+    person_names_rows = (
+        db()
+        .conn.execute(
+            """
+        SELECT DISTINCT je.value
+        FROM photos p, json_each(p.apple_persons) je
+        WHERE je.value != '_UNKNOWN_'
+          AND je.value != ''
+          AND p.apple_persons IS NOT NULL
+        ORDER BY je.value
+        """
+        )
+        .fetchall()
+    )
+    person_names = [r[0] for r in person_names_rows]
+
     return render_template(
         "map.html",
         center_lat=center_lat,
         center_lon=center_lon,
         highlight_id=highlight_id,
         birthday_people=db().get_person_birthdays(),
+        albums=albums,
+        person_names=person_names,
     )
 
 
@@ -887,8 +908,37 @@ def api_map_photos() -> Response:
     time_pattern = request.args.get("time_pattern") or None
     time_expand = 2 if request.args.get("expand") == "1" else 0
 
-    extra_where = ""
-    extra_params: list = []
+    # ── New filter params ────────────────────────────────────────────────
+    def _safe_year(key: str) -> int | None:
+        raw = request.args.get(key)
+        if not raw:
+            return None
+        try:
+            y = int(raw)
+        except ValueError:
+            return None
+        return y if 1800 <= y <= 2099 else None
+
+    year_from = _safe_year("year_from")
+    year_to = _safe_year("year_to")
+    if year_from is not None and year_to is not None and year_from > year_to:
+        year_from, year_to = year_to, year_from
+
+    album_id_raw = request.args.get("album_id")
+    album_id: int | None = None
+    if album_id_raw:
+        try:
+            album_id = int(album_id_raw)
+        except ValueError:
+            pass
+
+    person = (request.args.get("person") or "").strip() or None
+
+    # ── Build WHERE fragments ────────────────────────────────────────────
+    where_frags: list[str] = []
+    where_params: list = []
+
+    # Time pattern (existing logic — unchanged)
     if time_pattern:
         from db.time_patterns import parse_pattern, birthday_clause
 
@@ -909,8 +959,8 @@ def api_map_photos() -> Response:
                 month, day = (int(x) for x in bday[-5:].split("-"))
                 frag, frag_params = birthday_clause(month, day, time_expand, all_years)
                 if frag != "1=1":
-                    extra_where = f" AND {frag}"
-                    extra_params = frag_params
+                    where_frags.append(frag)
+                    where_params.extend(frag_params)
         else:
             years = (
                 [
@@ -928,17 +978,47 @@ def api_map_photos() -> Response:
             )
             frag, frag_params = parse_pattern(time_pattern, time_expand, years)
             if frag != "1=1":
-                extra_where = f" AND {frag}"
-                extra_params = frag_params
+                where_frags.append(frag)
+                where_params.extend(frag_params)
+
+    # Year range — ISO string range predicates (index-friendly)
+    if year_from is not None:
+        where_frags.append("p.date_taken >= ?")
+        where_params.append(f"{year_from:04d}-01-01")
+    if year_to is not None:
+        where_frags.append("p.date_taken < ?")
+        where_params.append(f"{year_to + 1:04d}-01-01")
+
+    # Album — correlated EXISTS to avoid row duplication
+    if album_id is not None:
+        where_frags.append(
+            "EXISTS (SELECT 1 FROM photo_albums pa2 "
+            "WHERE pa2.photo_id = p.id AND pa2.album_id = ? AND pa2.removed_at IS NULL)"
+        )
+        where_params.append(album_id)
+
+    # Person — case-insensitive exact match against apple_persons JSON array
+    if person:
+        where_frags.append(
+            "EXISTS (SELECT 1 FROM json_each(p.apple_persons) je WHERE LOWER(je.value) = LOWER(?))"
+        )
+        where_params.append(person)
+
+    extra_where = (" AND " + " AND ".join(where_frags)) if where_frags else ""
 
     rows = (
         db()
         .conn.execute(
             "SELECT p.id, p.latitude, p.longitude, p.photos_title, p.flickr_title, "
-            "       p.date_taken, p.flickr_id "
+            "       p.date_taken, p.flickr_id, p.privacy_state "
             "FROM photos p "
-            f"WHERE p.latitude IS NOT NULL AND p.longitude IS NOT NULL AND p.flickr_deleted = 0{extra_where}",
-            extra_params,
+            f"WHERE p.latitude IS NOT NULL AND p.longitude IS NOT NULL "
+            f"AND p.flickr_deleted = 0{extra_where} "
+            "ORDER BY p.date_taken, p.id",
+            # NOTE: ORDER BY date_taken, id ensures deterministic ordering for trail/animation.
+            # Do NOT add a date_taken IS NOT NULL filter — photos with NULL dates are valid
+            # map dots; they are excluded from trail/animation client-side.
+            where_params,
         )
         .fetchall()
     )
@@ -958,6 +1038,7 @@ def api_map_photos() -> Response:
                 "title": title,
                 "date": (r["date_taken"] or "")[:10],
                 "flickr_url": flickr_url,
+                "privacy_state": r["privacy_state"],
             }
         )
     return jsonify(result)
