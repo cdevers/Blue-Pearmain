@@ -56,23 +56,39 @@ All controls live inside the existing `.map-filter-bar` div. The second row is s
 
 **Year from / Year to** — two `<input type="number" min="1800" max="2099">` fields. Either or both may be left blank (= unbounded). Label: "Year" with a dash between them.
 
-**Person** — `<input type="text" list="person-datalist">` paired with a `<datalist id="person-datalist">` populated server-side from all distinct named persons in `apple_persons` (excluding `_UNKNOWN_` and blank). When the field is blank, no person filter is applied. Matching is exact (case-sensitive, matching the stored Apple Photos name).
+**Person** — `<input type="text" list="person-datalist">` paired with a `<datalist id="person-datalist">` populated server-side from all distinct named persons in `apple_persons` (excluding `_UNKNOWN_` and blank). When the field is blank, no person filter is applied. Matching is **case-insensitive exact**: `LOWER(je.value) = LOWER(?)`. This is more robust than strict case-sensitivity given that Apple Photos name data can vary in capitalisation.
 
-**Album** — `<select>` populated server-side with all non-deleted albums ordered by name. First option is `— any album —` (value `""`). When blank, no album filter.
+**Album** — `<select>` populated server-side with all non-deleted albums ordered by name. First option is `— any album —` (value `""`). When blank, no album filter. With 177+ albums, the dropdown can get long; a `size="1"` select with the browser's native search (typing characters to jump to a match) is sufficient for now. A searchable replacement is a natural upgrade once the filter system is proven useful.
 
-**Animation privacy** — `<select>` with three options:
+**Animation privacy** — a `<select>` with a visible label "▶ Animate:" immediately before it (using the ▶ play symbol to signal it is animation-specific, not a global privacy mode). Three options:
 - `all` (default, label "All photos")
 - `public` (label "Public only") → filters to `privacy_state IN ('approved_public', 'already_public')`
 - `private` (label "Private only") → filters to `privacy_state NOT IN ('approved_public', 'already_public')`
 
-This control is always visible in row 2. It only takes effect when the Animate button is active.
+This control is always visible in row 2. It only takes effect when `toggleAnimation()` is called. If the privacy filter reduces the eligible geotagged photos below 2, the Animate button is **disabled** (grayed, `disabled` attribute set). No toast or error message — the disabled state is sufficient signal. The button re-enables when the privacy filter is relaxed or the filtered photo set grows.
+
+### Active filter summary
+
+A chip row sits **below** the two-row filter bar, visible only when at least one filter is active. It renders the current filter set as readable tokens, for example:
+
+```
+August  •  2019  •  Marcin Sulikowski  •  Japan Trip  •  ▶ Public only
+```
+
+Each chip reflects the human-readable label, not the raw value (album name not ID; year range "2015–2019" not two separate fields; pattern label not key). This row is purely display — no interactive removal in this issue.
+
+**Why it matters:** animation screenshots and screen-recordings will otherwise lose context. The chip row makes the filter state legible in any capture.
 
 ### Show/hide and interaction rules
 
-- All five row-2 controls are always visible when the filter bar is visible (no hide/show toggling).
-- The Animate button show/hide logic is unchanged: visible when trail checkbox is checked and ≥2 geotagged photos are in the filtered result.
-- Changing any filter re-fires the `/api/map-photos` request and re-renders the map (same as the current pattern dropdown `change` handler).
-- The privacy dropdown does **not** re-fire the map request on change — it only takes effect at animation start. `animatePOC()` reads it just before starting.
+- All row-2 controls are always visible when the filter bar is visible (no hide/show toggling).
+- The Animate button is **shown** when trail checkbox is checked; it is **disabled** (grayed) when the privacy-filtered geotagged photo count is < 2, and **enabled** otherwise.
+- Changing any filter (pattern, year, album, person) re-fires the `/api/map-photos` request and re-renders the map. The active filter chip row updates at the same time.
+- The privacy dropdown does **not** re-fire the map request on change — it only takes effect at animation start. `_updateAnimateBtn()` re-evaluates the enabled/disabled state on every privacy change.
+
+### Invariant
+
+All of dots, trail polyline, and animation draw from the **same filtered dataset** returned by a single `/api/map-photos` call. The trail and animation must never recompute from a different query path than the dots. Privacy filtering is the only divergence — and it is applied client-side to the same `_lastPhotos` array, not via a separate fetch.
 
 ---
 
@@ -83,7 +99,7 @@ All active filters compound with AND:
 ```
 photos WHERE
   [time pattern clause]          -- existing logic, unchanged
-  AND [year range clause]        -- strftime('%Y', date_taken) BETWEEN ? AND ?
+  AND [year range clause]        -- range predicate on date_taken (index-friendly; see below)
   AND [album clause]             -- EXISTS in photo_albums
   AND [person clause]            -- EXISTS in json_each(apple_persons)
 ```
@@ -115,15 +131,34 @@ Privacy is **not** a backend param — it is applied client-side in `animatePOC(
 
 ### SQL clauses
 
-**Year range:**
+**Year range** — use ISO-string range predicates rather than `strftime('%Y', ...)`. Wrapping a column in a function prevents SQLite from using an index on `date_taken`. Since `date_taken` is stored as `YYYY-MM-DD HH:MM:SS` (ISO text), year boundaries map cleanly to string comparisons:
+
 ```sql
--- year_from only:
-strftime('%Y', p.date_taken) >= ?          -- [str(year_from)]
--- year_to only:
-strftime('%Y', p.date_taken) <= ?          -- [str(year_to)]
--- both:
-strftime('%Y', p.date_taken) BETWEEN ? AND ?  -- [str(year_from), str(year_to)]
+-- year_from=2019 contributes:
+p.date_taken >= '2019-01-01'
+
+-- year_to=2019 contributes:
+p.date_taken < '2020-01-01'      -- exclusive upper bound = start of next year
+
+-- both bounds:
+p.date_taken >= '2019-01-01' AND p.date_taken < '2020-01-01'
 ```
+
+The Python helper that builds these strings:
+```python
+def _year_bounds(year_from: int | None, year_to: int | None
+                ) -> tuple[list[str], list[str]]:
+    clauses, params = [], []
+    if year_from is not None:
+        clauses.append("p.date_taken >= ?")
+        params.append(f"{year_from:04d}-01-01")
+    if year_to is not None:
+        clauses.append("p.date_taken < ?")
+        params.append(f"{year_to + 1:04d}-01-01")
+    return clauses, params
+```
+
+**Input validation — year_from > year_to:** silently swap before constructing bounds. No error message; the intent is unambiguous and a validation error would just be friction.
 
 **Album:**
 ```sql
@@ -140,9 +175,11 @@ EXISTS (
 ```sql
 EXISTS (
   SELECT 1 FROM json_each(p.apple_persons) je
-  WHERE je.value = ?
+  WHERE LOWER(je.value) = LOWER(?)
 )
 ```
+
+**Photos with NULL `date_taken`:** included in map dots and trail if they have coordinates and pass the album/person filters; excluded from the trail polyline and animation (which require temporal ordering). Year range filter naturally excludes them (NULL comparisons are false in SQL). No special handling needed.
 
 ### `db.py` — `get_map_photos()` signature change
 
@@ -168,7 +205,7 @@ The method builds the WHERE clause incrementally, appending only the active filt
 ### `app.py` — `api_map_photos()` route
 
 Parse four new optional query params before calling `db().get_map_photos()`. Validate:
-- `year_from` / `year_to`: coerce to `int`; ignore if non-numeric or out of range 1800–2099.
+- `year_from` / `year_to`: coerce to `int`; ignore if non-numeric or out of range 1800–2099. If both are valid and `year_from > year_to`, silently swap them.
 - `album_id`: coerce to `int`; ignore if non-numeric.
 - `person`: strip whitespace; ignore if empty string after strip.
 
@@ -204,8 +241,24 @@ function animatePOC(photos) {
   } else if (privacySel === 'private') {
     pts = pts.filter(p => !PUBLIC_STATES.has(p.privacy_state));
   }
-  if (pts.length < 2) return;
+  if (pts.length < 2) return;   // button was already disabled; this is a safety guard
   // ... existing segment/rAF logic ...
+}
+```
+
+`_updateAnimateBtn()` is extended to evaluate privacy-filtered count:
+
+```js
+function _updateAnimateBtn() {
+  const trailOn = document.getElementById('map-trail-cb').checked;
+  const privacySel = document.getElementById('map-privacy-select').value;
+  const PUBLIC_STATES = new Set(['approved_public', 'already_public']);
+  let eligible = _lastPhotos.filter(p => p.lat != null && p.lon != null);
+  if (privacySel === 'public') eligible = eligible.filter(p => PUBLIC_STATES.has(p.privacy_state));
+  else if (privacySel === 'private') eligible = eligible.filter(p => !PUBLIC_STATES.has(p.privacy_state));
+  const btn = document.getElementById('map-animate-btn');
+  btn.style.display = trailOn ? '' : 'none';
+  btn.disabled = eligible.length < 2;
 }
 ```
 
@@ -252,7 +305,11 @@ New tests in `tests/test_map_filter.py`:
 - `test_map_view_passes_albums_to_template` — `map_view()` includes `albums`
 - `test_map_view_passes_person_names` — `map_view()` includes `person_names`, no `_UNKNOWN_`
 - `test_api_ignores_invalid_year` — non-numeric year_from/to ignored gracefully
+- `test_year_swap_when_from_greater_than_to` — year_from=2020, year_to=2015 treated as 2015–2020
 - `test_privacy_state_in_api_response` — `privacy_state` field present in each photo dict
+- `test_person_filter_case_insensitive` — "marcin sulikowski" matches "Marcin Sulikowski"
+- `test_null_date_taken_excluded_from_trail_ordering` — photos without dates not in temporal sequence
+- `test_year_bounds_sql_uses_range_not_strftime` — year filter builds `>= 'YYYY-01-01'` clause (not strftime)
 
 ---
 
