@@ -250,15 +250,19 @@ function applyLibraryFilter() {
 }
 
 const _debounced = debounce(applyLibraryFilter, 500);
-const _debouncedYear = debounce(applyLibraryFilter, 650);
 
-// Shared macro fields (selects: immediate; text/number inputs: debounced)
+// Shared macro fields
+// Selects: immediate on change
 document.querySelector('[name=time_pattern]').addEventListener('change', applyLibraryFilter);
 document.querySelector('[name=album_id]').addEventListener('change', applyLibraryFilter);
 document.querySelector('[name=status]').addEventListener('change', applyLibraryFilter);
+// Person text: debounced on input (500ms) — avoids per-keystroke reloads
 document.querySelector('[name=person]').addEventListener('input', _debounced);
-document.querySelector('[name=year_from]').addEventListener('input', _debouncedYear);
-document.querySelector('[name=year_to]').addEventListener('input', _debouncedYear);
+// Year inputs: fire on blur or Enter only — avoids intermediate states like "201" mid-type
+for (const el of document.querySelectorAll('[name=year_from],[name=year_to]')) {
+  el.addEventListener('blur', applyLibraryFilter);
+  el.addEventListener('keydown', e => { if (e.key === 'Enter') applyLibraryFilter(); });
+}
 
 // Library-specific fields
 document.querySelector('[name=status]').addEventListener('change', applyLibraryFilter);
@@ -338,6 +342,7 @@ The current two-row always-visible bar is replaced with a single line:
 - `buildMapUrl()` — unchanged (reads named form fields).
 - `_updateFilterBadge()` — replaces separate `_hasAnyFilter()` calls; counts active shared filters and updates `#map-filter-badge`.
 - All existing `change` listeners on the shared filter controls remain; they now fire from inside the panel instead of the top bar.
+- Year inputs on the map: replace existing debounced `input` handler with `blur` + `keydown Enter` (same as library). This also removes intermediate-state fetches on the map.
 - `_updateAnimateBtn()` — unchanged logic; triggered by privacy select change and on data load.
 - Chip row — unchanged.
 
@@ -391,6 +396,16 @@ function openInLibrary() {
   window.open('/library?' + p.toString(), '_blank');
 }
 ```
+
+---
+
+## Invariants
+
+**Privacy filtering is server-side on both pages.** The `status` filter is applied in the SQL WHERE clause — never as a client-side pass over results. On `/library` this ensures pagination counts are correct (a page of 120 "Public" photos is 120 photos that actually match, not 120 photos minus client-filtered ones). On `/api/map-photos` the WHERE clause excludes non-matching dots before the response is sent.
+
+**Privacy semantics are identical across routes.** The `_STATUS_MAP` dict (or equivalent logic) must produce the same `privacy_state` comparisons in both `db.library_photos()` and `api_map_photos()`. If "private" means `keep_private + auto_private` in the library, it must mean exactly that on the map too. Do not let one route silently interpret "private" as "not public" while the other uses exact enum values.
+
+**Map animation privacy override is client-side only.** After `/api/map-photos` returns a `status`-filtered dataset, the animation privacy select may further narrow which photos animate. This client-side narrowing operates on `_lastPhotos` (never mutates it) and does not re-fetch. The two layers are independent and composable: `status=public` + `animate=private` would yield zero animation candidates — which is correct and expected.
 
 ---
 
