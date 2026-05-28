@@ -21,8 +21,9 @@ The map (`/map`) and library (`/library`) each have independent filter implement
 ## Scope
 
 **In:**
-- `reviewer/templates/_filter_bar.html` — new Jinja macro for the four shared filter controls
-- `/library` route — add `year_from` / `year_to` integer params
+- `reviewer/templates/_filter_bar.html` — new Jinja macro for the five shared filter controls
+- `/library` route — add `year_from` / `year_to` integer params; extend `status` handling to include `friends`/`family`/`friends_family`
+- `/api/map-photos` — add `status` as a dataset-level filter (affects dots + trail)
 - Library UI — instant-apply (drop "Apply" button), active filter chip row, shared macro in panel
 - Map UI — collapse two-row bar to compact-bar + collapsible panel using shared macro
 - `map_view()` route — accept shared params for deep-link support
@@ -32,8 +33,9 @@ The map (`/map`) and library (`/library`) each have independent filter implement
 - `/review` filter expansion (separate issue)
 - `localStorage` filter persistence (URL-first is sufficient)
 - Multi-person OR selection
-- Library-only controls in the macro: search query (`q`), tag, status, untitled, no-location, confirmed-none, location cascade, spatial bbox
-- Map-only control in the macro: animation privacy select
+- Library-only controls in the macro: search query (`q`), tag, untitled, no-location, confirmed-none, location cascade, spatial bbox, review-workflow `status` values (screenshot states)
+- Map-only control in the macro: animation privacy override select
+- Animation privacy override granularity (stays All / Public / Private; separate from the shared `status` filter)
 
 ---
 
@@ -80,11 +82,25 @@ The map (`/map`) and library (`/library`) each have independent filter implement
       {% endfor %}
     </datalist>
   </label>
+
+  <label>Privacy
+    <select name="status">
+      <option value="">— any —</option>
+      <option value="public"         {% if filters.status == 'public'         %}selected{% endif %}>Public</option>
+      <option value="friends"        {% if filters.status == 'friends'        %}selected{% endif %}>Friends</option>
+      <option value="family"         {% if filters.status == 'family'         %}selected{% endif %}>Family</option>
+      <option value="friends_family" {% if filters.status == 'friends_family' %}selected{% endif %}>Friends &amp; Family</option>
+      <option value="private"        {% if filters.status == 'private'        %}selected{% endif %}>Private</option>
+      <option value="pending"        {% if filters.status == 'pending'        %}selected{% endif %}>Pending review</option>
+    </select>
+  </label>
 </div>
 {% endmacro %}
 ```
 
 Both `library.html` and `map.html` call this macro. Both pages already pass `albums` and a person name list to the template; the macro reuses those same variables (library uses `person_list`, map uses `person_names` — the route normalises the key to `person_names` on both pages).
+
+**Separation from library-only `status` values:** the library's existing filter panel has a fuller `status` select that includes review-workflow states (`screenshot_unreviewed`, etc.). That select is **replaced** by the shared macro's Privacy dropdown. The macro only exposes the seven dataset-scope values above; screenshot-filtering moves to the library-specific row 2 as a dedicated checkbox or separate select if needed. (Current usage of screenshot filters is through the `/review` route, not `/library`, so in practice this dropdown consolidation is clean.)
 
 ---
 
@@ -122,6 +138,55 @@ Update `filter_count` in `library.html` to include `year_from`/`year_to`.
 
 **Rename `person_list` → `person_names` in `library()` route.** The route currently passes `person_list=person_list` to the template. Change to `person_names=person_list` so the template variable name matches both the macro's parameter name and the variable name used by `map_view()`. Update the one reference to `person_list` in `library.html` accordingly.
 
+**Extend `status` handling in `db.library_photos()` and `db.library_photo_count()`** to recognise three new values:
+
+| `status` value | `privacy_state` clause |
+|---|---|
+| `friends` | `privacy_state = 'approved_friends'` |
+| `family` | `privacy_state = 'approved_family'` |
+| `friends_family` | `privacy_state = 'approved_friends_family'` |
+
+The existing `public`, `private`, `pending` mappings are unchanged.
+
+Add `status` to the `filters` dict passed to the template:
+
+```python
+filters={
+    ...existing keys...,
+    "year_from": year_from or "",
+    "year_to":   year_to   or "",
+    "status":    status    or "",   # replaces the existing "status" key (already present)
+}
+```
+
+(`status` is already in the `filters` dict; this just ensures it's always present and covers the new values.)
+
+### `/api/map-photos` — new `status` dataset filter
+
+Add `status` param parsing to `api_map_photos()`:
+
+```python
+status = (request.args.get("status") or "").strip() or None
+```
+
+Add a WHERE clause fragment (appended to `where_frags` / `where_params` alongside year, album, person):
+
+```python
+_STATUS_MAP = {
+    "public":         "p.privacy_state IN ('approved_public','already_public')",
+    "friends":        "p.privacy_state = 'approved_friends'",
+    "family":         "p.privacy_state = 'approved_family'",
+    "friends_family": "p.privacy_state = 'approved_friends_family'",
+    "private":        "p.privacy_state IN ('keep_private','auto_private')",
+    "pending":        "p.privacy_state IN ('needs_review','candidate_public')",
+}
+if status and status in _STATUS_MAP:
+    where_frags.append(_STATUS_MAP[status])
+    # no bound param — SQL literals only (values are hard-coded, not user input)
+```
+
+This affects which dots and trail segments appear. The animation privacy override remains a separate client-side filter on top of this.
+
 ### `map_view()` route (`app.py`)
 
 Accept the four shared params as optional URL params so the library's "View on map" link can deep-link to a pre-filtered map:
@@ -136,6 +201,7 @@ def map_view() -> str:
         "year_to":      request.args.get("year_to", ""),
         "album_id":     request.args.get("album_id", ""),
         "person":       request.args.get("person", ""),
+        "status":       request.args.get("status", ""),
     }
     return render_template("map.html", ..., initial_filters=initial_filters)
 ```
@@ -186,9 +252,10 @@ function applyLibraryFilter() {
 const _debounced = debounce(applyLibraryFilter, 500);
 const _debouncedYear = debounce(applyLibraryFilter, 650);
 
-// Shared macro fields
+// Shared macro fields (selects: immediate; text/number inputs: debounced)
 document.querySelector('[name=time_pattern]').addEventListener('change', applyLibraryFilter);
 document.querySelector('[name=album_id]').addEventListener('change', applyLibraryFilter);
+document.querySelector('[name=status]').addEventListener('change', applyLibraryFilter);
 document.querySelector('[name=person]').addEventListener('input', _debounced);
 document.querySelector('[name=year_from]').addEventListener('input', _debouncedYear);
 document.querySelector('[name=year_to]').addEventListener('input', _debouncedYear);
@@ -212,7 +279,7 @@ Added between the search bar and the photo grid:
 <div id="lib-filter-chips" class="lib-filter-chips"></div>
 ```
 
-Populated by `_updateLibraryChips()` on load (reads the `filters` object passed from the server via `data-filters` attribute or inline Jinja). Chip format mirrors the map: album name, `YYYY–YYYY` for year range, person name, time pattern label. Chip row is hidden via CSS `:empty` when no filters are active.
+Populated by `_updateLibraryChips()` on load (reads the `filters` object passed from the server via `data-filters` attribute or inline Jinja). Chip format mirrors the map: album name, `YYYY–YYYY` for year range, person name, time pattern label, privacy label (e.g. "Public", "Friends & Family"). Chip row is hidden via CSS `:empty` when no filters are active.
 
 ### Panel auto-open
 
@@ -288,7 +355,8 @@ A "View on map" link in the library toolbar, Jinja-built:
   year_from=filters.year_from or None,
   year_to=filters.year_to or None,
   album_id=filters.album_id or None,
-  person=filters.person or None) }}"
+  person=filters.person or None,
+  status=filters.status or None) }}"
    title="View these photos on the map">🗺 Map</a>
 ```
 
@@ -311,6 +379,8 @@ function openInLibrary() {
   if (yt) p.set('year_to', yt);
   if (ai) p.set('album_id', ai);
   if (pe) p.set('person', pe);
+  const st = document.querySelector('[name=status]')?.value;
+  if (st) p.set('status', st);
   // Preserve spatial bbox if a map region is selected (existing behaviour)
   if (_regionBounds) {
     p.set('lat_min', _regionBounds.getSouth().toFixed(5));
@@ -335,8 +405,11 @@ The shared params and their meaning are identical on both pages:
 | `year_to` | int (optional) | Latest year inclusive; silently swapped if > year_from |
 | `album_id` | int (optional) | Album membership filter |
 | `person` | str (optional) | Case-insensitive exact match against `apple_persons` |
+| `status` | str (optional) | Privacy scope: `public` / `friends` / `family` / `friends_family` / `private` / `pending` |
 
-Privacy animate is map-only and not in the shared contract. Calendar `date_from`/`date_to` are library-only.
+**Map-only (not in shared contract):** animation privacy override (`all`/`public`/`private`), trail toggle, animate state. These must not appear in library URLs generated by `openInLibrary()`.
+
+**Library-only:** `q` (search query), `date_from`/`date_to` (calendar date pickers), `tag`, `untitled`, `no_location`, `confirmed_none`, location cascade, spatial bbox.
 
 ---
 
@@ -351,12 +424,20 @@ New tests in `tests/test_library_filter.py` (or extend existing `test_map_filter
 - `test_library_year_does_not_override_explicit_date_from` — explicit `date_from` takes precedence over `year_from`
 - `test_library_year_nonnumeric_ignored` — `year_from=abc` ignored gracefully
 - `test_library_year_out_of_range_ignored` — `year_from=1700` ignored
-- `test_map_view_accepts_initial_filter_params` — `map_view()` passes `initial_filters` to template
-- `test_library_view_on_map_link_has_filter_params` — "View on map" link in library HTML includes active shared filters (template test)
+- `test_library_status_public_filter` — `status=public` returns only approved_public + already_public photos
+- `test_library_status_friends_filter` — `status=friends` returns only approved_friends photos
+- `test_library_status_family_filter` — `status=family` returns only approved_family photos
+- `test_library_status_friends_family_filter` — `status=friends_family` returns only approved_friends_family photos
+- `test_library_status_private_filter` — `status=private` returns only keep_private + auto_private photos
+- `test_library_status_pending_filter` — `status=pending` returns only needs_review + candidate_public photos
+- `test_map_api_status_public_filter` — `/api/map-photos?status=public` returns only public-state geotagged photos
+- `test_map_api_status_unknown_ignored` — `/api/map-photos?status=bogus` returns all geotagged photos (unknown values ignored)
+- `test_map_view_accepts_initial_filter_params` — `map_view()` passes `initial_filters` (including `status`) to template
+- `test_library_view_on_map_link_has_filter_params` — "View on map" link in library HTML includes active shared filters including `status` (template test)
 
 Template tests (extend `tests/test_map_filter.py`):
-- `test_shared_macro_present_in_library` — `<select name="time_pattern">` appears in `/library` response
-- `test_shared_macro_present_in_map` — `<select name="time_pattern">` appears in `/map` response
+- `test_shared_macro_present_in_library` — `<select name="time_pattern">` and `<select name="status">` appear in `/library` response
+- `test_shared_macro_present_in_map` — `<select name="time_pattern">` and `<select name="status">` appear in `/map` response
 
 ---
 
