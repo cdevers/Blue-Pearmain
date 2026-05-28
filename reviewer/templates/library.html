@@ -301,7 +301,8 @@
     year_to=filters.year_to or None,
     album_id=filters.album_id or None,
     person=filters.person or None,
-    status=filters.status or None) }}"
+    status=filters.status or None,
+    tag=filters.tag or None) }}"
      class="map-btn" style="font-size:12px;padding:4px 8px"
      title="View current filter on map">🗺 Map</a>
   {% if filters.q or filter_count > 0 %}
@@ -320,7 +321,8 @@
 
   <!-- Row 0: shared filter macro (time · year · album · person · privacy) -->
   <div class="lib-filter-row">
-    {{ filter_bar(albums, person_names, filters, datalist_id="lib-persons") }}
+    {{ filter_bar(albums, person_names, filters, datalist_id="lib-persons",
+                  tag_names=tag_names, tag_datalist_id="lib-tags") }}
   </div>
 
   {% if filters.lat_min %}

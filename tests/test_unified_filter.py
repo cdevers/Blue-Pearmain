@@ -515,3 +515,64 @@ class TestNormalizeSharedFiltersTag:
         with app.test_request_context("/?tag="):
             f = normalize_shared_filters()
         assert f["tag"] == ""
+
+
+# ── /library tag filter ───────────────────────────────────────────────────────
+
+
+@pytest.fixture()
+def client_lib_tags():
+    """DB with photos tagged boston, concert, and one untagged."""
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(Path(tmp) / "test.db")
+        p1 = db.upsert_photo(
+            _photo(90, photos_tags=["boston", "travel"], privacy_state="approved_public")
+        )
+        p2 = db.upsert_photo(_photo(91, photos_tags=["concert"], privacy_state="approved_public"))
+        p3 = db.upsert_photo(_photo(92, photos_tags=[], privacy_state="approved_public"))
+        app_module._db = db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test"
+        with app_module.app.test_client() as c:
+            yield c, p1, p2, p3
+        app_module._db = None
+
+
+class TestLibraryTagFilter:
+    def test_tag_filters_to_matching_photos(self, client_lib_tags):
+        c, p1, p2, p3 = client_lib_tags
+        resp = c.get("/library?tag=boston")
+        assert resp.status_code == 200
+        ids = _lib_ids(resp)
+        assert p1 in ids
+        assert p2 not in ids
+        assert p3 not in ids
+
+    def test_no_tag_returns_all(self, client_lib_tags):
+        c, p1, p2, p3 = client_lib_tags
+        resp = c.get("/library")
+        ids = _lib_ids(resp)
+        assert {p1, p2, p3}.issubset(ids)
+
+    def test_nonexistent_tag_returns_zero(self, client_lib_tags):
+        c, p1, p2, p3 = client_lib_tags
+        resp = c.get("/library?tag=no-such-tag")
+        ids = _lib_ids(resp)
+        assert len(ids) == 0
+
+    def test_tag_datalist_rendered_in_library(self, client_lib_tags):
+        c, p1, p2, p3 = client_lib_tags
+        resp = c.get("/library")
+        body = resp.data.decode()
+        assert 'id="lib-tags"' in body
+
+    def test_view_on_map_link_carries_tag(self, client_lib_tags):
+        c, p1, p2, p3 = client_lib_tags
+        resp = c.get("/library?tag=boston")
+        body = resp.data.decode()
+        import re
+
+        map_links = re.findall(r'href="(/map[^"]*)"', body)
+        tag_link = next((u for u in map_links if "tag=" in u), None)
+        assert tag_link is not None, "No /map link with tag= found"
+        assert "boston" in tag_link

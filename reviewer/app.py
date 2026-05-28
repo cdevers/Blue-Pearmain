@@ -1124,7 +1124,6 @@ def library() -> str:
 
     date_from = request.args.get("date_from") or None
     date_to = request.args.get("date_to") or None
-    tag = request.args.get("tag") or None
     untitled_only = request.args.get("untitled") == "1"
     no_location = request.args.get("no_location") == "1"
     confirmed_none = request.args.get("confirmed_none") == "1"
@@ -1132,6 +1131,7 @@ def library() -> str:
     sf = normalize_shared_filters()
     album_id = sf["album_id"]
     person: str | None = sf["person"] or None
+    tag: str | None = sf["tag"] or None
     status: str | None = sf["status"] or None
     time_pattern: str | None = sf["time_pattern"] or None
     time_expand = 2 if sf["expand"] == "1" else 0
@@ -1223,6 +1223,7 @@ def library() -> str:
     confirmed_none_count = db().confirmed_none_count()
     location_tree = db().location_data()
     person_list = db().person_names()
+    tag_names = db().tag_names()
     albums = db().get_all_albums()
 
     current_album = None
@@ -1240,6 +1241,7 @@ def library() -> str:
         current_album=current_album,
         location_tree=location_tree,
         person_names=person_list,
+        tag_names=tag_names,
         no_location_count=no_location_count,
         confirmed_none_count=confirmed_none_count,
         filters={
