@@ -1,0 +1,109 @@
+{#
+  _filter_bar.html — shared filter macro (#155)
+
+  Usage:
+    {% from "_filter_bar.html" import filter_bar %}
+    {{ filter_bar(albums, person_names, filters, datalist_id="lib-persons") }}
+    {{ filter_bar(albums, person_names, initial_filters, datalist_id="map-persons") }}
+
+  Parameters:
+    albums       — list of dicts with keys: id (int), name (str)
+    person_names — sorted list of named persons (strings); _UNKNOWN_ excluded
+    filters      — dict with keys: time_pattern, year_from, year_to,
+                   album_id (int|None), person, status, expand
+    datalist_id  — unique ID for the <datalist> element; must differ per page
+                   to avoid duplicate-ID collisions (default: "shared-persons")
+#}
+{% macro filter_bar(albums, person_names, filters, datalist_id="shared-persons") %}
+<div class="shared-filter-bar">
+
+  <label>Time of year
+    <select name="time_pattern">
+      <option value="">— any time —</option>
+      <optgroup label="Month">
+        <option value="month:01" {% if filters.time_pattern == 'month:01' %}selected{% endif %}>January</option>
+        <option value="month:02" {% if filters.time_pattern == 'month:02' %}selected{% endif %}>February</option>
+        <option value="month:03" {% if filters.time_pattern == 'month:03' %}selected{% endif %}>March</option>
+        <option value="month:04" {% if filters.time_pattern == 'month:04' %}selected{% endif %}>April</option>
+        <option value="month:05" {% if filters.time_pattern == 'month:05' %}selected{% endif %}>May</option>
+        <option value="month:06" {% if filters.time_pattern == 'month:06' %}selected{% endif %}>June</option>
+        <option value="month:07" {% if filters.time_pattern == 'month:07' %}selected{% endif %}>July</option>
+        <option value="month:08" {% if filters.time_pattern == 'month:08' %}selected{% endif %}>August</option>
+        <option value="month:09" {% if filters.time_pattern == 'month:09' %}selected{% endif %}>September</option>
+        <option value="month:10" {% if filters.time_pattern == 'month:10' %}selected{% endif %}>October</option>
+        <option value="month:11" {% if filters.time_pattern == 'month:11' %}selected{% endif %}>November</option>
+        <option value="month:12" {% if filters.time_pattern == 'month:12' %}selected{% endif %}>December</option>
+      </optgroup>
+      <optgroup label="Season">
+        <option value="season:spring" {% if filters.time_pattern == 'season:spring' %}selected{% endif %}>Spring (Mar–Jun)</option>
+        <option value="season:summer" {% if filters.time_pattern == 'season:summer' %}selected{% endif %}>Summer (Jun–Sep)</option>
+        <option value="season:fall"   {% if filters.time_pattern == 'season:fall'   %}selected{% endif %}>Fall (Sep–Dec)</option>
+        <option value="season:winter" {% if filters.time_pattern == 'season:winter' %}selected{% endif %}>Winter (Dec–Mar)</option>
+      </optgroup>
+      <optgroup label="Day type">
+        <option value="daytype:weekend" {% if filters.time_pattern == 'daytype:weekend' %}selected{% endif %}>Weekends</option>
+        <option value="daytype:weekday" {% if filters.time_pattern == 'daytype:weekday' %}selected{% endif %}>Weekdays</option>
+      </optgroup>
+      <optgroup label="Holidays">
+        <option value="holiday:new_years"      {% if filters.time_pattern == 'holiday:new_years'      %}selected{% endif %}>New Year's Day (Jan 1)</option>
+        <option value="holiday:mlk_day"        {% if filters.time_pattern == 'holiday:mlk_day'        %}selected{% endif %}>MLK Day (3rd Mon Jan)</option>
+        <option value="holiday:presidents_day" {% if filters.time_pattern == 'holiday:presidents_day' %}selected{% endif %}>Presidents' Day (3rd Mon Feb)</option>
+        <option value="holiday:memorial_day"   {% if filters.time_pattern == 'holiday:memorial_day'   %}selected{% endif %}>Memorial Day (last Mon May)</option>
+        <option value="holiday:july_4th"       {% if filters.time_pattern == 'holiday:july_4th'       %}selected{% endif %}>July 4th</option>
+        <option value="holiday:labor_day"      {% if filters.time_pattern == 'holiday:labor_day'      %}selected{% endif %}>Labor Day (1st Mon Sep)</option>
+        <option value="holiday:columbus_day"   {% if filters.time_pattern == 'holiday:columbus_day'   %}selected{% endif %}>Columbus Day (2nd Mon Oct)</option>
+        <option value="holiday:halloween"      {% if filters.time_pattern == 'holiday:halloween'      %}selected{% endif %}>Halloween (Oct 31)</option>
+        <option value="holiday:thanksgiving"   {% if filters.time_pattern == 'holiday:thanksgiving'   %}selected{% endif %}>Thanksgiving (4th Thu Nov)</option>
+        <option value="holiday:christmas"      {% if filters.time_pattern == 'holiday:christmas'      %}selected{% endif %}>Christmas (Dec 25)</option>
+      </optgroup>
+    </select>
+  </label>
+
+  <span class="shared-year-range">
+    <label>Year
+      <input type="number" name="year_from" min="1800" max="2099"
+             value="{{ filters.year_from or '' }}" placeholder="from" style="width:62px">
+    </label>
+    <span style="padding:0 2px">–</span>
+    <label>
+      <input type="number" name="year_to" min="1800" max="2099"
+             value="{{ filters.year_to or '' }}" placeholder="to" style="width:62px">
+    </label>
+  </span>
+
+  <label>Album
+    <select name="album_id">
+      <option value="">— any album —</option>
+      {% for a in albums %}
+      <option value="{{ a.id }}"
+              {% if filters.album_id == a.id or (filters.album_id | string) == (a.id | string) %}selected{% endif %}>
+        {{ a.name | e }}
+      </option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>Person
+    <input type="text" name="person" value="{{ filters.person or '' }}"
+           list="{{ datalist_id }}" placeholder="person name…" style="width:160px">
+    <datalist id="{{ datalist_id }}">
+      {% for name in person_names %}
+      <option value="{{ name | e }}">
+      {% endfor %}
+    </datalist>
+  </label>
+
+  <label>Privacy
+    <select name="status">
+      <option value="">— any —</option>
+      <option value="public"         {% if filters.status == 'public'         %}selected{% endif %}>Public</option>
+      <option value="friends"        {% if filters.status == 'friends'        %}selected{% endif %}>Friends</option>
+      <option value="family"         {% if filters.status == 'family'         %}selected{% endif %}>Family</option>
+      <option value="friends_family" {% if filters.status == 'friends_family' %}selected{% endif %}>Friends &amp; Family</option>
+      <option value="private"        {% if filters.status == 'private'        %}selected{% endif %}>Private</option>
+      <option value="pending"        {% if filters.status == 'pending'        %}selected{% endif %}>Pending review</option>
+    </select>
+  </label>
+
+</div>
+{% endmacro %}
