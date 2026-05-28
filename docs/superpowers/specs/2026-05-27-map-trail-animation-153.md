@@ -1,6 +1,6 @@
 # Spec: Animated map trail — Indiana Jones-style route animation (#153, Phase 1 POC)
 
-_Status: spec — not yet implemented_
+_Status: ✓ Phase 1 done — shipped a1574f4 (2026-05-27)_
 
 ---
 

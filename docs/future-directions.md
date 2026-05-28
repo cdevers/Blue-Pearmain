@@ -96,7 +96,7 @@ The map currently shows all geotagged photos as independent dots. A "Photo Trail
 
 ### Person birthdays and birthday-aware filtering ([#152](https://github.com/cdevers/Blue-Pearmain/issues/152)) `size:M` · [spec](superpowers/specs/2026-05-27-person-birthdays-152.md) · ✓ done
 
-### Animated map trail — Indiana Jones-style route animation ([#153](https://github.com/cdevers/Blue-Pearmain/issues/153)) `size:L`
+### Animated map trail — Indiana Jones-style route animation ([#153](https://github.com/cdevers/Blue-Pearmain/issues/153)) `size:L` · [spec](superpowers/specs/2026-05-27-map-trail-animation-153.md) · ✓ Phase 1 done
 
 Animate the photo trail so the route draws itself: a moving point traces the journey and leaves a growing line behind it. BP already has the data (#151 computes the ordered sequence); the question is rendering.
 
