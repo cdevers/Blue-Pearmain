@@ -20,6 +20,16 @@
 
 No migrations needed — no schema changes.
 
+### Dataset invariants (preserve during implementation)
+
+1. **`_lastPhotos` replaced atomically** — `reloadMarkers()` increments `_currentRequest`; `plotPhotos()` discards stale responses via the `requestId` guard. `_lastPhotos` is only written once the full response arrives. Never mutate it incrementally.
+
+2. **Privacy filter never mutates `_lastPhotos`** — `animatePOC(photos)` uses `let pts = photos.filter(...)` which returns a new array. `photos` (which is `_lastPhotos`) is never modified. A subsequent UI interaction always reads the unfiltered set.
+
+3. **NULL `date_taken` photos appear as dots, never in trail/animation** — the SQL carries no global `date_taken IS NOT NULL` guard. `plotTrail` and `animatePOC` both filter `.date` client-side. Do not add a server-side date guard.
+
+4. **Deleted album IDs in URL state** — if `?album_id=N` is loaded and album N is deleted, the `<select>` shows `— any album —` (no matching option), the backend receives `album_id=N`, and the EXISTS subquery returns 0 rows (album is deleted, no active memberships). The result is an empty map, not an error. This is acceptable; no special handling needed.
+
 ---
 
 ### Task 1: Year range filter — tests and `api_map_photos()` backend
