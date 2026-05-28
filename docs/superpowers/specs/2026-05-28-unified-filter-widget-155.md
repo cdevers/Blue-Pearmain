@@ -1,6 +1,6 @@
 # Spec: Unified filter widget — shared macro, instant-apply, cross-page persistence (#155)
 
-_Status: spec — awaiting implementation plan_
+_Status: ✓ done — shipped 2026-05-28_
 
 ---
 
