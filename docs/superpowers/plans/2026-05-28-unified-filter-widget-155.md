@@ -10,6 +10,8 @@
 
 **Tech Stack:** Python/Flask, SQLite, Jinja2 macros, vanilla JS (`URLSearchParams`, `debounce`, `blur`/`keydown Enter` for year inputs).
 
+**Future scope (not in this PR):** tag filtering is the obvious next dimension to add to the shared macro once this ships. When that work is planned, `normalize_shared_filters()` gains a `tag` field and the macro gets a tag input — no other routes need changing.
+
 ---
 
 ## Files
@@ -30,16 +32,24 @@
 Each request follows this sequence. Implementors should be able to point to where their code sits in this chain.
 
 1. **URL / request args** — all filter state lives in URL params (library) or JS reads from named form fields (map). No localStorage.
-2. **Route normalization** — `_safe_year()` parses int; year bounds are swapped if `year_from > year_to`; year→ISO date conversion happens before passing to db layer. `normalize_shared_filters()` is the long-term home for this; for now the logic is in `library()` and `map_view()` — see Known Trade-off below.
+2. **Route normalization** — `normalize_shared_filters()` in `app.py` is the single normalization entry point for both routes. It parses ints, swaps year bounds if `year_from > year_to`, validates album_id, and strips whitespace. Both `library()` and `map_view()` call it. Implemented in Task 3.
 3. **DB query** — `library_photos()` / `library_photo_ids()` receive cleaned `date_from`/`date_to`, `status`, `album_id`, `person`, `time_pattern`. SQL WHERE clauses built from these.
 4. **Template render** — route passes `filters` dict (library) or `initial_filters` dict (map) to Jinja; macro uses these to pre-populate `selected`/`value` attributes. Rendered HTML always reflects canonical (normalised) state.
 5. **JS hydration** — map JS reads field values via `document.querySelector('[name=X]')`; library JS reads from `libFilters` (JSON-serialised `filters`). Event listeners attached once.
 6. **User interaction** — selects trigger immediately; text fields debounce (details below); year inputs fire on `blur`/`Enter` only.
 7. **URL sync** — library: `buildLibraryUrl()` serializes all form fields → `location.href` (full reload; browser history push). Map: `buildMapUrl()` passes params to `fetch()`; URL bar updated via `history.replaceState()` (no extra history entries during exploration).
 
-### Known trade-off — normalization duplication
+### Canonical URL invariant
 
-`_safe_year()` at module level in `app.py` is the shared year-parsing function. The status enum is validated via `_STATUS_STATES` dict lookup in `db.py`. The map API mirrors these in `_MAP_STATUS_CLAUSES`. This is a small, tracked duplication — a future `normalize_shared_filters()` helper could eliminate it, but that refactor is deferred post-#155.
+Two semantically equivalent filter states must serialize to the same URL:
+- **Year bounds** always stored in ascending order (`year_from ≤ year_to`). `normalize_shared_filters()` enforces this; rendered URLs always carry canonical bounds.
+- **Empty params omitted.** `buildLibraryUrl()` skips blank values; `buildMapUrl()` only sets params when non-empty. Deep-links are minimal.
+- **Unknown status values dropped.** `normalize_shared_filters()` validates against `_STATUS_STATES` keys; invalid values become `""` (no-filter).
+- **Year→date conversion is one-way.** `year_from`/`year_to` appear in URLs; `date_from`/`date_to` (ISO strings) are internal route variables that do not re-appear in generated URLs.
+
+### Normalization authority
+
+`normalize_shared_filters()` (module-level, `app.py`) is the single source of truth for parsing, validation, and canonical order. Both `library()` and `map_view()` call it; neither duplicates parsing logic inline. `_MAP_STATUS_CLAUSES` in `api_map_photos()` still mirrors `_STATUS_STATES` — that is tracked technical debt and a candidate for the follow-up refactor.
 
 ---
 
@@ -380,13 +390,132 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 
 ---
 
-### Task 3: library route — year_from/year_to + person_names rename
+### Task 3: library route — `normalize_shared_filters()` + year_from/year_to + person_names rename
 
 **Files:**
-- Modify: `reviewer/app.py` — `library()` function (~lines 1047–1195)
+- Modify: `reviewer/app.py` — new module-level function + `library()` function (~lines 1047–1195)
 - Test: `tests/test_unified_filter.py`
 
-- [ ] **Step 1: Write failing tests**
+- [ ] **Step 1: Write failing normalization tests**
+
+Add to `tests/test_unified_filter.py` (before the library year section):
+
+```python
+# ── normalize_shared_filters() ─────────────────────────────────────────────
+
+
+class TestNormalizeSharedFilters:
+    def test_year_swap_produces_canonical_order(self):
+        from reviewer.app import app, normalize_shared_filters
+        with app.test_request_context("/?year_from=2025&year_to=2010"):
+            f = normalize_shared_filters()
+        assert f["year_from"] == 2010
+        assert f["year_to"] == 2025
+
+    def test_invalid_album_id_becomes_none(self):
+        from reviewer.app import app, normalize_shared_filters
+        with app.test_request_context("/?album_id=notanint"):
+            f = normalize_shared_filters()
+        assert f["album_id"] is None
+
+    def test_empty_request_gives_clean_defaults(self):
+        from reviewer.app import app, normalize_shared_filters
+        with app.test_request_context("/"):
+            f = normalize_shared_filters()
+        assert f["time_pattern"] == ""
+        assert f["year_from"] is None
+        assert f["year_to"] is None
+        assert f["album_id"] is None
+        assert f["person"] == ""
+        assert f["status"] == ""
+        assert f["expand"] == ""
+
+    def test_unknown_status_becomes_empty(self):
+        from reviewer.app import app, normalize_shared_filters
+        with app.test_request_context("/?status=bogus"):
+            f = normalize_shared_filters()
+        assert f["status"] == ""
+
+    def test_single_year_bound_preserved(self):
+        from reviewer.app import app, normalize_shared_filters
+        with app.test_request_context("/?year_from=2018"):
+            f = normalize_shared_filters()
+        assert f["year_from"] == 2018
+        assert f["year_to"] is None
+```
+
+- [ ] **Step 2: Run to confirm failures**
+
+```
+python -m pytest tests/test_unified_filter.py::TestNormalizeSharedFilters -v
+```
+
+Expected: all 5 FAIL (`normalize_shared_filters` not defined yet).
+
+- [ ] **Step 3: Implement `normalize_shared_filters()` in `reviewer/app.py`**
+
+Add this function at module level, immediately after `_safe_year()`:
+
+```python
+from typing import TypedDict
+
+class SharedFilters(TypedDict):
+    time_pattern: str
+    year_from: int | None
+    year_to: int | None
+    album_id: int | None
+    person: str
+    status: str
+    expand: str
+
+
+def normalize_shared_filters() -> SharedFilters:
+    """Parse and normalize the five shared filter params from request.args.
+
+    Single normalization entry point for both library() and map_view().
+    Centralizes: int parsing, year-bound swap, status validation, empty-string
+    normalization. Call within a Flask request context.
+    """
+    from db.db import _STATUS_STATES  # import here to keep at function level
+
+    year_from = _safe_year("year_from")
+    year_to   = _safe_year("year_to")
+    if year_from is not None and year_to is not None and year_from > year_to:
+        year_from, year_to = year_to, year_from
+
+    album_id: int | None = None
+    raw_album = (request.args.get("album_id") or "").strip()
+    if raw_album:
+        try:
+            album_id = int(raw_album)
+        except ValueError:
+            pass
+
+    raw_status = (request.args.get("status") or "").strip()
+    status = raw_status if raw_status in _STATUS_STATES else ""
+
+    return SharedFilters(
+        time_pattern=(request.args.get("time_pattern") or "").strip(),
+        year_from=year_from,
+        year_to=year_to,
+        album_id=album_id,
+        person=(request.args.get("person") or "").strip(),
+        status=status,
+        expand=(request.args.get("expand") or "").strip(),
+    )
+```
+
+> **Note on `_STATUS_STATES` import:** `db.py` is already imported in `app.py` as `from db.db import Database`. Check whether `_STATUS_STATES` is exported (it starts with `_` so it's technically private). If it isn't directly importable, use `db.db._STATUS_STATES` or expose a `STATUS_KEYS` constant. The simplest fix is a module-level `set` in `app.py`: `_VALID_STATUSES = frozenset(["public","friends","family","friends_family","private","pending"])`.
+
+- [ ] **Step 4: Run normalization tests**
+
+```
+python -m pytest tests/test_unified_filter.py::TestNormalizeSharedFilters -v
+```
+
+Expected: all 5 PASS.
+
+- [ ] **Step 5: Write failing library year tests**
 
 Add to `tests/test_unified_filter.py`:
 
@@ -482,7 +611,7 @@ class TestLibraryYearFilter:
 
 > **Note:** The JS `buildLibraryUrl()` always calls `params.delete('page')`, so pagination is reset on every filter change. There is no server-side test for this (it's a client-side invariant enforced in JS), but it is an explicit design invariant — any filter mutation must land on page 1.
 
-- [ ] **Step 2: Run to confirm failures**
+- [ ] **Step 6: Run to confirm failures**
 
 ```
 python -m pytest tests/test_unified_filter.py::TestLibraryYearFilter -v
@@ -490,24 +619,23 @@ python -m pytest tests/test_unified_filter.py::TestLibraryYearFilter -v
 
 Expected: all 7 FAIL (`year_from`/`year_to` not parsed by library route yet).
 
-- [ ] **Step 3: Update `library()` route in `reviewer/app.py`**
+- [ ] **Step 7: Update `library()` route in `reviewer/app.py` to use `normalize_shared_filters()`**
 
-In the `library()` function, immediately after the `time_pattern`/`time_expand` lines (around line 1065), add year parsing:
+Replace the inline year/album/person parsing in `library()` with a call to `normalize_shared_filters()`. In the `library()` function, after the `date_from`/`date_to` lines, add:
 
 ```python
-    # Year range convenience params — converted to ISO date_from/date_to
-    year_from = _safe_year("year_from")
-    year_to = _safe_year("year_to")
-    if year_from is not None and year_to is not None and year_from > year_to:
-        year_from, year_to = year_to, year_from
-    # Apply only if no explicit date_from/date_to was provided
-    if year_from is not None and not date_from:
-        date_from = f"{year_from:04d}-01-01"
-    if year_to is not None and not date_to:
-        date_to = f"{year_to + 1:04d}-01-01T00:00:00"
+    # Shared filter normalization — single canonical entry point
+    sf = normalize_shared_filters()
+    # Apply year→ISO date only if no explicit date_from/date_to was provided
+    if sf["year_from"] is not None and not date_from:
+        date_from = f"{sf['year_from']:04d}-01-01"
+    if sf["year_to"] is not None and not date_to:
+        date_to = f"{sf['year_to'] + 1:04d}-01-01T00:00:00"
 ```
 
-(`_safe_year` is already defined at module level in `app.py` from #154. If it is currently defined inside `api_map_photos()`, move it to module level now so both functions can use it.)
+Then use `sf["album_id"]`, `sf["person"]`, `sf["status"]`, `sf["time_pattern"]`, `sf["expand"]` where the route previously parsed them individually (search for `album_id = request.args.get(...)`, `person = request.args.get(...)`, etc.).
+
+(`_safe_year` is already defined at module level in `app.py` from #154; `normalize_shared_filters()` calls it internally, so no direct calls to `_safe_year` are needed in `library()` after this change.)
 
 Then in the `render_template` call, rename the template variable and add year fields. Find:
 
@@ -521,14 +649,14 @@ Change to:
         person_names=person_list,
 ```
 
-And in the `filters` dict, add:
+And in the `filters` dict, add (using the `sf` dict from `normalize_shared_filters()`):
 
 ```python
-            "year_from": year_from if year_from is not None else "",
-            "year_to":   year_to   if year_to   is not None else "",
+            "year_from": sf["year_from"] if sf["year_from"] is not None else "",
+            "year_to":   sf["year_to"]   if sf["year_to"]   is not None else "",
 ```
 
-- [ ] **Step 4: Run tests**
+- [ ] **Step 8: Run tests**
 
 ```
 python -m pytest tests/test_unified_filter.py::TestLibraryYearFilter -v
@@ -536,7 +664,7 @@ python -m pytest tests/test_unified_filter.py::TestLibraryYearFilter -v
 
 Expected: all 7 PASS.
 
-- [ ] **Step 5: Run full suite**
+- [ ] **Step 9: Run full suite**
 
 ```
 python -m pytest tests/ -q
@@ -546,11 +674,11 @@ Expected: all passing. (The one `person_list` reference in `library.html` — `{
 
 If template tests fail with `UndefinedError: person_list`, fix now by updating `library.html` line ~426: change `person_list` → `person_names`. Then re-run. (This reference will be removed entirely in Task 6 when the macro takes over, but patching it now keeps tests green.)
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add reviewer/app.py
-git commit -m "feat(#155): library route — year_from/year_to params + person_names rename
+git add reviewer/app.py tests/test_unified_filter.py
+git commit -m "feat(#155): normalize_shared_filters() + library route year params + person_names rename
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 ```
@@ -611,26 +739,22 @@ Expected: FAIL (map_view doesn't pass initial_filters; year/person values not in
 In `map_view()`, before the `return render_template(...)` call, add:
 
 ```python
-    # Parse shared filter params so deep-links from /library pre-populate the map filter form
-    _safe_album_id: int | None = None
-    _raw_album = request.args.get("album_id", "")
-    if _raw_album:
-        try:
-            _safe_album_id = int(_raw_album)
-        except ValueError:
-            pass
+    # Parse shared filter params via the single normalization entry point
+    sf = normalize_shared_filters()
     initial_filters = {
-        "time_pattern": request.args.get("time_pattern", ""),
-        "year_from":    request.args.get("year_from", ""),
-        "year_to":      request.args.get("year_to", ""),
-        "album_id":     _safe_album_id,
-        "person":       request.args.get("person", ""),
-        "status":       request.args.get("status", ""),
-        "expand":       request.args.get("expand", ""),  # holiday ±2 day expansion
+        "time_pattern": sf["time_pattern"],
+        "year_from":    sf["year_from"] if sf["year_from"] is not None else "",
+        "year_to":      sf["year_to"]   if sf["year_to"]   is not None else "",
+        "album_id":     sf["album_id"],
+        "person":       sf["person"],
+        "status":       sf["status"],
+        "expand":       sf["expand"],
     }
 ```
 
 Then add `initial_filters=initial_filters` to the `render_template("map.html", ...)` call.
+
+> `normalize_shared_filters()` replaces the inline `album_id` parsing that was here in earlier plan drafts. Both routes now share the same normalization path.
 
 - [ ] **Step 4: Run tests**
 
@@ -1612,8 +1736,12 @@ git push --tags
 | Tests: View on map link + roundtrip preserves filters | Task 6 |
 | `expand` in `initial_filters` (holiday deep-link) | Task 4 |
 | Bulk ops respect year range (year→date in `_buildPayload`) | Task 6 |
+| `normalize_shared_filters()` + `SharedFilters` TypedDict | Task 3 |
+| Both routes use `normalize_shared_filters()` | Tasks 3, 4 |
+| Canonical URL invariant + normalization authority | Plan header |
 | Map URL bar syncs via `history.replaceState` | Task 7 |
 | Pagination reset invariant (`params.delete('page')`) | Task 6 (JS) |
 | State flow + interaction model documented | Plan header |
+| Tags filter noted as planned next addition | Plan header |
 | README update | Task 8 |
 | Issue closed with retrospective | Task 8 |
