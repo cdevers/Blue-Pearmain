@@ -955,6 +955,7 @@ def map_view() -> str:
         .fetchall()
     )
     person_names = [r[0] for r in person_names_rows]
+    tag_names = db().tag_names()
 
     sf = normalize_shared_filters()
     initial_filters = {
@@ -965,6 +966,7 @@ def map_view() -> str:
         "person": sf["person"],
         "status": sf["status"],
         "expand": sf["expand"],
+        "tag": sf["tag"],
     }
 
     return render_template(
@@ -975,6 +977,7 @@ def map_view() -> str:
         birthday_people=db().get_person_birthdays(),
         albums=albums,
         person_names=person_names,
+        tag_names=tag_names,
         initial_filters=initial_filters,
     )
 

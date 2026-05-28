@@ -691,3 +691,53 @@ class TestMapTagFilter:
         data = resp.get_json()
         matching = [p for p in data if p["id"] == p_both]
         assert len(matching) == 1
+
+
+# ── /map tag deep-link ────────────────────────────────────────────────────────
+
+
+@pytest.fixture()
+def client_map_deep_link():
+    """Minimal DB for map route deep-link tests."""
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(Path(tmp) / "test.db")
+        db.upsert_photo(
+            _photo(
+                98,
+                latitude=42.36,
+                longitude=-71.06,
+                date_taken="2022-06-01T10:00:00",
+                privacy_state="approved_public",
+                photos_tags=["boston"],
+            )
+        )
+        app_module._db = db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test"
+        with app_module.app.test_client() as c:
+            yield c
+        app_module._db = None
+
+
+class TestMapTagDeepLink:
+    def test_map_view_passes_tag_to_initial_filters(self, client_map_deep_link):
+        resp = client_map_deep_link.get("/map?tag=boston")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert 'value="boston"' in body
+
+    def test_map_view_renders_tag_datalist(self, client_map_deep_link):
+        resp = client_map_deep_link.get("/map")
+        body = resp.data.decode()
+        assert 'id="map-tags"' in body
+
+    def test_map_view_tag_datalist_contains_photo_tag(self, client_map_deep_link):
+        resp = client_map_deep_link.get("/map")
+        body = resp.data.decode()
+        assert "boston" in body
+
+    def test_map_to_library_roundtrip_carries_tag(self, client_map_deep_link):
+        """openInLibrary() serialises tag — verify it appears in the JS."""
+        resp = client_map_deep_link.get("/map?tag=boston")
+        body = resp.data.decode()
+        assert "params.set('tag'" in body or 'params.set("tag"' in body

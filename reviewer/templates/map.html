@@ -124,7 +124,10 @@
   <!-- Collapsible filter panel (hidden via CSS; .is-open shows it) -->
   {% from "_filter_bar.html" import filter_bar %}
   <div id="map-filter-panel" class="map-filter-panel">
-    {{ filter_bar(albums, person_names, initial_filters, datalist_id="map-persons") }}
+    {{ filter_bar(albums, person_names, initial_filters,
+                  datalist_id="map-persons",
+                  tag_names=tag_names,
+                  tag_datalist_id="map-tags") }}
 
     <!-- Map-specific: expand toggle + animation privacy -->
     <div style="display:flex;align-items:center;gap:12px;padding:4px 0">
@@ -192,6 +195,7 @@ function _hasAnyFilter() {
   if ((document.querySelector('[name=album_id]')?.value || '')) return true;
   if ((document.querySelector('[name=person]')?.value || '').trim()) return true;
   if ((document.querySelector('[name=status]')?.value || '')) return true;
+  if ((document.querySelector('[name=tag]')?.value || '').trim()) return true;
   return false;
 }
 
@@ -223,6 +227,9 @@ function _updateFilterChips() {
   if (statusEl?.value) {
     chips.push({ text: statusEl.options[statusEl.selectedIndex].text, cls: 'map-chip' });
   }
+
+  const tag = (document.querySelector('[name=tag]')?.value || '').trim();
+  if (tag) chips.push({ text: `#${tag}`, cls: 'map-chip' });
 
   const privacyEl = document.getElementById('map-privacy-select');
   if (privacyEl?.value !== 'all') {
@@ -418,6 +425,8 @@ function buildMapUrl() {
   if (person) params.set('person', person);
   const status = document.querySelector('[name=status]')?.value || '';
   if (status) params.set('status', status);
+  const tag = (document.querySelector('[name=tag]')?.value || '').trim();
+  if (tag) params.set('tag', tag);
   // Sync URL bar without adding a browser history entry (exploration ≠ navigation)
   const s = params.toString();
   history.replaceState(null, '', s ? `/map?${s}` : '/map');
@@ -607,6 +616,8 @@ function openInLibrary() {
   if (person) params.set('person', person);
   const status = document.querySelector('[name=status]')?.value || '';
   if (status) params.set('status', status);
+  const tag = (document.querySelector('[name=tag]')?.value || '').trim();
+  if (tag) params.set('tag', tag);
   window.open('/library?' + params.toString(), '_blank');
 }
 </script>
