@@ -971,21 +971,12 @@ def api_map_photos() -> Response:
     time_pattern = request.args.get("time_pattern") or None
     time_expand = 2 if request.args.get("expand") == "1" else 0
 
-    # ── New filter params ────────────────────────────────────────────────
-    year_from = _safe_year("year_from")
-    year_to = _safe_year("year_to")
-    if year_from is not None and year_to is not None and year_from > year_to:
-        year_from, year_to = year_to, year_from
-
-    album_id_raw = request.args.get("album_id")
-    album_id: int | None = None
-    if album_id_raw:
-        try:
-            album_id = int(album_id_raw)
-        except ValueError:
-            pass
-
-    person = (request.args.get("person") or "").strip() or None
+    # ── Shared filter params ─────────────────────────────────────────────
+    sf = normalize_shared_filters()
+    year_from = sf["year_from"]
+    year_to = sf["year_to"]
+    album_id = sf["album_id"]
+    person = (sf["person"] or "").strip()
 
     # ── Build WHERE fragments ────────────────────────────────────────────
     where_frags: list[str] = []
@@ -1066,7 +1057,7 @@ def api_map_photos() -> Response:
         "private": "p.privacy_state IN ('keep_private','auto_private')",
         "pending": "p.privacy_state IN ('needs_review','candidate_public')",
     }
-    map_status = (request.args.get("status") or "").strip()
+    map_status = sf["status"]
     if map_status and map_status in _MAP_STATUS_CLAUSES:
         where_frags.append(_MAP_STATUS_CLAUSES[map_status])
         # No bound parameter — SQL literals only (all values are hard-coded)
