@@ -99,6 +99,8 @@
   <label id="map-trail-label" style="display:none;align-items:center;gap:5px">
     <input type="checkbox" id="map-trail-cb"> Show trail
   </label>
+  <button type="button" id="map-animate-btn" onclick="toggleAnimation()"
+          class="map-btn" style="display:none">Animate</button>
   <span id="map-photo-count" style="font-size:12px;color:var(--muted)"></span>
   <button type="button" id="map-draw-btn" onclick="toggleDraw()"
           class="map-btn" style="margin-left:auto">Draw selection</button>
@@ -130,6 +132,12 @@ map.addLayer(markers);   // added once; reloadMarkers only calls clearLayers()
 
 let _lastPhotos = [];    // last-fetched photo array; used to redraw trail without a network round-trip
 let _trailLayer  = null; // current L.polyline, or null
+
+// ── Animation state (#153) ─────────────────────────────────────────────────
+let _animFrame   = null; // requestAnimationFrame handle while animating, null otherwise
+let _animTrail   = null; // L.polyline growing trail, null when not animating
+let _planeMarker = null; // L.marker with divIcon plane, null when not animating
+
 let _highlightDone = false;
 function tryHighlight() {
   if (!highlightId || _highlightDone) return;
@@ -137,6 +145,14 @@ function tryHighlight() {
   if (!marker) return;
   _highlightDone = true;
   markers.zoomToShowLayer(marker, () => marker.openPopup());
+}
+
+function _updateAnimateBtn() {
+  const btn = document.getElementById('map-animate-btn');
+  if (!btn) return;
+  const trailOn = document.getElementById('map-trail-cb').checked;
+  btn.style.display = (trailOn && _lastPhotos.filter(p => p.lat != null && p.lon != null).length >= 2)
+    ? '' : 'none';
 }
 
 function plotTrail(photos) {
@@ -152,6 +168,118 @@ function plotTrail(photos) {
     opacity: 0.65,
   }).addTo(map);
   _trailLayer.bringToBack();
+  _updateAnimateBtn();
+}
+
+// ── Animation helpers (#153) ───────────────────────────────────────────────
+function bearing(lat1, lon1, lat2, lon2) {
+  const toRad = d => d * Math.PI / 180;
+  const dLon = toRad(lon2 - lon1);
+  const φ1 = toRad(lat1), φ2 = toRad(lat2);
+  const y = Math.sin(dLon) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(dLon);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function planeIcon(deg) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="font-size:20px;transform:rotate(${deg - 90}deg);transform-origin:center;line-height:1">✈</div>`,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+  });
+}
+
+const lerp = (a, b, t) => a + (b - a) * t;
+
+function stopAnimation() {
+  if (_animFrame)   { cancelAnimationFrame(_animFrame); _animFrame = null; }
+  if (_planeMarker) { map.removeLayer(_planeMarker);    _planeMarker = null; }
+  if (_animTrail)   { map.removeLayer(_animTrail);      _animTrail = null; }
+  if (_trailLayer)  { _trailLayer.setStyle({ opacity: 0.65 }); }
+  const btn = document.getElementById('map-animate-btn');
+  if (btn) btn.textContent = 'Animate';
+}
+
+function animatePOC(photos) {
+  const pts = photos.filter(p => p.lat != null && p.lon != null);
+  if (pts.length < 2) return;
+
+  // Build segments with distances
+  const segments = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const dist = map.distance([pts[i].lat, pts[i].lon], [pts[i+1].lat, pts[i+1].lon]);
+    segments.push({ lat1: pts[i].lat, lon1: pts[i].lon,
+                    lat2: pts[i+1].lat, lon2: pts[i+1].lon, dist });
+  }
+  const totalDist = segments.reduce((s, seg) => s + seg.dist, 0);
+  if (totalDist === 0) return;
+
+  const DURATION_MS = 12000;
+
+  // Hide static trail, create animated trail and plane
+  if (_trailLayer) _trailLayer.setStyle({ opacity: 0 });
+  _animTrail   = L.polyline([], { color: '#e06820', weight: 3, opacity: 0.8 }).addTo(map);
+  const brg0   = bearing(segments[0].lat1, segments[0].lon1, segments[0].lat2, segments[0].lon2);
+  _planeMarker = L.marker([segments[0].lat1, segments[0].lon1], { icon: planeIcon(brg0), zIndexOffset: 1000 }).addTo(map);
+  map.setView([segments[0].lat1, segments[0].lon1], map.getZoom(), { animate: false });
+
+  const startTime = performance.now();
+
+  function step(now) {
+    const t_global = Math.min((now - startTime) / DURATION_MS, 1);
+
+    // Find which segment t_global falls in
+    let cumTime = 0;
+    let seg = segments[segments.length - 1];
+    let segStartTime = 0;
+    const completedLatLngs = [[segments[0].lat1, segments[0].lon1]];
+
+    for (let i = 0; i < segments.length; i++) {
+      const share = segments[i].dist / totalDist;
+      if (cumTime + share >= t_global || i === segments.length - 1) {
+        seg = segments[i];
+        segStartTime = cumTime;
+        break;
+      }
+      cumTime += share;
+      completedLatLngs.push([segments[i].lat2, segments[i].lon2]);
+    }
+
+    const share = seg.dist / totalDist;
+    const t_local = share > 0 ? Math.min((t_global - segStartTime) / share, 1) : 1;
+    const lat = lerp(seg.lat1, seg.lat2, t_local);
+    const lon = lerp(seg.lon1, seg.lon2, t_local);
+
+    // Grow trail to current position
+    _animTrail.setLatLngs([...completedLatLngs, [lat, lon]]);
+
+    // Move and rotate plane
+    const brg = bearing(seg.lat1, seg.lon1, seg.lat2, seg.lon2);
+    _planeMarker.setLatLng([lat, lon]);
+    _planeMarker.setIcon(planeIcon(brg));
+
+    // Pan map to follow
+    map.panTo([lat, lon], { animate: true, duration: 0.3 });
+
+    if (t_global < 1) {
+      _animFrame = requestAnimationFrame(step);
+    } else {
+      stopAnimation();
+    }
+  }
+
+  _animFrame = requestAnimationFrame(step);
+}
+
+function toggleAnimation() {
+  if (_animFrame !== null) {
+    stopAnimation();
+  } else {
+    animatePOC(_lastPhotos);
+    const btn = document.getElementById('map-animate-btn');
+    if (btn && _animFrame !== null) btn.textContent = 'Stop';
+  }
 }
 
 function esc(s) {
@@ -222,12 +350,17 @@ document.getElementById('map-time-select').addEventListener('change', function (
   trailLbl.style.display = isAnyPattern ? 'flex' : 'none';
   if (!isAnyPattern) {
     trailCb.checked = false;
+    stopAnimation();
     if (_trailLayer) { map.removeLayer(_trailLayer); _trailLayer = null; }
+    document.getElementById('map-animate-btn').style.display = 'none';
   }
 
   reloadMarkers();
 });
-document.getElementById('map-trail-cb').addEventListener('change', () => plotTrail(_lastPhotos));
+document.getElementById('map-trail-cb').addEventListener('change', () => {
+  plotTrail(_lastPhotos);
+  _updateAnimateBtn();
+});
 document.getElementById('map-expand-cb').addEventListener('change', reloadMarkers);
 
 reloadMarkers();   // initial load
