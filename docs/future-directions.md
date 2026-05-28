@@ -96,9 +96,17 @@ The map currently shows all geotagged photos as independent dots. A "Photo Trail
 
 ### Person birthdays and birthday-aware filtering ([#152](https://github.com/cdevers/Blue-Pearmain/issues/152)) `size:M` · [spec](superpowers/specs/2026-05-27-person-birthdays-152.md) · ✓ done
 
-### Map filter scoping — year range, album, person, privacy ([#154](https://github.com/cdevers/Blue-Pearmain/issues/154)) `size:M` · [spec](superpowers/specs/2026-05-28-map-filter-scoping-154.md)
+### Map filter scoping — year range, album, person, privacy ([#154](https://github.com/cdevers/Blue-Pearmain/issues/154)) `size:M` · [spec](superpowers/specs/2026-05-28-map-filter-scoping-154.md) · ✓ done
 
 The map filter bar gains four new dimensions that AND with the existing time-pattern dropdown: year range (from/to, either optional), album, person (type-ahead against `apple_persons`), and an animation-only privacy toggle (All / Public only / Private only). All filters affect map dots, trail, and animation; privacy affects animation only. Enables workflows like "every place I've met Marcin" or "find which August trip included Spain, then animate it."
+
+### Unified filter widget — shared macro across library and map ([#155](https://github.com/cdevers/Blue-Pearmain/issues/155)) `size:M` · [spec](superpowers/specs/2026-05-28-unified-filter-widget-155.md) · ✓ done
+
+Extracted the five shared filter dimensions (time pattern, year range, album, person, privacy/status) into a reusable Jinja macro (`_filter_bar.html`) used by both `/library` and `/map`. Library gains instant-apply JS (no Apply button), a filter chip row, and a View-on-map link that preserves filter state. Map gets a compact bar + collapsible panel with deep-link support. `normalize_shared_filters()` is the single normalization entry point for both routes.
+
+### Unified filter widget: tags dimension ([#156](https://github.com/cdevers/Blue-Pearmain/issues/156)) `size:S`
+
+Add a tag type-ahead to the shared `_filter_bar.html` macro. Tags are already in the DB; this wires them as a sixth filter dimension on both `/library` and `/map`, with the same chip-row, deep-link, and cross-page nav treatment as the other dimensions. Single-tag filter to start; multi-tag OR can follow separately.
 
 ### Animated map trail — Indiana Jones-style route animation ([#153](https://github.com/cdevers/Blue-Pearmain/issues/153)) `size:L` · [spec](superpowers/specs/2026-05-27-map-trail-animation-153.md) · ✓ Phase 1 done
 
