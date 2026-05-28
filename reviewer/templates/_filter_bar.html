@@ -1,20 +1,31 @@
 {#
-  _filter_bar.html — shared filter macro (#155)
+  _filter_bar.html — shared filter macro (#155, extended in #156)
 
   Usage:
     {% from "_filter_bar.html" import filter_bar %}
-    {{ filter_bar(albums, person_names, filters, datalist_id="lib-persons") }}
-    {{ filter_bar(albums, person_names, initial_filters, datalist_id="map-persons") }}
+    {{ filter_bar(albums, person_names, filters,
+                  datalist_id="lib-persons",
+                  tag_names=tag_names,
+                  tag_datalist_id="lib-tags") }}
+    {{ filter_bar(albums, person_names, initial_filters,
+                  datalist_id="map-persons",
+                  tag_names=tag_names,
+                  tag_datalist_id="map-tags") }}
 
   Parameters:
-    albums       — list of dicts with keys: id (int), name (str)
-    person_names — sorted list of named persons (strings); _UNKNOWN_ excluded
-    filters      — dict with keys: time_pattern, year_from, year_to,
-                   album_id (int|None), person, status, expand
-    datalist_id  — unique ID for the <datalist> element; must differ per page
-                   to avoid duplicate-ID collisions (default: "shared-persons")
+    albums          — list of dicts with keys: id (int), name (str)
+    person_names    — sorted list of named persons (strings); _UNKNOWN_ excluded
+    filters         — dict with keys: time_pattern, year_from, year_to,
+                      album_id (int|None), person, status, tag, expand
+    datalist_id     — unique ID for the person <datalist>; must differ per page
+                      to avoid duplicate-ID collisions (default: "shared-persons")
+    tag_names       — sorted list of tag strings for the tag datalist (default: None → empty)
+    tag_datalist_id — unique ID for the tag <datalist> (default: "shared-tags")
 #}
-{% macro filter_bar(albums, person_names, filters, datalist_id="shared-persons") %}
+{% macro filter_bar(albums, person_names, filters,
+                    datalist_id="shared-persons",
+                    tag_names=None,
+                    tag_datalist_id="shared-tags") %}
 <div class="shared-filter-bar">
 
   <label>Time of year
@@ -89,6 +100,16 @@
     <datalist id="{{ datalist_id }}">
       {% for name in person_names %}
       <option value="{{ name | e }}">
+      {% endfor %}
+    </datalist>
+  </label>
+
+  <label>Tag
+    <input type="text" name="tag" value="{{ filters.tag or '' }}"
+           list="{{ tag_datalist_id }}" placeholder="tag…" style="width:160px">
+    <datalist id="{{ tag_datalist_id }}">
+      {% for t in (tag_names or []) %}
+      <option value="{{ t | e }}">
       {% endfor %}
     </datalist>
   </label>
