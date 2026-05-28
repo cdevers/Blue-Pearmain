@@ -1062,6 +1062,18 @@ def api_map_photos() -> Response:
         )
         where_params.append(person)
 
+    # Tag — case-sensitive exact match in either photos_tags or flickr_tags.
+    # Intentionally case-sensitive for consistency with _library_where() tag logic;
+    # datalist suggestions always produce exact-case values so this is correct for
+    # normal usage. Do not add LOWER() without also changing _library_where().
+    map_tag = (sf["tag"] or "").strip()
+    if map_tag:
+        where_frags.append(
+            "(EXISTS (SELECT 1 FROM json_each(p.flickr_tags) WHERE value = ?) "
+            "OR EXISTS (SELECT 1 FROM json_each(p.photos_tags) WHERE value = ?))"
+        )
+        where_params.extend([map_tag, map_tag])
+
     # Status (privacy scope) — dataset-level filter; same semantics as library
     _MAP_STATUS_CLAUSES: dict[str, str] = {
         "public": "p.privacy_state IN ('already_public','approved_public')",

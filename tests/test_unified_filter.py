@@ -576,3 +576,118 @@ class TestLibraryTagFilter:
         tag_link = next((u for u in map_links if "tag=" in u), None)
         assert tag_link is not None, "No /map link with tag= found"
         assert "boston" in tag_link
+
+
+# ── /api/map-photos tag filter ────────────────────────────────────────────────
+
+
+@pytest.fixture()
+def client_map_tags():
+    """DB with geotagged photos: one tagged boston, one tagged concert, one untagged."""
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(Path(tmp) / "test.db")
+        p1 = db.upsert_photo(
+            _photo(
+                93,
+                photos_tags=["boston"],
+                latitude=42.36,
+                longitude=-71.06,
+                date_taken="2022-06-01T10:00:00",
+                privacy_state="approved_public",
+            )
+        )
+        p2 = db.upsert_photo(
+            _photo(
+                94,
+                photos_tags=["concert"],
+                latitude=42.37,
+                longitude=-71.07,
+                date_taken="2022-06-02T10:00:00",
+                privacy_state="approved_public",
+            )
+        )
+        p3 = db.upsert_photo(
+            _photo(
+                95,
+                photos_tags=[],
+                latitude=42.38,
+                longitude=-71.08,
+                date_taken="2022-06-03T10:00:00",
+                privacy_state="approved_public",
+            )
+        )
+        app_module._db = db
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test"
+        with app_module.app.test_client() as c:
+            yield c, p1, p2, p3
+        app_module._db = None
+
+
+class TestMapTagFilter:
+    def test_tag_scopes_map_results(self, client_map_tags):
+        c, p1, p2, p3 = client_map_tags
+        resp = c.get("/api/map-photos?tag=boston")
+        assert resp.status_code == 200
+        ids = _map_ids(resp)
+        assert p1 in ids
+        assert p2 not in ids
+        assert p3 not in ids
+
+    def test_no_tag_returns_all_geotagged(self, client_map_tags):
+        c, p1, p2, p3 = client_map_tags
+        resp = c.get("/api/map-photos")
+        ids = _map_ids(resp)
+        assert {p1, p2, p3}.issubset(ids)
+
+    def test_nonexistent_tag_returns_empty(self, client_map_tags):
+        c, p1, p2, p3 = client_map_tags
+        resp = c.get("/api/map-photos?tag=no-such-tag")
+        ids = _map_ids(resp)
+        assert len(ids) == 0
+
+    def test_tag_match_is_case_sensitive(self, client_map_tags):
+        """Tag filter is intentionally case-sensitive — matches _library_where() behaviour."""
+        c, p1, p2, p3 = client_map_tags
+        resp = c.get("/api/map-photos?tag=Boston")  # capital B
+        ids = _map_ids(resp)
+        assert p1 not in ids
+
+    def test_tag_in_flickr_tags_also_matches(self, client_map_tags):
+        """Tag filter checks flickr_tags as well as photos_tags."""
+        c, p1, p2, p3 = client_map_tags
+        db = app_module._db
+        p_flickr = db.upsert_photo(
+            _photo(
+                96,
+                flickr_tags=["flickr-only-tag"],
+                photos_tags=[],
+                latitude=42.39,
+                longitude=-71.09,
+                date_taken="2022-06-04T10:00:00",
+                privacy_state="approved_public",
+            )
+        )
+        resp = c.get("/api/map-photos?tag=flickr-only-tag")
+        ids = _map_ids(resp)
+        assert p_flickr in ids
+
+    def test_photo_with_tag_in_both_columns_appears_once(self, client_map_tags):
+        """Photo with tag in both flickr_tags and photos_tags appears exactly once."""
+        db = app_module._db
+        p_both = db.upsert_photo(
+            _photo(
+                97,
+                flickr_tags=["boston"],
+                photos_tags=["boston"],
+                latitude=42.40,
+                longitude=-71.10,
+                date_taken="2022-06-05T10:00:00",
+                privacy_state="approved_public",
+            )
+        )
+        c, p1, p2, p3 = client_map_tags
+        resp = c.get("/api/map-photos?tag=boston")
+        data = resp.get_json()
+        matching = [p for p in data if p["id"] == p_both]
+        assert len(matching) == 1
