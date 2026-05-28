@@ -1004,6 +1004,20 @@ def api_map_photos() -> Response:
         )
         where_params.append(person)
 
+    # Status (privacy scope) — dataset-level filter; same semantics as library
+    _MAP_STATUS_CLAUSES: dict[str, str] = {
+        "public": "p.privacy_state IN ('already_public','approved_public')",
+        "friends": "p.privacy_state = 'approved_friends'",
+        "family": "p.privacy_state = 'approved_family'",
+        "friends_family": "p.privacy_state = 'approved_friends_family'",
+        "private": "p.privacy_state IN ('keep_private','auto_private')",
+        "pending": "p.privacy_state IN ('needs_review','candidate_public')",
+    }
+    map_status = (request.args.get("status") or "").strip()
+    if map_status and map_status in _MAP_STATUS_CLAUSES:
+        where_frags.append(_MAP_STATUS_CLAUSES[map_status])
+        # No bound parameter — SQL literals only (all values are hard-coded)
+
     extra_where = (" AND " + " AND ".join(where_frags)) if where_frags else ""
 
     rows = (
