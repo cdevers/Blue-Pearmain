@@ -10,17 +10,52 @@
 
 {% block extra_style %}
 .map-filter-bar {
-  height: 40px;
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 16px;
+  flex-direction: column;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   font-size: 13px;
 }
+.map-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  height: 40px;
+  flex-wrap: wrap;
+}
+.map-filter-row + .map-filter-row {
+  border-top: 1px solid var(--border);
+}
 .map-filter-bar label { display: flex; align-items: center; gap: 6px; }
-#map { height: calc(100vh - 48px - 40px); width: 100%; }
+.map-filter-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 16px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  min-height: 0;
+}
+.map-filter-chips:empty { display: none; }
+.map-chip {
+  background: #e0eeff;
+  border: 1px solid #a0c0ff;
+  border-radius: 12px;
+  padding: 1px 8px;
+  font-size: 11px;
+  color: #1a5fbf;
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.map-chip-anim {
+  background: #fff0d0;
+  border-color: #e0a040;
+  color: #7a4800;
+}
+#map { height: calc(100vh - 48px - 80px); width: 100%; }
 .map-popup img { width: 120px; height: 80px; object-fit: cover; border-radius: 4px; display: block; margin-bottom: 6px; }
 .map-popup .pop-title { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
 .map-popup .pop-date  { font-size: 11px; color: #888; margin-bottom: 6px; }
@@ -36,6 +71,10 @@
   font-size: 12px;
   cursor: pointer;
 }
+.map-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 .map-btn-primary {
   background: var(--accent);
   border-color: var(--accent);
@@ -45,69 +84,110 @@
 
 {% block content %}
 <div class="map-filter-bar">
-  <label>Time of year
-    <select id="map-time-select">
-      <option value="">Any time</option>
-      <optgroup label="Month">
-        <option value="month:01">January</option>
-        <option value="month:02">February</option>
-        <option value="month:03">March</option>
-        <option value="month:04">April</option>
-        <option value="month:05">May</option>
-        <option value="month:06">June</option>
-        <option value="month:07">July</option>
-        <option value="month:08">August</option>
-        <option value="month:09">September</option>
-        <option value="month:10">October</option>
-        <option value="month:11">November</option>
-        <option value="month:12">December</option>
-      </optgroup>
-      <optgroup label="Season">
-        <option value="season:spring">Spring (Mar–Jun)</option>
-        <option value="season:summer">Summer (Jun–Sep)</option>
-        <option value="season:fall">Fall (Sep–Dec)</option>
-        <option value="season:winter">Winter (Dec–Mar)</option>
-      </optgroup>
-      <optgroup label="Day type">
-        <option value="daytype:weekend">Weekends</option>
-        <option value="daytype:weekday">Weekdays</option>
-      </optgroup>
-      <optgroup label="Holidays">
-        <option value="holiday:new_years">New Year's Day (Jan 1)</option>
-        <option value="holiday:mlk_day">MLK Day (3rd Mon Jan)</option>
-        <option value="holiday:presidents_day">Presidents' Day (3rd Mon Feb)</option>
-        <option value="holiday:memorial_day">Memorial Day (last Mon May)</option>
-        <option value="holiday:july_4th">July 4th</option>
-        <option value="holiday:labor_day">Labor Day (1st Mon Sep)</option>
-        <option value="holiday:columbus_day">Columbus Day (2nd Mon Oct)</option>
-        <option value="holiday:halloween">Halloween (Oct 31)</option>
-        <option value="holiday:thanksgiving">Thanksgiving (4th Thu Nov)</option>
-        <option value="holiday:christmas">Christmas (Dec 25)</option>
-      </optgroup>
-      {% if birthday_people %}
-      <optgroup label="Birthdays">
-        {% for name in birthday_people | sort %}
-        <option value="birthday:{{ name | e }}">{{ name }}'s birthday</option>
+  <!-- Row 1: time scope + year range + trail + animate + map controls -->
+  <div class="map-filter-row">
+    <label>Time of year
+      <select id="map-time-select">
+        <option value="">Any time</option>
+        <optgroup label="Month">
+          <option value="month:01">January</option>
+          <option value="month:02">February</option>
+          <option value="month:03">March</option>
+          <option value="month:04">April</option>
+          <option value="month:05">May</option>
+          <option value="month:06">June</option>
+          <option value="month:07">July</option>
+          <option value="month:08">August</option>
+          <option value="month:09">September</option>
+          <option value="month:10">October</option>
+          <option value="month:11">November</option>
+          <option value="month:12">December</option>
+        </optgroup>
+        <optgroup label="Season">
+          <option value="season:spring">Spring (Mar–Jun)</option>
+          <option value="season:summer">Summer (Jun–Sep)</option>
+          <option value="season:fall">Fall (Sep–Dec)</option>
+          <option value="season:winter">Winter (Dec–Mar)</option>
+        </optgroup>
+        <optgroup label="Day type">
+          <option value="daytype:weekend">Weekends</option>
+          <option value="daytype:weekday">Weekdays</option>
+        </optgroup>
+        <optgroup label="Holidays">
+          <option value="holiday:new_years">New Year's Day (Jan 1)</option>
+          <option value="holiday:mlk_day">MLK Day (3rd Mon Jan)</option>
+          <option value="holiday:presidents_day">Presidents' Day (3rd Mon Feb)</option>
+          <option value="holiday:memorial_day">Memorial Day (last Mon May)</option>
+          <option value="holiday:july_4th">July 4th</option>
+          <option value="holiday:labor_day">Labor Day (1st Mon Sep)</option>
+          <option value="holiday:columbus_day">Columbus Day (2nd Mon Oct)</option>
+          <option value="holiday:halloween">Halloween (Oct 31)</option>
+          <option value="holiday:thanksgiving">Thanksgiving (4th Thu Nov)</option>
+          <option value="holiday:christmas">Christmas (Dec 25)</option>
+        </optgroup>
+        {% if birthday_people %}
+        <optgroup label="Birthdays">
+          {% for name in birthday_people | sort %}
+          <option value="birthday:{{ name | e }}">{{ name }}'s birthday</option>
+          {% endfor %}
+        </optgroup>
+        {% endif %}
+      </select>
+    </label>
+    <label id="map-expand-label" style="display:none;align-items:center;gap:5px">
+      <input type="checkbox" id="map-expand-cb"> ±2 days
+    </label>
+    <label style="align-items:center;gap:5px">Year
+      <input type="number" id="map-year-from" min="1800" max="2099"
+             placeholder="from" style="width:62px">
+      <span>–</span>
+      <input type="number" id="map-year-to" min="1800" max="2099"
+             placeholder="to" style="width:62px">
+    </label>
+    <label style="align-items:center;gap:5px">
+      <input type="checkbox" id="map-trail-cb"> Trail
+    </label>
+    <button type="button" id="map-animate-btn" onclick="toggleAnimation()"
+            class="map-btn" style="display:none">Animate</button>
+    <span id="map-photo-count" style="font-size:12px;color:var(--muted)"></span>
+    <button type="button" id="map-draw-btn" onclick="toggleDraw()"
+            class="map-btn" style="margin-left:auto">Draw selection</button>
+    <button type="button" id="map-clear-btn" onclick="clearSelection()"
+            class="map-btn" style="display:none">✕ Clear selection</button>
+    <button type="button" id="map-open-lib-btn" onclick="openInLibrary()"
+            class="map-btn map-btn-primary">Open in Library ↗</button>
+  </div>
+
+  <!-- Row 2: person + album + animation privacy -->
+  <div class="map-filter-row">
+    <label>Person
+      <input type="text" id="map-person" list="map-person-datalist"
+             placeholder="Search name…" style="width:160px">
+      <datalist id="map-person-datalist">
+        {% for name in person_names %}
+        <option value="{{ name | e }}">
         {% endfor %}
-      </optgroup>
-      {% endif %}
-    </select>
-  </label>
-  <label id="map-expand-label" style="display:none;align-items:center;gap:5px">
-    <input type="checkbox" id="map-expand-cb"> ±2 days
-  </label>
-  <label id="map-trail-label" style="display:none;align-items:center;gap:5px">
-    <input type="checkbox" id="map-trail-cb"> Show trail
-  </label>
-  <button type="button" id="map-animate-btn" onclick="toggleAnimation()"
-          class="map-btn" style="display:none">Animate</button>
-  <span id="map-photo-count" style="font-size:12px;color:var(--muted)"></span>
-  <button type="button" id="map-draw-btn" onclick="toggleDraw()"
-          class="map-btn" style="margin-left:auto">Draw selection</button>
-  <button type="button" id="map-clear-btn" onclick="clearSelection()"
-          class="map-btn" style="display:none">✕ Clear selection</button>
-  <button type="button" id="map-open-lib-btn" onclick="openInLibrary()"
-          class="map-btn map-btn-primary">Open in Library ↗</button>
+      </datalist>
+    </label>
+    <label>Album
+      <select id="map-album-select">
+        <option value="">— any album —</option>
+        {% for album in albums %}
+        <option value="{{ album.id }}">{{ album.name | e }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label style="margin-left:auto;align-items:center;gap:5px">▶ Animate:
+      <select id="map-privacy-select">
+        <option value="all">All photos</option>
+        <option value="public">Public only</option>
+        <option value="private">Private only</option>
+      </select>
+    </label>
+  </div>
+
+  <!-- Active filter chips (hidden when empty via :empty selector) -->
+  <div class="map-filter-chips" id="map-filter-chips"></div>
 </div>
 <div id="map"></div>
 
@@ -130,7 +210,7 @@ const _markerById = {};   // photo id (number) → Leaflet marker; rebuilt on ea
 const highlightId = {{ highlight_id | default(none) | tojson }};   // null or integer from backend
 map.addLayer(markers);   // added once; reloadMarkers only calls clearLayers()
 
-let _lastPhotos = [];    // last-fetched photo array; used to redraw trail without a network round-trip
+let _lastPhotos = [];    // last-fetched photo array (replaced atomically in plotPhotos); never mutate directly
 let _trailLayer  = null; // current L.polyline, or null
 
 // ── Animation state (#153) ─────────────────────────────────────────────────
@@ -147,12 +227,80 @@ function tryHighlight() {
   markers.zoomToShowLayer(marker, () => marker.openPopup());
 }
 
+// ── Filter helpers ─────────────────────────────────────────────────────────
+
+function _hasAnyFilter() {
+  if (document.getElementById('map-time-select').value) return true;
+  if (document.getElementById('map-year-from').value.trim()) return true;
+  if (document.getElementById('map-year-to').value.trim()) return true;
+  if (document.getElementById('map-album-select').value) return true;
+  if (document.getElementById('map-person').value.trim()) return true;
+  return false;
+}
+
+function _updateFilterChips() {
+  const container = document.getElementById('map-filter-chips');
+  if (!container) return;
+  const chips = [];
+
+  const patternEl = document.getElementById('map-time-select');
+  if (patternEl.value) {
+    const label = patternEl.options[patternEl.selectedIndex].text;
+    chips.push({ text: label, cls: 'map-chip' });
+  }
+
+  const yf = document.getElementById('map-year-from').value.trim();
+  const yt = document.getElementById('map-year-to').value.trim();
+  if (yf && yt) {
+    chips.push({ text: `${yf}–${yt}`, cls: 'map-chip' });
+  } else if (yf) {
+    chips.push({ text: `from ${yf}`, cls: 'map-chip' });
+  } else if (yt) {
+    chips.push({ text: `to ${yt}`, cls: 'map-chip' });
+  }
+
+  const person = document.getElementById('map-person').value.trim();
+  if (person) chips.push({ text: person, cls: 'map-chip' });
+
+  const albumEl = document.getElementById('map-album-select');
+  if (albumEl.value) {
+    const albumLabel = albumEl.options[albumEl.selectedIndex].text;
+    chips.push({ text: albumLabel, cls: 'map-chip' });
+  }
+
+  const privacyEl = document.getElementById('map-privacy-select');
+  if (privacyEl.value !== 'all') {
+    const privLabel = privacyEl.options[privacyEl.selectedIndex].text;
+    chips.push({ text: `▶ ${privLabel}`, cls: 'map-chip map-chip-anim' });
+  }
+
+  container.innerHTML = chips
+    .map(c => `<span class="${c.cls}">${esc(c.text)}</span>`)
+    .join('');
+}
+
+// ── Animate button state ───────────────────────────────────────────────────
+
 function _updateAnimateBtn() {
   const btn = document.getElementById('map-animate-btn');
   if (!btn) return;
   const trailOn = document.getElementById('map-trail-cb').checked;
-  btn.style.display = (trailOn && _lastPhotos.filter(p => p.lat != null && p.lon != null).length >= 2)
-    ? '' : 'none';
+  if (!trailOn) {
+    btn.style.display = 'none';
+    btn.disabled = false;
+    return;
+  }
+  btn.style.display = '';
+  // Apply privacy filter to determine eligible photo count
+  const privacySel = document.getElementById('map-privacy-select').value;
+  const PUBLIC_STATES = new Set(['approved_public', 'already_public']);
+  let eligible = _lastPhotos.filter(p => p.lat != null && p.lon != null && p.date);
+  if (privacySel === 'public') {
+    eligible = eligible.filter(p => PUBLIC_STATES.has(p.privacy_state));
+  } else if (privacySel === 'private') {
+    eligible = eligible.filter(p => !PUBLIC_STATES.has(p.privacy_state));
+  }
+  btn.disabled = eligible.length < 2;
 }
 
 function plotTrail(photos) {
@@ -202,8 +350,18 @@ function stopAnimation() {
 }
 
 function animatePOC(photos) {
-  const pts = photos.filter(p => p.lat != null && p.lon != null);
-  if (pts.length < 2) return;
+  const privacySel = document.getElementById('map-privacy-select').value;
+  const PUBLIC_STATES = new Set(['approved_public', 'already_public']);
+  // Filter to geotagged+dated photos (matches plotTrail eligibility); privacy filter on copy only
+  let pts = photos.filter(p => p.lat != null && p.lon != null && p.date);
+  if (privacySel === 'public') {
+    pts = pts.filter(p => PUBLIC_STATES.has(p.privacy_state));
+  } else if (privacySel === 'private') {
+    pts = pts.filter(p => !PUBLIC_STATES.has(p.privacy_state));
+  }
+  // Sort deterministically by date then id — matches ORDER BY in the API
+  pts.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id);
+  if (pts.length < 2) return;  // button was disabled; safety guard
 
   // Build segments with distances
   const segments = [];
@@ -291,15 +449,26 @@ function esc(s) {
 }
 
 function buildMapUrl() {
-  const p = document.getElementById('map-time-select').value;
-  const e = document.getElementById('map-expand-cb').checked ? '&expand=1' : '';
-  return p ? `/api/map-photos?time_pattern=${encodeURIComponent(p)}${e}` : '/api/map-photos';
+  const params = new URLSearchParams();
+  const pattern = document.getElementById('map-time-select').value;
+  if (pattern) params.set('time_pattern', pattern);
+  if (document.getElementById('map-expand-cb').checked) params.set('expand', '1');
+  const yf = document.getElementById('map-year-from').value.trim();
+  const yt = document.getElementById('map-year-to').value.trim();
+  if (yf) params.set('year_from', yf);
+  if (yt) params.set('year_to', yt);
+  const album = document.getElementById('map-album-select').value;
+  if (album) params.set('album_id', album);
+  const person = document.getElementById('map-person').value.trim();
+  if (person) params.set('person', person);
+  const s = params.toString();
+  return s ? `/api/map-photos?${s}` : '/api/map-photos';
 }
 
 let _currentRequest = 0;   // incremented on each reload; stale responses are dropped
 
 function plotPhotos(photos, requestId) {
-  if (requestId !== _currentRequest) return;   // stale response — discard
+  if (requestId !== _currentRequest) return;   // stale response — discard; _lastPhotos not touched
   photos.forEach(p => {
     const marker = L.marker([p.lat, p.lon]);
     const title = p.title || '';
@@ -320,7 +489,7 @@ function plotPhotos(photos, requestId) {
   });
   document.getElementById('map-photo-count').textContent =
     photos.length === 1 ? '1 photo' : `${photos.length} photos`;
-  _lastPhotos = photos;
+  _lastPhotos = photos;   // atomic replacement — full response only
   plotTrail(photos);
   tryHighlight();
 }
@@ -337,6 +506,8 @@ function reloadMarkers() {
     .catch(() => { /* silently fail — map usable, just empty */ });
 }
 
+// ── Event listeners ────────────────────────────────────────────────────────
+
 document.getElementById('map-time-select').addEventListener('change', function () {
   const lbl = document.getElementById('map-expand-label');
   const cb  = document.getElementById('map-expand-cb');
@@ -344,26 +515,54 @@ document.getElementById('map-time-select').addEventListener('change', function (
   lbl.style.display = isHoliday ? 'flex' : 'none';
   if (!isHoliday) cb.checked = false;
 
-  const trailLbl = document.getElementById('map-trail-label');
-  const trailCb  = document.getElementById('map-trail-cb');
-  const isAnyPattern = !!this.value;
-  trailLbl.style.display = isAnyPattern ? 'flex' : 'none';
-  if (!isAnyPattern) {
-    trailCb.checked = false;
+  // If all filters are now cleared, reset trail and animation state
+  if (!_hasAnyFilter()) {
+    document.getElementById('map-trail-cb').checked = false;
     stopAnimation();
     if (_trailLayer) { map.removeLayer(_trailLayer); _trailLayer = null; }
-    document.getElementById('map-animate-btn').style.display = 'none';
   }
 
   reloadMarkers();
+  _updateFilterChips();
 });
+
 document.getElementById('map-trail-cb').addEventListener('change', () => {
   plotTrail(_lastPhotos);
   _updateAnimateBtn();
 });
+
 document.getElementById('map-expand-cb').addEventListener('change', reloadMarkers);
 
-reloadMarkers();   // initial load
+function debounce(fn, ms) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+const _debouncedReload = debounce(() => { reloadMarkers(); _updateFilterChips(); }, 300);
+document.getElementById('map-person').addEventListener('input', _debouncedReload);
+
+document.getElementById('map-album-select').addEventListener('change', () => {
+  reloadMarkers();
+  _updateFilterChips();
+});
+
+document.getElementById('map-year-from').addEventListener('change', () => {
+  reloadMarkers();
+  _updateFilterChips();
+});
+
+document.getElementById('map-year-to').addEventListener('change', () => {
+  reloadMarkers();
+  _updateFilterChips();
+});
+
+document.getElementById('map-privacy-select').addEventListener('change', () => {
+  _updateAnimateBtn();
+  _updateFilterChips();
+});
+
+reloadMarkers();      // initial load
+_updateFilterChips(); // ensure chip row starts empty (not stale)
 
 // ── Spatial selection ─────────────────────────────────────────────────────
 const _drawnItems = new L.FeatureGroup();
@@ -414,6 +613,14 @@ function openInLibrary() {
   const tp = document.getElementById('map-time-select').value;
   if (tp) params.set('time_pattern', tp);
   if (document.getElementById('map-expand-cb').checked) params.set('expand', '1');
+  const yf = document.getElementById('map-year-from').value.trim();
+  const yt = document.getElementById('map-year-to').value.trim();
+  if (yf) params.set('year_from', yf);
+  if (yt) params.set('year_to', yt);
+  const album = document.getElementById('map-album-select').value;
+  if (album) params.set('album_id', album);
+  const person = document.getElementById('map-person').value.trim();
+  if (person) params.set('person', person);
   window.open('/library?' + params.toString(), '_blank');
 }
 </script>
