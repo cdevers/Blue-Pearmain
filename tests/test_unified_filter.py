@@ -333,7 +333,6 @@ def client_map_view():
 
 
 class TestMapViewInitialFilters:
-    @pytest.mark.xfail(strict=False, reason="pre-populates form via shared macro added in Task 7")
     def test_map_view_passes_initial_filters_to_template(self, client_map_view):
         c = client_map_view
         resp = c.get(
