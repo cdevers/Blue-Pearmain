@@ -85,7 +85,7 @@ class SharedFilters(TypedDict):
 
 ### `_safe_date(key)` helper
 
-Replaces `_safe_year()`. Reads `request.args.get(key)`, validates the string is a valid ISO date (`YYYY-MM-DD`), returns the string on success or `None` on failure (missing, wrong format, impossible date).
+Becomes the primary date-parsing helper. `_safe_year()` is retained alongside it for use in the legacy-conversion path inside `normalize_shared_filters()`. Reads `request.args.get(key)`, validates the string is a valid ISO date (`YYYY-MM-DD`), returns the string on success or `None` on failure (missing, wrong format, impossible date).
 
 ```python
 def _safe_date(key: str) -> str | None:
@@ -183,7 +183,15 @@ def _format_date_filter(s: str) -> str:
         return s
 ```
 
-**Filter count / chip independence:** `date_from` and `date_to` each have their own chip with their own dismiss link. Dismissing `date_from` clears only `date_from`; `date_to` remains active (and vice versa). However, together they count as **one** active filter dimension in the `filter_count` tally — matching the existing behavior for `year_from`/`year_to`. The library template already has this expression: `(1 if filters.date_from or filters.date_to ... else 0)` — no change needed there.
+**Filter count — one dimension:** The date range counts as a single active filter regardless of whether one or both endpoints are set. The `filter_count` expression is:
+
+```jinja
+(1 if filters.date_from or filters.date_to else 0)
+```
+
+This matches the existing `year_from`/`year_to` behavior. The library template already has this expression — no code change needed.
+
+**Chip independence (display only):** Each date has its own dismissable chip. Dismissing `date_from` clears only `date_from`; `date_to` remains (and vice versa). The `filter_count` remains at 1 until both are cleared.
 
 **Library → Map deep link ("View on map"):** replace `year_from`/`year_to` query params with `date_from`/`date_to`.
 
