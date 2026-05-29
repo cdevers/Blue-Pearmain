@@ -22,7 +22,7 @@ BP runs as three always-on launchd daemons. Right now, if something goes wrong �
 
 A new `bp status` command that prints a structured summary of daemon state, queue sizes, last-run times, and unresolved drift. Reads only from the local DB and `launchctl` — no network calls. Intended to answer "is everything OK?" in one command.
 
-### macOS notifications for daemon errors ([#113](https://github.com/cdevers/Blue-Pearmain/issues/113)) `size:S`
+### macOS notifications for daemon errors ([#113](https://github.com/cdevers/Blue-Pearmain/issues/113)) `size:S` · ✓ done
 
 Surface high-signal failures (auth expiry, sustained API errors, unresolved reconcile drift) as macOS system notifications rather than log-only events. Optional via config flag; fire-and-forget so it doesn't block daemon operation.
 
@@ -38,7 +38,7 @@ BP's current model is reactive: classify what arrives, queue what needs review, 
 
 A way to declare "any photo containing Person X is always auto-private" — stored in the DB, checked at scan time. Currently, batch-marking all of a person's photos private is a one-shot action; new photos of that person re-enter the queue. A persistent policy is the right primitive for people who should never appear on Flickr (children, people who've asked not to be photographed publicly).
 
-### Tag protection rules ([#115](https://github.com/cdevers/Blue-Pearmain/issues/115)) `size:S`
+### Tag protection rules ([#115](https://github.com/cdevers/Blue-Pearmain/issues/115)) `size:S` · ✓ done
 
 A config-driven way to declare tag namespaces or specific tags as protected from auto-removal. The sync engine currently treats a tag's absence from one side as a non-conflict eligible for auto-correction. For archival tags (`family/*`, `scanned-film`, `archive/*`) that may not exist in Apple Photos' keyword set, this can produce harmful removals. A lightweight `tag_protection:` section in `config.yml` prevents this without a full policy engine.
 
@@ -78,7 +78,7 @@ A `bp export` command that serialises the full BP state — per-photo metadata, 
 
 The deduplicator is currently a manually-invoked script. As the scanner adds new Photos records over time, they can silently accumulate as "orphaned" photos — sharing a key with an existing duplicate group but not linked to it. A periodic deduplicator run (weekly, or after each scan cycle) would self-heal this automatically.
 
-### Deduplicator in poller cycle ([#147](https://github.com/cdevers/Blue-Pearmain/issues/147)) `size:S`
+### Deduplicator in poller cycle ([#147](https://github.com/cdevers/Blue-Pearmain/issues/147)) `size:S` · ✓ done
 
 Run `deduplicator --write` as part of the poller's regular cycle (or as a separate weekly launchd job). This ensures orphaned siblings are linked to their groups promptly, and stale `photo_count` values stay accurate. The `--prune` pass could also be folded in so zombie groups are cleaned up automatically.
 
@@ -108,7 +108,7 @@ Extracted the five shared filter dimensions (time pattern, year range, album, pe
 
 Add a tag type-ahead to the shared `_filter_bar.html` macro. Tags are already in the DB; this wires them as a sixth filter dimension on both `/library` and `/map`, with the same chip-row, deep-link, and cross-page nav treatment as the other dimensions. Single-tag filter to start; multi-tag OR can follow separately.
 
-### Animated map trail — Indiana Jones-style route animation ([#153](https://github.com/cdevers/Blue-Pearmain/issues/153)) `size:L` · [spec](superpowers/specs/2026-05-27-map-trail-animation-153.md) · ✓ Phase 1 done
+### Animated map trail — Indiana Jones-style route animation ([#153](https://github.com/cdevers/Blue-Pearmain/issues/153)) `size:L` · [spec](superpowers/specs/2026-05-27-map-trail-animation-153.md) · ✓ done
 
 Animate the photo trail so the route draws itself: a moving point traces the journey and leaves a growing line behind it. BP already has the data (#151 computes the ordered sequence); the question is rendering.
 
@@ -124,11 +124,11 @@ Storing a known birthday for named people (in a `people` table or similar) enabl
 
 Not immediate — needs a people schema that BP doesn't have yet — but a coherent direction worth designing for.
 
-### Approximate / fuzzy dates for historical photos
+### Approximate / fuzzy dates for historical photos ([#157](https://github.com/cdevers/Blue-Pearmain/issues/157)) `size:M`
 
 Pre-digital or scanned photos often have only a year, or a decade, or "sometime in the 1970s." The DB currently treats `date_taken` as either a precise timestamp or NULL. A `date_precision` field (`exact`, `day`, `month`, `year`, `decade`, `unknown`) alongside a `date_approximate` flag would let BP represent and surface these photos without either lying about their date or discarding the approximate information entirely. Useful for iPhoto migrations and scanned film.
 
-### Command palette (⌘K) for the reviewer UI
+### Command palette (⌘K) for the reviewer UI ([#158](https://github.com/cdevers/Blue-Pearmain/issues/158)) `size:M`
 
 A keyboard-driven command palette — jump to photo, filter by person, open map, navigate to date — would meaningfully speed up the review workflow. BP's web UI is currently mouse-heavy; this would let power users drive it without reaching for the mouse. Relatively self-contained as a JS feature.
 
