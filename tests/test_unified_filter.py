@@ -394,17 +394,68 @@ def _lib_ids(resp) -> set[int]:
     return {int(m) for m in re.findall(r'data-id="(\d+)"', body)}
 
 
-class TestLibraryYearFilter:
-    def test_year_from_excludes_earlier(self, client_lib_years):
+class TestLibraryDateFilter:
+    def test_date_from_excludes_earlier(self, client_lib_years):
         c, p16, p19, p23 = client_lib_years
-        resp = c.get("/library?year_from=2019")
+        resp = c.get("/library?date_from=2019-01-01")
         assert resp.status_code == 200
         ids = _lib_ids(resp)
         assert p16 not in ids
         assert p19 in ids
         assert p23 in ids
 
-    def test_year_to_excludes_later(self, client_lib_years):
+    def test_date_to_excludes_later(self, client_lib_years):
+        c, p16, p19, p23 = client_lib_years
+        resp = c.get("/library?date_to=2019-12-31")
+        ids = _lib_ids(resp)
+        assert p16 in ids
+        assert p19 in ids
+        assert p23 not in ids
+
+    def test_date_range_both_bounds(self, client_lib_years):
+        c, p16, p19, p23 = client_lib_years
+        resp = c.get("/library?date_from=2019-01-01&date_to=2019-12-31")
+        ids = _lib_ids(resp)
+        assert p16 not in ids
+        assert p19 in ids
+        assert p23 not in ids
+
+    def test_date_to_inclusive_boundary(self, client_lib_years):
+        """Photo taken on the boundary day is included."""
+        c, p16, p19, p23 = client_lib_years
+        # p19 has date_taken="2019-12-20T10:00:00"
+        resp = c.get("/library?date_to=2019-12-20")
+        ids = _lib_ids(resp)
+        assert p19 in ids  # taken on the boundary day → included
+        assert p23 not in ids
+
+    def test_date_to_excludes_next_day(self, client_lib_years):
+        """Photo taken the day after date_to is excluded."""
+        c, p16, p19, p23 = client_lib_years
+        # p19 has date_taken="2019-12-20T10:00:00"; p23 has "2023-07-04T10:00:00"
+        resp = c.get("/library?date_from=2019-12-21&date_to=2023-07-03")
+        ids = _lib_ids(resp)
+        assert p19 not in ids  # 2019-12-20 is before date_from
+        assert p23 not in ids  # 2023-07-04 is after date_to
+
+    def test_date_swap_integration(self, client_lib_years):
+        """Reversed date_from/date_to produces same results as correct order."""
+        c, p16, p19, p23 = client_lib_years
+        normal = _lib_ids(c.get("/library?date_from=2016-01-01&date_to=2022-12-31"))
+        swapped = _lib_ids(c.get("/library?date_from=2022-12-31&date_to=2016-01-01"))
+        assert normal == swapped
+
+    def test_legacy_year_from_still_works(self, client_lib_years):
+        """Old year_from URL param is auto-converted."""
+        c, p16, p19, p23 = client_lib_years
+        resp = c.get("/library?year_from=2019")
+        ids = _lib_ids(resp)
+        assert p16 not in ids
+        assert p19 in ids
+        assert p23 in ids
+
+    def test_legacy_year_to_still_works(self, client_lib_years):
+        """Old year_to URL param is auto-converted."""
         c, p16, p19, p23 = client_lib_years
         resp = c.get("/library?year_to=2019")
         ids = _lib_ids(resp)
@@ -412,39 +463,9 @@ class TestLibraryYearFilter:
         assert p19 in ids
         assert p23 not in ids
 
-    def test_year_range_both_bounds(self, client_lib_years):
+    def test_invalid_date_ignored(self, client_lib_years):
         c, p16, p19, p23 = client_lib_years
-        resp = c.get("/library?year_from=2019&year_to=2019")
-        ids = _lib_ids(resp)
-        assert p16 not in ids
-        assert p19 in ids
-        assert p23 not in ids
-
-    def test_year_swap_when_from_greater_than_to(self, client_lib_years):
-        c, p16, p19, p23 = client_lib_years
-        resp = c.get("/library?year_from=2023&year_to=2016")
-        ids = _lib_ids(resp)
-        assert p16 in ids
-        assert p19 in ids
-        assert p23 in ids
-
-    def test_year_does_not_override_explicit_date_from(self, client_lib_years):
-        c, p16, p19, p23 = client_lib_years
-        resp = c.get("/library?date_from=2020-01-01&year_from=2016")
-        ids = _lib_ids(resp)
-        assert p16 not in ids
-        assert p19 not in ids
-        assert p23 in ids
-
-    def test_nonnumeric_year_ignored(self, client_lib_years):
-        c, p16, p19, p23 = client_lib_years
-        resp = c.get("/library?year_from=abc&year_to=xyz")
-        assert resp.status_code == 200
-        assert len(_lib_ids(resp)) == 3
-
-    def test_out_of_range_year_ignored(self, client_lib_years):
-        c, p16, p19, p23 = client_lib_years
-        resp = c.get("/library?year_from=1700&year_to=3000")
+        resp = c.get("/library?date_from=not-a-date&date_to=xyz")
         assert resp.status_code == 200
         assert len(_lib_ids(resp)) == 3
 

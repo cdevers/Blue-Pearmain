@@ -27,7 +27,7 @@ import re
 import subprocess
 import sys
 import threading
-from datetime import date as _date
+from datetime import date as _date, timedelta
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -1160,8 +1160,6 @@ def library() -> str:
     per_page = int(request.args.get("per_page", 120))
     offset = (page - 1) * per_page
 
-    date_from = request.args.get("date_from") or None
-    date_to = request.args.get("date_to") or None
     untitled_only = request.args.get("untitled") == "1"
     no_location = request.args.get("no_location") == "1"
     confirmed_none = request.args.get("confirmed_none") == "1"
@@ -1174,11 +1172,14 @@ def library() -> str:
     time_pattern: str | None = sf["time_pattern"] or None
     time_expand = 2 if sf["expand"] == "1" else 0
 
-    # Apply year→ISO date only if no explicit date_from/date_to was provided
-    if sf["year_from"] is not None and not date_from:
-        date_from = f"{sf['year_from']:04d}-01-01"
-    if sf["year_to"] is not None and not date_to:
-        date_to = f"{sf['year_to'] + 1:04d}-01-01T00:00:00"
+    # Use date_from/date_to from SharedFilters (handles legacy year params too)
+    date_from: str | None = sf["date_from"] or None
+    # date_to is the inclusive end the user selected (YYYY-MM-DD).
+    # db.library_photos() uses <=, so pass next-day for correct day-level inclusion.
+    date_to_display: str | None = sf["date_to"] or None
+    date_to: str | None = None
+    if date_to_display:
+        date_to = str(_date.fromisoformat(date_to_display) + timedelta(days=1))
 
     q = request.args.get("q", "").strip() or None
     country = request.args.get("country") or None
@@ -1188,7 +1189,9 @@ def library() -> str:
     date_alias = request.args.get("date") or None
     if date_alias:
         date_from = date_from or date_alias
-        date_to = date_to or (date_alias + "T23:59:59")
+        if date_to_display is None:
+            date_to_display = date_alias
+            date_to = date_alias + "T23:59:59"
 
     lat_min = _parse_float(request.args.get("lat_min"))
     lat_max = _parse_float(request.args.get("lat_max"))
@@ -1284,7 +1287,7 @@ def library() -> str:
         confirmed_none_count=confirmed_none_count,
         filters={
             "date_from": date_from or "",
-            "date_to": date_to or "",
+            "date_to": date_to_display or "",
             "album_id": album_id,
             "tag": tag or "",
             "status": status or "",
@@ -1299,8 +1302,6 @@ def library() -> str:
             "city": city or "",
             "neighborhood": neighborhood or "",
             "person": person or "",
-            "year_from": sf["year_from"] if sf["year_from"] is not None else "",
-            "year_to": sf["year_to"] if sf["year_to"] is not None else "",
             "lat_min": f"{lat_min:.5f}" if lat_min is not None else "",
             "lat_max": f"{lat_max:.5f}" if lat_max is not None else "",
             "lon_min": f"{lon_min:.5f}" if lon_min is not None else "",
