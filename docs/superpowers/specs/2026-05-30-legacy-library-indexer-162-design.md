@@ -44,8 +44,8 @@ Opening the library directly over AFP is slow: a verified open-test took **243 s
 - Thumbnails are read from the live mount during the single index run (then copied into BP's thumb cache as the durable artifact), so the cache only needs the database files, not the originals/derivatives.
 
 **Cache invalidation (review point 3).** The cache is validated against `legacy_libraries` metadata before reuse:
-- **Reuse** the local cache if it exists and the source `Photos.sqlite` `db_mtime` + `db_size` match the values recorded for that `library_uuid` (cheap stat over the network; no multi-GB read).
-- **Rebuild** if the cache is absent, the source DB has changed (library upgraded/restored), or a prior copy was incomplete (a copy completes by atomic rename of a temp dir, so a partial copy is never treated as valid).
+- **Reuse** the local cache if it exists and the source `Photos.sqlite` matches the recorded `db_mtime` + `db_size` **and** `db_head_hash` (SHA256 of the first 16 MB). The hash is the extra discriminator (review point 1): it catches restores/rsync copies that preserve mtime, and same-size replacements that bare mtime+size would miss. Reading 16 MB is cheap relative to the 1.8 GB full DB.
+- **Rebuild** if the cache is absent, any discriminator differs (library upgraded/restored/replaced), or a prior copy was incomplete (a copy completes by atomic rename of a temp dir, so a partial copy is never treated as valid).
 - `--refresh-cache` forces a rebuild regardless. Stale/partial caches are replaced, not appended to.
 
 ## Data model (new migration)
@@ -64,6 +64,7 @@ Houses per-library identity, provenance, and cache-validity metadata (the latter
 | `schema_version` | INTEGER — `LibrarySchemaVersion` from the bundle |
 | `db_mtime` | TEXT — mtime of the source `Photos.sqlite` at last index/cache |
 | `db_size` | INTEGER — size of the source `Photos.sqlite` at last index/cache |
+| `db_head_hash` | TEXT — SHA256 of the first 16 MB of source `Photos.sqlite` (cheap content discriminator) |
 | `asset_count` | INTEGER |
 | `indexed_at` | TEXT ISO8601 |
 
@@ -94,11 +95,25 @@ Constraint: `UNIQUE(library_uuid, asset_uuid)`. Indexes on `date_taken` and `(wi
 
 **Identity vs. advisory fields:** asset identity is strictly `(library_uuid, asset_uuid)`. `fingerprint`, `original_filename`, `source_path_last_seen`, and the thumbnail cache location are all **advisory** — never identity, never the source of truth for "where is this asset."
 
+**Path canonicalization (review point 5):** `master_rel_path` is produced by a single canonical transform so the same asset never yields two spellings: POSIX `/` separators, original case preserved, leading `./` stripped, duplicate slashes collapsed, no trailing slash, Unicode normalized to **NFC** (macOS surfaces NFD). This is for stable storage/comparison and display; it is advisory, so a later phase that needs to *open* the file should re-derive the path from the live bundle rather than trust this string.
+
 **Thumbnail path (review point 1):** only the cache *key* is durable. The absolute path is derived at read time from the configured thumb-cache root, so moving the repo / `data/` / restoring backups never strands the DB on stale absolute paths. This deliberately diverges from the older `photos.thumbnail_path` (absolute) convention because path-independence is a first-class goal for the legacy index.
 
 **Design choice:** mirror the existing `photos.apple_persons` JSON-array convention rather than introducing normalized person/face tables. Consistent with the codebase; YAGNI for this phase.
 
 Migration follows the existing `migrate_019_*` idempotent pattern. Next free migration number to be confirmed at implementation time by inspecting `db/migrations/`.
+
+### Reindex semantics (review point 2)
+
+`legacy_assets` is an **authoritative mirror** of the source library, not an append-only archive. A **full** index run reconciles per `library_uuid`:
+- assets present in the source are upserted;
+- rows for that `library_uuid` **not seen during the run are hard-deleted** (the source library is the sole authority; the index is rebuildable, so no soft-delete/tombstones).
+
+This prevents removed assets from lingering and producing false-positive candidates in the matching preview.
+
+A **`--limit N`** run is explicitly **non-authoritative**: it upserts only the sampled assets and performs **no deletions** (a partial run cannot speak for the whole library). Reconciliation/GC happen only on full runs.
+
+**Thumbnail orphan cleanup (review point 3):** the thumbnail cache is reconciled on full runs — cache entries whose key no longer maps to a live `legacy_assets` row for that library are pruned, so deleted assets don't leak thumbnails forever. (`--limit` runs prune nothing.)
 
 ## Components
 
@@ -106,15 +121,17 @@ Migration follows the existing `migrate_019_*` idempotent pattern. Next free mig
   - `index_library(library_path: str, db, copy_thumbnails: bool = True, limit: int | None = None) -> dict` (stats).
   - Opens `osxphotos.PhotosDB(library_path)`, iterates photos, builds a row per asset, upserts (idempotent on identity), and copies an existing derivative/preview thumbnail into BP's thumb cache (no regeneration). Uses `poller/bp_logging.py`.
 - **`db/db.py`**: `upsert_legacy_asset(...)`, `legacy_asset_count()`, `iter_legacy_assets()`.
-- **CLI (`bp`)**: `bp index-legacy --library <path> [--no-thumbnails] [--limit N]`. Path from `--library`, falling back to optional `legacy_library.path` in config; the flag always wins. Identity is path-independent, so re-pointing requires no reindex.
-- **Matching preview (`bp match-legacy-preview`)**: joins `legacy_assets` to Flickr-only `candidate_public` photos. Emits a deterministic tiered report and optional CSV. **Writes nothing to `photos`.**
+- **CLI (`bp`)**: `bp index-legacy --library <path> [--no-thumbnails] [--limit N] [--no-cache] [--refresh-cache]`. Path from `--library`, falling back to optional `legacy_library.path` in config; the flag always wins. Identity is path-independent, so re-pointing requires no reindex. **Local DB cache is on by default** (given the ~4-min AFP open); `--no-cache` reads the library in place, `--refresh-cache` forces a cache rebuild.
+- **Matching preview (`bp match-legacy-preview`)**: joins `legacy_assets` to Flickr-only `candidate_public` photos. Emits a deterministic tiered report to the console plus an optional CSV (`--csv <path>`). **No new table, and writes nothing to `photos`** — persisting proposed links is deferred to the #12 migration phase that will actually consume them (YAGNI here).
 
 **Timestamp normalization (review point 2).** The two sources store `date_taken` differently — Flickr-only is naive (`2026-04-08 14:42:08`), Apple/osxphotos is tz-aware (`2023-05-06T16:34:28-04:00`, sometimes with microseconds). Both sides are normalized through the **existing** `poller/deduplicator.py:_normalise_to_utc_second()` helper before comparison: it parses the space-separated Flickr variant, treats naive timestamps as UTC, converts tz-aware to UTC, and truncates to whole seconds (`YYYY-MM-DD HH:MM:SS`). Reusing it keeps legacy matching consistent with the existing reupload/orphan matching semantics rather than inventing a parallel scheme. The naive=UTC assumption can introduce a systematic offset for genuinely local Flickr times; because this command is a **non-destructive preview**, any such drift surfaces in the ambiguous/no-match tiers for inspection before any future migration acts on it.
 
 **Deterministic match tiers** (for durable tests):
-- **confident** — exactly one legacy asset whose normalized-UTC-second `date_taken` equals the photo's *and* `(width, height)` match (title, when both present, must not conflict).
-- **ambiguous** — more than one legacy candidate at the matching timestamp, or a timestamp match with conflicting dimensions/title.
+- **confident** — exactly one legacy asset whose normalized-UTC-second `date_taken` equals the photo's *and* `(width, height)` match, with no title conflict.
+- **ambiguous** — more than one legacy candidate at the matching timestamp, or a timestamp match with conflicting dimensions or title.
 - **no-match** — zero legacy candidates at the normalized timestamp.
+
+**Title comparison (review point 4).** Title is a weak signal and is treated as a *tiebreaker only*, never a primary key. A title "conflict" exists **only when both titles are non-empty after normalization** (trim whitespace, casefold, NFC) and still differ. An empty/missing title on either side is *not* a conflict and never demotes an otherwise-confident match — this keeps the ambiguous rate from climbing on the 28% of photos lacking a Flickr title.
 
 Matching feasibility (verified against the live DB): Flickr-only `candidate_public` rows have `date_taken` 100% (34035/34035), dimensions ~100% (34034), `flickr_title` 72% (24555). The legacy assets carry all of these plus fingerprint (advisory).
 
@@ -146,7 +163,11 @@ The live review queue and `photos` table are never modified by either command.
 - **Indexer unit test**: mock `osxphotos.PhotosDB` with fake photo objects → assert rows built correctly (persons, face counts, bundle-relative POSIX paths) and thumbnail-copy invoked. No real 1.8 GB read in CI.
 - **Thumbnail-miss test**: a derivative that can't be copied records `thumbnail_status='missing'` and does **not** fail the run.
 - **Matching tiers test**: seed cases that exercise each deterministic tier (confident / ambiguous / no-match), including a Flickr naive timestamp vs an Apple tz-aware timestamp that normalize to the same UTC second → confident; assert **zero writes** to `photos`.
-- **Cache invalidation test**: matching `db_mtime`+`db_size` → cache reused (no rebuild); changed mtime/size or `--refresh-cache` → rebuild; partial cache (no atomic-rename marker) treated as invalid.
+- **Cache invalidation test**: matching `db_mtime`+`db_size`+`db_head_hash` → cache reused (no rebuild); changed hash with identical mtime+size (simulated restore) → rebuild; `--refresh-cache` → rebuild; partial cache (no atomic-rename marker) treated as invalid.
+- **Reindex reconciliation test**: full run that no longer sees a previously-indexed asset hard-deletes its row; a `--limit` run deletes nothing.
+- **Thumbnail GC test**: full run prunes cache entries orphaned by deleted assets; `--limit` run prunes nothing.
+- **Title-conflict test**: empty title on one side never demotes a confident match; two non-empty titles differing after trim/casefold/NFC → ambiguous.
+- **Path-canonicalization test**: inputs with `./`, duplicate slashes, trailing slash, and NFD Unicode all collapse to one canonical NFC POSIX string.
 - **Path-independence test**: re-index the same identity from a different `library_path` → updates the same row, no duplicate; `thumbnail_cache_key` resolves correctly after the configured cache root changes.
 
 Run `python -m pytest tests/ -q` and `make lint` (mypy-clean, no bare `# type: ignore`).
