@@ -529,11 +529,14 @@ class TestLibraryTemplateIntegration:
         assert resp.status_code == 200
         body = resp.data.decode()
         assert 'name="time_pattern"' in body
-        assert 'name="year_from"' in body
-        assert 'name="year_to"' in body
+        assert 'name="date_from"' in body  # was name="year_from"
+        assert 'name="date_to"' in body  # was name="year_to"
         assert 'name="album_id"' in body
         assert 'name="person"' in body
         assert 'name="status"' in body
+        # Old year inputs must be gone
+        assert 'name="year_from"' not in body
+        assert 'name="year_to"' not in body
 
     def test_library_has_no_apply_button(self, client_template):
         c = client_template

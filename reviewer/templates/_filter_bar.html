@@ -15,7 +15,7 @@
   Parameters:
     albums          — list of dicts with keys: id (int), name (str)
     person_names    — sorted list of named persons (strings); _UNKNOWN_ excluded
-    filters         — dict with keys: time_pattern, year_from, year_to,
+    filters         — dict with keys: time_pattern, date_from, date_to,
                       album_id (int|None), person, status, tag, expand
     datalist_id     — unique ID for the person <datalist>; must differ per page
                       to avoid duplicate-ID collisions (default: "shared-persons")
@@ -70,17 +70,17 @@
     </select>
   </label>
 
-  <span class="shared-year-range">
-    <label>Year
-      <input type="number" name="year_from" min="1800" max="2099"
-             value="{{ filters.year_from or '' }}" placeholder="from" style="width:62px">
-    </label>
-    <span style="padding:0 2px">–</span>
-    <label>
-      <input type="number" name="year_to" min="1800" max="2099"
-             value="{{ filters.year_to or '' }}" placeholder="to" style="width:62px">
-    </label>
-  </span>
+  <label>From
+    <input type="date" name="date_from"
+           value="{{ filters.date_from or '' }}"
+           style="color-scheme:dark;width:140px">
+  </label>
+  <span style="padding:0 2px;align-self:flex-end;padding-bottom:6px">–</span>
+  <label>To
+    <input type="date" name="date_to"
+           value="{{ filters.date_to or '' }}"
+           style="color-scheme:dark;width:140px">
+  </label>
 
   <label>Album
     <select name="album_id">
