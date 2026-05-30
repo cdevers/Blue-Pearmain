@@ -260,8 +260,7 @@
 {% block content %}
 {% from "_filter_bar.html" import filter_bar %}
 {% set filter_count = (
-  (1 if filters.date_from or filters.date_to
-        or filters.year_from or filters.year_to else 0) +
+  (1 if filters.date_from or filters.date_to else 0) +
   (1 if filters.album_id else 0) +
   (1 if filters.tag else 0) +
   (1 if filters.status else 0) +
@@ -297,8 +296,8 @@
   </button>
   <a href="{{ url_for('map_view',
     time_pattern=filters.time_pattern or None,
-    year_from=filters.year_from or None,
-    year_to=filters.year_to or None,
+    date_from=filters.date_from or None,
+    date_to=filters.date_to or None,
     album_id=filters.album_id or None,
     person=filters.person or None,
     status=filters.status or None,
@@ -348,10 +347,8 @@
   </div>
   {% endif %}
 
-  <!-- Row 1: dates, tag, untitled, no location -->
+  <!-- Row 1: tag, untitled, no location (dates are in the shared macro above) -->
   <div class="lib-filter-row">
-    <label>From <input type="date" name="date_from" value="{{ filters.date_from }}"></label>
-    <label>To <input type="date" name="date_to" value="{{ (filters.date_to or '')[:10] }}"></label>
     <label>Tag <input type="text" name="tag" value="{{ filters.tag }}" placeholder="filter by tag…" style="width:120px"></label>
     <label style="display:flex;align-items:center;gap:5px">
       <input type="checkbox" name="untitled" value="1" {% if filters.untitled %}checked{% endif %}>
@@ -814,17 +811,9 @@ function _buildPayload(dryRun) {
   if (_selectAllFilter) {
     const form = document.getElementById('lib-filter-form');
     const fd = new FormData(form);
-    // Convert year_from/year_to → date_from/date_to for the bulk endpoint,
-    // which uses library_photo_ids() and only understands ISO date strings.
-    let _yearFrom = fd.get('year_from') ? parseInt(fd.get('year_from'), 10) : null;
-    let _yearTo   = fd.get('year_to')   ? parseInt(fd.get('year_to'),   10) : null;
-    if (_yearFrom !== null && _yearTo !== null && _yearFrom > _yearTo) {
-      [_yearFrom, _yearTo] = [_yearTo, _yearFrom];
-    }
-    const _dateFrom = fd.get('date_from') ||
-                      (_yearFrom !== null ? String(_yearFrom).padStart(4,'0') + '-01-01' : null);
-    const _dateTo   = fd.get('date_to') ||
-                      (_yearTo   !== null ? String(_yearTo + 1).padStart(4,'0') + '-01-01T00:00:00' : null);
+    // date_from/date_to come directly from the shared filter bar
+    const _dateFrom = fd.get('date_from') || null;
+    const _dateTo   = fd.get('date_to')   || null;
 
     payload.filter = {
       date_from:    _dateFrom,
@@ -1186,10 +1175,10 @@ if (_stSel) _stSel.addEventListener('change', applyLibraryFilter);
 const _perIn = document.querySelector('[name=person]');
 if (_perIn) _perIn.addEventListener('input', _libDebounced);
 
-// Year inputs: fire on blur or Enter only (avoids intermediate-state reloads)
-for (const el of document.querySelectorAll('[name=year_from],[name=year_to]')) {
+// Date inputs: fire on change (calendar pick) or blur (keyboard entry)
+for (const el of document.querySelectorAll('[name=date_from],[name=date_to]')) {
+  el.addEventListener('change', applyLibraryFilter);
   el.addEventListener('blur', applyLibraryFilter);
-  el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyLibraryFilter(); } });
 }
 
 // Library-specific fields: immediate
@@ -1212,9 +1201,16 @@ for (const cb of document.querySelectorAll('[name=untitled],[name=no_location],[
     const label = sel ? sel.options[sel.selectedIndex]?.text : f.time_pattern;
     chips.push(label || f.time_pattern);
   }
-  if (f.year_from && f.year_to) chips.push(`${f.year_from}–${f.year_to}`);
-  else if (f.year_from) chips.push(`from ${f.year_from}`);
-  else if (f.year_to)   chips.push(`to ${f.year_to}`);
+  function _fmtDate(iso) {
+    if (!iso) return '…';
+    try {
+      const d = new Date(iso + 'T12:00:00');  // noon avoids DST edge cases
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch (e) { return iso; }
+  }
+  if (f.date_from && f.date_to) chips.push(`${_fmtDate(f.date_from)} – ${_fmtDate(f.date_to)}`);
+  else if (f.date_from) chips.push(`from ${_fmtDate(f.date_from)}`);
+  else if (f.date_to)   chips.push(`to ${_fmtDate(f.date_to)}`);
   if (f.album_id) {
     const sel = document.querySelector('[name=album_id]');
     const label = sel ? sel.options[sel.selectedIndex]?.text : String(f.album_id);
@@ -1222,9 +1218,6 @@ for (const cb of document.querySelectorAll('[name=untitled],[name=no_location],[
   }
   if (f.person)  chips.push(f.person);
   if (f.status)  chips.push(STATUS_LABELS[f.status] || f.status);
-  if (f.date_from || f.date_to) {
-    chips.push(`${f.date_from || '…'} → ${f.date_to ? f.date_to.slice(0,10) : '…'}`);
-  }
   if (f.tag)     chips.push(`#${f.tag}`);
   if (f.country || f.state || f.city) {
     chips.push([f.city, f.state, f.country].filter(Boolean).join(', '));

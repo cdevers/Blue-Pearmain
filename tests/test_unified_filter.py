@@ -546,11 +546,11 @@ class TestLibraryTemplateIntegration:
 
     def test_library_has_view_on_map_link(self, client_template):
         c = client_template
-        resp = c.get("/library?time_pattern=month:08&year_from=2015&person=Alice+W")
+        resp = c.get("/library?time_pattern=month%3A08&date_from=2015-01-01&person=Alice+W")
         body = resp.data.decode()
         assert "/map" in body
-        assert "time_pattern=month%3A08" in body or "time_pattern=month:08" in body
-        assert "year_from=2015" in body
+        assert "time_pattern" in body
+        assert "date_from=2015-01-01" in body
         assert "Alice" in body
 
     def test_library_chip_row_present(self, client_template):
@@ -571,7 +571,7 @@ class TestLibraryTemplateIntegration:
         """View-on-map link from library carries all shared filter params."""
         c = client_template
         resp = c.get(
-            "/library?time_pattern=month:08&year_from=2015&year_to=2019"
+            "/library?time_pattern=month%3A08&date_from=2015-01-01&date_to=2019-12-31"
             "&person=Alice+W&status=public"
         )
         assert resp.status_code == 200
@@ -580,11 +580,10 @@ class TestLibraryTemplateIntegration:
 
         map_links = re.findall(r'href="(/map[^"]*)"', body)
         assert map_links, "No /map link found in library response"
-        # nav bar also has a bare /map link; find the View-on-map link with filter params
         map_url = next((u for u in map_links if "time_pattern" in u), None)
         assert map_url is not None, "No /map link with filter params found"
-        assert "year_from=2015" in map_url
-        assert "year_to=2019" in map_url
+        assert "date_from=2015-01-01" in map_url
+        assert "date_to=2019-12-31" in map_url
         assert "Alice" in map_url
         assert "status=public" in map_url
 
