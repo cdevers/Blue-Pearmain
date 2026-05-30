@@ -35,6 +35,14 @@ The library is mounted via AFP today but may move to SMB, a different IP, or an 
 - Thumbnails are **copied into BP's thumb cache**, keyed by a stable hash of the identity, so a transport/path change requires **no reindex**.
 - The library root path is supplied at index time (`--library` flag, or optional config default).
 
+## Optional local DB cache (performance & resilience)
+
+Opening the library directly over AFP is slow: a verified open-test took **243 s (~4 min)** to load 237,309 photos. The library's `database/` directory is **6.5 GB** — small enough to cache locally (86 GB free).
+
+- Optional `--cache-db` behaviour: before opening, mirror the library's `database/` plus the small bundle plists osxphotos needs (e.g. `DataModelVersion.plist`) into a local skeleton bundle at `~/Library/Application Support/Blue Pearmain/legacy-cache/<library_uuid>/`, then point osxphotos at the local copy. **Never inside the git repo.**
+- Keyed by `library_uuid`, so multiple libraries and refreshes coexist; the cache is purely a performance/resilience aid, never part of asset identity, and is safe to delete and rebuild.
+- Thumbnails are read from the live mount during the single index run (then copied into BP's thumb cache as the durable artifact), so the cache only needs the database files, not the originals/derivatives.
+
 ## Data model (new migration)
 
 New table `legacy_assets` (one row per old-library asset):
@@ -95,7 +103,7 @@ The live review queue and `photos` table are never modified by either command.
 - **Read-only on the library bundle**: we only read it (osxphotos copies the DB to a temp dir on open); thumbnails are copied *out*. The bundle is never written.
 - Missing / unmounted library path → clear error message, non-zero exit.
 - Idempotent re-runs: upsert by `(library_uuid, asset_uuid)`; already-cached thumbnails are skipped. `--limit` enables quick test runs over slow AFP/SMB links.
-- **osxphotos open contingency:** opening this Photos 4 library over AFP copies a multi-GB SQLite first and is slow; Photos 4 support, while real, is less battle-tested than Photos 5+. A feasibility open-test is run during implementation. If osxphotos cannot open the library, fall back to a **direct read-only SQL reader** against `Photos.sqlite` (`ZGENERICASSET ⋈ ZPERSON ⋈ ZDETECTEDFACE`) behind the same `index_library` interface — the data model, CLI, and matching preview are unaffected.
+- **osxphotos open — verified:** a feasibility open-test confirmed `osxphotos.PhotosDB` opens this Photos 4 library successfully (237,309 photos, persons present), in ~243 s over AFP (hence the optional local DB cache above). Remaining contingency: if osxphotos later proves unreliable on this library, fall back to a **direct read-only SQL reader** against `Photos.sqlite` (`ZGENERICASSET ⋈ ZPERSON ⋈ ZDETECTEDFACE`) behind the same `index_library` interface — the data model, CLI, and matching preview are unaffected.
 
 ## Testing (TDD)
 
