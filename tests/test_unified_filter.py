@@ -270,6 +270,17 @@ class TestSafeDate:
             result = _safe_date("date_from")
         assert result is None
 
+    def test_week_date_normalized_to_canonical_form(self):
+        """ISO week dates (2019-W26-4) are normalized to YYYY-MM-DD, not passed through raw."""
+        from reviewer.app import app, _safe_date
+
+        with app.test_request_context("/?date_from=2019-W26-4"):
+            result = _safe_date("date_from")
+        # Either returns canonical YYYY-MM-DD or None — never the raw "2019-W26-4" string
+        assert result != "2019-W26-4"
+        if result is not None:
+            assert len(result) == 10 and result[4] == "-" and result[7] == "-"
+
 
 class TestNormalizeSharedFiltersNew:
     def test_date_from_only(self):

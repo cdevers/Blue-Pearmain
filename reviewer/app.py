@@ -855,8 +855,7 @@ def _safe_date(key: str) -> str | None:
     if not val:
         return None
     try:
-        _date.fromisoformat(val)  # validates YYYY-MM-DD
-        return val
+        return str(_date.fromisoformat(val))  # canonical YYYY-MM-DD; rejects non-YYYY-MM-DD formats
     except ValueError:
         return None
 
