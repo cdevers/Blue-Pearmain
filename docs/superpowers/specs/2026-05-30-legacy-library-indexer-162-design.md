@@ -39,7 +39,7 @@ The library is mounted via AFP today but may move to SMB, a different IP, or an 
 
 Opening the library directly over AFP is slow: a verified open-test took **243 s (~4 min)** to load 237,309 photos. The library's `database/` directory is **6.5 GB** — small enough to cache locally (86 GB free).
 
-- Optional `--cache-db` behaviour: before opening, mirror the library's `database/` plus the small bundle plists osxphotos needs (e.g. `DataModelVersion.plist`) into a local skeleton bundle at `~/Library/Application Support/Blue Pearmain/legacy-cache/<library_uuid>/`, then point osxphotos at the local copy. **Never inside the git repo.**
+- Optional `--cache-db` behaviour: before opening, mirror the library's `database/` plus the small bundle plists osxphotos needs (e.g. `DataModelVersion.plist`) into a local skeleton bundle at `<dir of curator.db>/legacy-cache/<library_uuid>/` (i.e. under `data/`, derived from the configured DB path), then point osxphotos at the local copy. `data/` is git-ignored, so this stays **out of the repo** while living alongside `curator.db`.
 - Keyed by `library_uuid`, so multiple libraries and refreshes coexist; the cache is purely a performance/resilience aid, never part of asset identity, and is safe to delete and rebuild.
 - Thumbnails are read from the live mount during the single index run (then copied into BP's thumb cache as the durable artifact), so the cache only needs the database files, not the originals/derivatives.
 
