@@ -354,3 +354,55 @@ class TestMapViewTemplateVars:
         resp = c.get("/map")
         body = resp.data.decode()
         assert "_UNKNOWN_" not in body
+
+
+class TestMapDateFilter:
+    """Date-based filtering for /api/map-photos (date_from / date_to params).
+
+    client_years fixture provides (c, p16, p19, p23, db):
+      p16 → date_taken="2016-08-15T10:00:00"
+      p19 → date_taken="2019-12-20T10:00:00"
+      p23 → date_taken="2023-07-04T10:00:00"
+    """
+
+    def test_date_from_excludes_earlier(self, client_years):
+        c, p16, p19, p23, _ = client_years
+        resp = c.get("/api/map-photos?date_from=2019-01-01")
+        assert resp.status_code == 200
+        ids = _ids(resp)
+        assert p16 not in ids
+        assert p19 in ids
+        assert p23 in ids
+
+    def test_date_to_excludes_later(self, client_years):
+        c, p16, p19, p23, _ = client_years
+        resp = c.get("/api/map-photos?date_to=2019-12-31")
+        ids = _ids(resp)
+        assert p16 in ids
+        assert p19 in ids
+        assert p23 not in ids
+
+    def test_date_to_inclusive_boundary(self, client_years):
+        """Photo taken on the boundary day is included."""
+        c, p16, p19, p23, _ = client_years
+        # p19 has date_taken="2019-12-20T10:00:00"; date_to=2019-12-20 must include it
+        resp = c.get("/api/map-photos?date_to=2019-12-20")
+        ids = _ids(resp)
+        assert p19 in ids
+        assert p23 not in ids
+
+    def test_legacy_year_from_still_works(self, client_years):
+        c, p16, p19, p23, _ = client_years
+        resp = c.get("/api/map-photos?year_from=2019")
+        ids = _ids(resp)
+        assert p16 not in ids
+        assert p19 in ids
+        assert p23 in ids
+
+    def test_legacy_year_to_still_works(self, client_years):
+        c, p16, p19, p23, _ = client_years
+        resp = c.get("/api/map-photos?year_to=2019")
+        ids = _ids(resp)
+        assert p16 in ids
+        assert p19 in ids
+        assert p23 not in ids

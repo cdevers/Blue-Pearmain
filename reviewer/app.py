@@ -983,8 +983,8 @@ def map_view() -> str:
     sf = normalize_shared_filters()
     initial_filters = {
         "time_pattern": sf["time_pattern"],
-        "year_from": sf["year_from"] if sf["year_from"] is not None else "",
-        "year_to": sf["year_to"] if sf["year_to"] is not None else "",
+        "date_from": sf["date_from"] if sf["date_from"] is not None else "",
+        "date_to": sf["date_to"] if sf["date_to"] is not None else "",
         "album_id": sf["album_id"],
         "person": sf["person"],
         "status": sf["status"],
@@ -1013,8 +1013,6 @@ def api_map_photos() -> Response:
 
     # ── Shared filter params ─────────────────────────────────────────────
     sf = normalize_shared_filters()
-    year_from = sf["year_from"]
-    year_to = sf["year_to"]
     album_id = sf["album_id"]
     person = (sf["person"] or "").strip()
 
@@ -1065,13 +1063,14 @@ def api_map_photos() -> Response:
                 where_frags.append(frag)
                 where_params.extend(frag_params)
 
-    # Year range — ISO string range predicates (index-friendly)
-    if year_from is not None:
+    # Date range — from SharedFilters (handles legacy year params via normalization)
+    if sf["date_from"]:
         where_frags.append("p.date_taken >= ?")
-        where_params.append(f"{year_from:04d}-01-01")
-    if year_to is not None:
+        where_params.append(sf["date_from"])
+    if sf["date_to"]:
+        exclusive_end = str(_date.fromisoformat(sf["date_to"]) + timedelta(days=1))
         where_frags.append("p.date_taken < ?")
-        where_params.append(f"{year_to + 1:04d}-01-01")
+        where_params.append(exclusive_end)
 
     # Album — correlated EXISTS to avoid row duplication
     if album_id is not None:
