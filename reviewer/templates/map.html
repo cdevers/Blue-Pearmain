@@ -190,8 +190,8 @@ function tryHighlight() {
 
 function _hasAnyFilter() {
   if ((document.querySelector('[name=time_pattern]')?.value || '')) return true;
-  if ((document.querySelector('[name=year_from]')?.value || '').trim()) return true;
-  if ((document.querySelector('[name=year_to]')?.value || '').trim()) return true;
+  if ((document.querySelector('[name=date_from]')?.value || '').trim()) return true;
+  if ((document.querySelector('[name=date_to]')?.value || '').trim()) return true;
   if ((document.querySelector('[name=album_id]')?.value || '')) return true;
   if ((document.querySelector('[name=person]')?.value || '').trim()) return true;
   if ((document.querySelector('[name=status]')?.value || '')) return true;
@@ -209,11 +209,18 @@ function _updateFilterChips() {
     chips.push({ text: patternEl.options[patternEl.selectedIndex].text, cls: 'map-chip' });
   }
 
-  const yf = (document.querySelector('[name=year_from]')?.value || '').trim();
-  const yt = (document.querySelector('[name=year_to]')?.value || '').trim();
-  if (yf && yt)     chips.push({ text: `${yf}–${yt}`, cls: 'map-chip' });
-  else if (yf)      chips.push({ text: `from ${yf}`, cls: 'map-chip' });
-  else if (yt)      chips.push({ text: `to ${yt}`, cls: 'map-chip' });
+  function _fmtMapDate(iso) {
+    if (!iso) return '…';
+    try {
+      const d = new Date(iso + 'T12:00:00');
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch (e) { return iso; }
+  }
+  const df = (document.querySelector('[name=date_from]')?.value || '').trim();
+  const dt = (document.querySelector('[name=date_to]')?.value || '').trim();
+  if (df && dt)   chips.push({ text: `${_fmtMapDate(df)} – ${_fmtMapDate(dt)}`, cls: 'map-chip' });
+  else if (df)    chips.push({ text: `from ${_fmtMapDate(df)}`, cls: 'map-chip' });
+  else if (dt)    chips.push({ text: `to ${_fmtMapDate(dt)}`, cls: 'map-chip' });
 
   const person = (document.querySelector('[name=person]')?.value || '').trim();
   if (person) chips.push({ text: person, cls: 'map-chip' });
@@ -415,10 +422,10 @@ function buildMapUrl() {
   const pattern = document.querySelector('[name=time_pattern]')?.value || '';
   if (pattern) params.set('time_pattern', pattern);
   if (document.getElementById('map-expand-cb')?.checked) params.set('expand', '1');
-  const yf = (document.querySelector('[name=year_from]')?.value || '').trim();
-  const yt = (document.querySelector('[name=year_to]')?.value || '').trim();
-  if (yf) params.set('year_from', yf);
-  if (yt) params.set('year_to', yt);
+  const df = (document.querySelector('[name=date_from]')?.value || '').trim();
+  const dt = (document.querySelector('[name=date_to]')?.value || '').trim();
+  if (df) params.set('date_from', df);
+  if (dt) params.set('date_to', dt);
   const album = document.querySelector('[name=album_id]')?.value || '';
   if (album) params.set('album_id', album);
   const person = (document.querySelector('[name=person]')?.value || '').trim();
@@ -484,8 +491,8 @@ function _updateFilterBadge() {
   if (!badge) return;
   let n = 0;
   if (document.querySelector('[name=time_pattern]')?.value) n++;
-  if ((document.querySelector('[name=year_from]')?.value || '').trim()) n++;
-  if ((document.querySelector('[name=year_to]')?.value || '').trim()) n++;
+  if ((document.querySelector('[name=date_from]')?.value || '').trim() ||
+      (document.querySelector('[name=date_to]')?.value || '').trim()) n++;
   if (document.querySelector('[name=album_id]')?.value) n++;
   if ((document.querySelector('[name=person]')?.value || '').trim()) n++;
   if (document.querySelector('[name=status]')?.value) n++;
@@ -528,12 +535,10 @@ const _debouncedReload = debounce(() => {
 }, 300);
 document.querySelector('[name=person]')?.addEventListener('input', _debouncedReload);
 
-// Year: blur + Enter only
-for (const el of document.querySelectorAll('[name=year_from],[name=year_to]')) {
+// Date range: change + blur
+for (const el of document.querySelectorAll('[name=date_from],[name=date_to]')) {
+  el.addEventListener('change', () => { reloadMarkers(); _updateFilterChips(); _updateFilterBadge(); });
   el.addEventListener('blur', () => { reloadMarkers(); _updateFilterChips(); _updateFilterBadge(); });
-  el.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); reloadMarkers(); _updateFilterChips(); _updateFilterBadge(); }
-  });
 }
 
 document.getElementById('map-expand-cb')?.addEventListener('change', reloadMarkers);
@@ -606,10 +611,10 @@ function openInLibrary() {
   const tp = document.querySelector('[name=time_pattern]')?.value || '';
   if (tp) params.set('time_pattern', tp);
   if (document.getElementById('map-expand-cb')?.checked) params.set('expand', '1');
-  const yf = (document.querySelector('[name=year_from]')?.value || '').trim();
-  const yt = (document.querySelector('[name=year_to]')?.value || '').trim();
-  if (yf) params.set('year_from', yf);
-  if (yt) params.set('year_to', yt);
+  const df = (document.querySelector('[name=date_from]')?.value || '').trim();
+  const dt = (document.querySelector('[name=date_to]')?.value || '').trim();
+  if (df) params.set('date_from', df);
+  if (dt) params.set('date_to', dt);
   const album = document.querySelector('[name=album_id]')?.value || '';
   if (album) params.set('album_id', album);
   const person = (document.querySelector('[name=person]')?.value || '').trim();
