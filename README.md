@@ -78,7 +78,8 @@ bp doctor --check-flickr           # Also makes a live Flickr API call
 bp migrate                         # Apply all pending DB migrations in order
 bp migrate --dry-run               # Preview which migrations would run without applying them
 
-# 5. Install git hooks (keeps uv.lock in sync when pyproject.toml changes)
+# 5. Install git hooks (pre-commit: keep uv.lock in sync + lint staged files;
+#    pre-push: run tests + lint before pushing, and block direct pushes to main)
 make install-hooks
 
 # 6. (Optional) Install background daemons — poller (hourly), pipeline (6h), reviewer UI (always on)

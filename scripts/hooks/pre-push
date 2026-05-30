@@ -1,0 +1,32 @@
+#!/bin/sh
+# pre-push: never push red, and don't push straight to main.
+#
+# 1. Refuses to push directly to main (use a feature branch + PR). Branch
+#    protection enforces this server-side too; this just fails faster with a
+#    clearer message. Escape hatch: ALLOW_MAIN_PUSH=1 git push ...
+# 2. Runs the same checks CI runs (make test + make lint) so a green local
+#    push stays green in CI.
+
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+    case "$remote_ref" in
+        refs/heads/main)
+            if [ "${ALLOW_MAIN_PUSH:-0}" != "1" ]; then
+                echo "pre-push: direct pushes to main are blocked." >&2
+                echo "  Open a PR from a feature branch instead." >&2
+                echo "  (override: ALLOW_MAIN_PUSH=1 git push ...)" >&2
+                exit 1
+            fi
+            ;;
+    esac
+done
+
+echo "pre-push: running tests + lint (mirrors CI)…"
+if ! make test; then
+    echo "pre-push: tests failed — push aborted." >&2
+    exit 1
+fi
+if ! make lint; then
+    echo "pre-push: lint/type-check failed — push aborted." >&2
+    exit 1
+fi
+echo "pre-push: all checks passed."
