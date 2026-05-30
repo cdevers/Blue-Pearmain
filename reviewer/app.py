@@ -877,6 +877,15 @@ _VALID_STATUSES: frozenset[str] = frozenset(
 )
 
 
+@app.template_filter("format_date")
+def _format_date_filter(s: str) -> str:
+    """Format a YYYY-MM-DD string as 'Jun 15, 2018'."""
+    try:
+        return _date.fromisoformat(s).strftime("%b %-d, %Y")
+    except (ValueError, AttributeError):
+        return s
+
+
 def normalize_shared_filters() -> SharedFilters:
     """Parse and normalize the shared filter params from request.args.
 

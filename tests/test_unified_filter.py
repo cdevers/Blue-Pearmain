@@ -900,3 +900,40 @@ class TestMapTagDeepLink:
         resp = client_map_deep_link.get("/map?tag=boston")
         body = resp.data.decode()
         assert "params.set('tag'" in body or 'params.set("tag"' in body
+
+
+# ── format_date Jinja filter ───────────────────────────────────────────────
+
+
+class TestFormatDateFilter:
+    def test_formats_iso_string_as_readable_date(self):
+        from reviewer.app import app
+
+        with app.app_context():
+            env = app.jinja_env
+            result = env.filters["format_date"]("2018-06-15")
+        assert result == "Jun 15, 2018"
+
+    def test_formats_single_digit_day(self):
+        from reviewer.app import app
+
+        with app.app_context():
+            env = app.jinja_env
+            result = env.filters["format_date"]("2018-06-05")
+        assert result == "Jun 5, 2018"
+
+    def test_invalid_input_returned_unchanged(self):
+        from reviewer.app import app
+
+        with app.app_context():
+            env = app.jinja_env
+            result = env.filters["format_date"]("not-a-date")
+        assert result == "not-a-date"
+
+    def test_empty_string_returned_unchanged(self):
+        from reviewer.app import app
+
+        with app.app_context():
+            env = app.jinja_env
+            result = env.filters["format_date"]("")
+        assert result == ""
