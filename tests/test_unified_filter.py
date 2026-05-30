@@ -186,13 +186,13 @@ class TestMapStatusFilter:
 
 
 class TestNormalizeSharedFilters:
-    def test_year_swap_produces_canonical_order(self):
+    def test_date_swap_produces_canonical_order(self):
         from reviewer.app import app, normalize_shared_filters
 
-        with app.test_request_context("/?year_from=2025&year_to=2010"):
+        with app.test_request_context("/?date_from=2025-06-01&date_to=2010-01-01"):
             f = normalize_shared_filters()
-        assert f["year_from"] == 2010
-        assert f["year_to"] == 2025
+        assert f["date_from"] == "2010-01-01"
+        assert f["date_to"] == "2025-06-01"
 
     def test_invalid_album_id_becomes_none(self):
         from reviewer.app import app, normalize_shared_filters
@@ -207,8 +207,8 @@ class TestNormalizeSharedFilters:
         with app.test_request_context("/"):
             f = normalize_shared_filters()
         assert f["time_pattern"] == ""
-        assert f["year_from"] is None
-        assert f["year_to"] is None
+        assert f["date_from"] is None
+        assert f["date_to"] is None
         assert f["album_id"] is None
         assert f["person"] == ""
         assert f["status"] == ""
@@ -222,13 +222,133 @@ class TestNormalizeSharedFilters:
             f = normalize_shared_filters()
         assert f["status"] == ""
 
-    def test_single_year_bound_preserved(self):
+    def test_single_date_from_preserved(self):
         from reviewer.app import app, normalize_shared_filters
 
-        with app.test_request_context("/?year_from=2018"):
+        with app.test_request_context("/?date_from=2018-03-01"):
             f = normalize_shared_filters()
-        assert f["year_from"] == 2018
-        assert f["year_to"] is None
+        assert f["date_from"] == "2018-03-01"
+        assert f["date_to"] is None
+
+
+# ── _safe_date() + new normalize_shared_filters() ──────────────────────────
+
+
+class TestSafeDate:
+    def test_valid_date_returned_as_string(self):
+        from reviewer.app import app, _safe_date
+
+        with app.test_request_context("/?date_from=2019-06-15"):
+            result = _safe_date("date_from")
+        assert result == "2019-06-15"
+
+    def test_empty_param_returns_none(self):
+        from reviewer.app import app, _safe_date
+
+        with app.test_request_context("/"):
+            result = _safe_date("date_from")
+        assert result is None
+
+    def test_invalid_format_returns_none(self):
+        from reviewer.app import app, _safe_date
+
+        with app.test_request_context("/?date_from=not-a-date"):
+            result = _safe_date("date_from")
+        assert result is None
+
+    def test_impossible_date_returns_none(self):
+        from reviewer.app import app, _safe_date
+
+        with app.test_request_context("/?date_from=2019-13-01"):
+            result = _safe_date("date_from")
+        assert result is None
+
+    def test_partial_date_returns_none(self):
+        from reviewer.app import app, _safe_date
+
+        with app.test_request_context("/?date_from=2019-06"):
+            result = _safe_date("date_from")
+        assert result is None
+
+
+class TestNormalizeSharedFiltersNew:
+    def test_date_from_only(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/?date_from=2019-06-15"):
+            f = normalize_shared_filters()
+        assert f["date_from"] == "2019-06-15"
+        assert f["date_to"] is None
+
+    def test_date_to_only(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/?date_to=2019-08-30"):
+            f = normalize_shared_filters()
+        assert f["date_from"] is None
+        assert f["date_to"] == "2019-08-30"
+
+    def test_both_dates_set(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/?date_from=2019-06-15&date_to=2019-08-30"):
+            f = normalize_shared_filters()
+        assert f["date_from"] == "2019-06-15"
+        assert f["date_to"] == "2019-08-30"
+
+    def test_date_swap_when_from_after_to(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/?date_from=2019-12-31&date_to=2019-01-01"):
+            f = normalize_shared_filters()
+        assert f["date_from"] == "2019-01-01"
+        assert f["date_to"] == "2019-12-31"
+
+    def test_neither_date_set_returns_none(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/"):
+            f = normalize_shared_filters()
+        assert f["date_from"] is None
+        assert f["date_to"] is None
+
+    def test_legacy_year_from_converts_to_date(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/?year_from=2019"):
+            f = normalize_shared_filters()
+        assert f["date_from"] == "2019-01-01"
+        assert f["date_to"] is None
+
+    def test_legacy_year_to_converts_to_date(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/?year_to=2020"):
+            f = normalize_shared_filters()
+        assert f["date_from"] is None
+        assert f["date_to"] == "2020-12-31"
+
+    def test_date_param_wins_over_legacy_year(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/?date_from=2019-06-15&year_from=2016"):
+            f = normalize_shared_filters()
+        assert f["date_from"] == "2019-06-15"
+
+    def test_invalid_date_ignored(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/?date_from=not-a-date"):
+            f = normalize_shared_filters()
+        assert f["date_from"] is None
+
+    def test_other_fields_unaffected(self):
+        from reviewer.app import app, normalize_shared_filters
+
+        with app.test_request_context("/?date_from=2019-06-15&status=public&person=Alice"):
+            f = normalize_shared_filters()
+        assert f["status"] == "public"
+        assert f["person"] == "Alice"
 
 
 # ── /library year_from / year_to ──────────────────────────────────────────

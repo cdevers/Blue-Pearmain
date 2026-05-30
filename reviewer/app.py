@@ -838,7 +838,7 @@ def api_album_delete(album_id: int) -> _JsonResp:
 
 
 def _safe_year(key: str) -> int | None:
-    """Parse a year from request.args[key]; return None if missing/invalid/out-of-range."""
+    """Parse a year from request.args[key]; kept for any callers outside normalize_shared_filters."""
     raw = request.args.get(key)
     if not raw:
         return None
@@ -849,10 +849,22 @@ def _safe_year(key: str) -> int | None:
     return y if 1800 <= y <= 2099 else None
 
 
+def _safe_date(key: str) -> str | None:
+    """Parse a YYYY-MM-DD date string from request.args[key]; return None if missing/invalid."""
+    val = (request.args.get(key) or "").strip()
+    if not val:
+        return None
+    try:
+        _date.fromisoformat(val)  # validates YYYY-MM-DD
+        return val
+    except ValueError:
+        return None
+
+
 class SharedFilters(TypedDict):
     time_pattern: str
-    year_from: int | None
-    year_to: int | None
+    date_from: str | None  # YYYY-MM-DD or None
+    date_to: str | None  # YYYY-MM-DD inclusive end, or None
     album_id: int | None
     person: str
     status: str
@@ -867,17 +879,29 @@ _VALID_STATUSES: frozenset[str] = frozenset(
 
 
 def normalize_shared_filters() -> SharedFilters:
-    """Parse and normalize the six shared filter params from request.args.
+    """Parse and normalize the shared filter params from request.args.
 
     Single normalization entry point for both library() and map_view().
-    Centralizes: int parsing, year-bound swap, status validation, whitespace
-    stripping, and empty-string normalization. Call within a Flask request
-    context.
+    Reads date_from/date_to directly; falls back to legacy year_from/year_to
+    params (converting them to ISO date strings) when date params are absent.
     """
-    year_from = _safe_year("year_from")
-    year_to = _safe_year("year_to")
-    if year_from is not None and year_to is not None and year_from > year_to:
-        year_from, year_to = year_to, year_from
+    # Primary: explicit date params
+    date_from = _safe_date("date_from")
+    date_to = _safe_date("date_to")
+
+    # Legacy compat: year_from / year_to → ISO date strings
+    if date_from is None:
+        y = _safe_year("year_from")
+        if y is not None:
+            date_from = f"{y:04d}-01-01"
+    if date_to is None:
+        y = _safe_year("year_to")
+        if y is not None:
+            date_to = f"{y:04d}-12-31"
+
+    # Swap if inverted
+    if date_from is not None and date_to is not None and date_from > date_to:
+        date_from, date_to = date_to, date_from
 
     album_id: int | None = None
     raw_album = (request.args.get("album_id") or "").strip()
@@ -892,8 +916,8 @@ def normalize_shared_filters() -> SharedFilters:
 
     return SharedFilters(
         time_pattern=(request.args.get("time_pattern") or "").strip(),
-        year_from=year_from,
-        year_to=year_to,
+        date_from=date_from,
+        date_to=date_to,
         album_id=album_id,
         person=(request.args.get("person") or "").strip(),
         status=status,
