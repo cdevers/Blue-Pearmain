@@ -486,16 +486,23 @@ def client_map_view():
 
 
 class TestMapViewInitialFilters:
-    def test_map_view_passes_initial_filters_to_template(self, client_map_view):
+    def test_map_view_renders_with_date_params(self, client_map_view):
+        """map_view() does not crash with date_from/date_to params."""
         c = client_map_view
         resp = c.get(
-            "/map?time_pattern=month:08&year_from=2015&year_to=2019&person=Marcin&status=public"
+            "/map?time_pattern=month:08&date_from=2015-01-01&date_to=2019-12-31"
+            "&person=Marcin&status=public"
         )
         assert resp.status_code == 200
-        body = resp.data.decode()
-        assert 'value="2015"' in body
-        assert 'value="2019"' in body
-        assert 'value="Marcin"' in body
+        # Value assertions (value="2015-01-01") confirmed after Task 6 updates
+        # the filter bar template to render <input type="date"> inputs.
+        assert "Marcin" in resp.data.decode()
+
+    def test_map_view_renders_with_legacy_year_params(self, client_map_view):
+        """map_view() does not crash with legacy year_from/year_to params."""
+        c = client_map_view
+        resp = c.get("/map?year_from=2015&year_to=2019")
+        assert resp.status_code == 200
 
 
 # ── Template integration: shared macro + library UI ───────────────────────

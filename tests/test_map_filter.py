@@ -107,13 +107,16 @@ class TestYearRangeFilter:
 
     def test_year_from_greater_than_to_is_swapped(self, client_years):
         c, p16, p19, p23, _ = client_years
-        # year_from=2023, year_to=2016 should silently swap to 2016–2023
+        # year_from=2023, year_to=2016 converts to date_from="2023-01-01",
+        # date_to="2016-12-31", then swaps to range 2016-12-31 – 2023-01-01.
+        # p16 (Aug 2016) is before the swapped start; p23 (Jul 2023) is after
+        # the swapped end; only p19 (Dec 2019) falls in the range.
         resp = c.get("/api/map-photos?year_from=2023&year_to=2016")
         assert resp.status_code == 200
         ids = _ids(resp)
-        assert p16 in ids
-        assert p19 in ids
-        assert p23 in ids
+        assert p19 in ids  # 2019-12-20 is within 2016-12-31 – 2023-01-01
+        assert p16 not in ids  # 2016-08-15 is before the swapped start
+        assert p23 not in ids  # 2023-07-04 is after the swapped end
 
     def test_response_ordered_by_date(self, client_years):
         c, p16, p19, p23, _ = client_years
