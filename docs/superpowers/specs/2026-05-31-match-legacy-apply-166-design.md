@@ -243,9 +243,13 @@ Applied legacy reclassification:
   reclassified : <n> photos moved out of candidate_public
     needs_review : <a>
     auto_private : <b>
-  unchanged    : <c> (stayed candidate_public)
-  skipped      : <d> (already human-reviewed / not eligible)
+  unchanged    : <c> (matched but no people signal, or no/ambiguous-mixed match)
 ```
+
+The eligibility guard (only `candidate_public`, never human-reviewed states)
+is the candidate query's `WHERE privacy_state = 'candidate_public'` clause —
+ineligible photos are never selected, so there is no separate "skipped" count.
+`unchanged` covers every selected photo that was not demoted.
 
 ## Testing (TDD)
 
@@ -294,10 +298,17 @@ Run: `python -m pytest tests/ -q` (all green before commit). `make lint`
 - **Modify** `bp` — rename `match-legacy-preview` → `match-legacy`; add
   `--apply`; extend `cmd_match_legacy_preview` → `cmd_match_legacy` with the
   apply path; `id` added to the candidate query; update dispatch + arg defaults.
-- **Modify** `poller/legacy_match.py` — add a helper to shape a legacy asset
+- **Modify** `poller/legacy_match.py` — add pure helpers: shape a legacy asset
   into a `classify()`-ready dict (including `_UNKNOWN_` reconstruction), a
-  predicate for "people-positive", and the per-candidate aggregation
-  (ordering + most-private precedence).
+  predicate for "people-positive", and `resolve_apply_decision()` (tier gating +
+  per-candidate classify + ordering + most-private precedence + frozen reason).
+- **Create** `poller/legacy_apply.py` — `apply_legacy_matches(db, library_uuid,
+  *, self_name, zones, person_policies, classifier_version)` orchestration:
+  query eligible photos, build the wall-clock index, call
+  `resolve_apply_decision`, write via the atomic db helper, return a counts dict.
+  Keeps `bp` thin and the loop unit-testable against a temp DB.
+- **Modify** `db/db.py` — add `reclassify_legacy_match(...)` performing the
+  atomic `privacy_state` + `operation_log` write in one transaction.
 - **Modify** `analyzer/privacy.py` — add the `CLASSIFIER_VERSION` constant
   stamped into each audit row.
 - **Create** `tests/test_match_legacy_apply.py` — the tests above.
