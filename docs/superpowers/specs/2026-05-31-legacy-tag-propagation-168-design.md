@@ -209,11 +209,20 @@ Behaviour:
   `_json_loads_safe` helper (→ list, or `[]` if NULL/blank) before merging, and
   **re-encode** with `json.dumps` when persisting. Guard against malformed historical
   rows: a decoded value that is **not a list** (e.g. a bare string or dict) is coerced to
-  `[]`, so the set-union never iterates string characters or dict keys. Merge: `merged = sorted(set(current) |
-  set(add_tags))`; update only if `merged != current`. (Plain set-union — no `analyzer`
-  import; inputs are already lowercased/normalised by `propose_tags` upstream, and stored
-  `proposed_tags` are normalised. Decoding first avoids unioning the *characters* of the
-  JSON string.)
+  `[]`, so the set-union never iterates string characters or dict keys.
+  **Malformed-data policy: repair in-place.** `proposed_tags` is regenerable staging
+  output (not a canonical source — that's `photos_tags`/`flickr_tags`), so a malformed
+  payload is discarded and overwritten with the valid merged list rather than preserved
+  or skipped. The repair is *not* silent: when the current value was non-NULL but
+  unparseable/non-list, set `new_value.tags_repaired = true` in the audit row so the
+  anomaly is traceable. A malformed row with no tags to add still counts as a change
+  (it gets normalised to `[]`-as-JSON and logged with `tags_repaired`). Merge:
+  `merged = sorted(set(current) | set(add_tags))`; the tags column changed iff
+  `merged != current` **or** the raw stored value was malformed (the malformed clause is
+  what forces the no-add repair case, where `merged == current == []` would otherwise
+  skip it). (Plain set-union — no `analyzer` import; inputs are already
+  lowercased/normalised by `propose_tags` upstream, and stored `proposed_tags` are
+  normalised. Decoding first avoids unioning the *characters* of the JSON string.)
 - Scalars (`proposed_title`, `proposed_description`): update only when the **current**
   value is empty (`(current or "").strip() == ""`) *and* the incoming value is non-empty.
   The incoming value is already `.strip()`-ed by `legacy_metadata_payload`.
@@ -368,7 +377,11 @@ New tests (`tests/test_legacy_tag_propagation.py`):
   - `tags_added` is the delta (newly added), not the final merged total.
   - decodes JSON `proposed_tags` before merge (union of tag strings, not characters).
   - malformed current `proposed_tags` (bare string / dict / non-list JSON) → coerced to
-    `[]`, merge yields just `add_tags`, no crash.
+    `[]`, merge yields just `add_tags`, no crash; repaired in-place and the audit row
+    carries `tags_repaired: true`.
+  - malformed current `proposed_tags` with **no** add_tags → still repaired to `[]`-JSON,
+    returns True, audit row has `tags_repaired: true` (the `merged == current` skip is
+    overridden).
   - `new_value.fields` is in schema order (`proposed_tags`, `proposed_title`,
     `proposed_description`) regardless of which changed.
   - writes exactly one aggregate operation_log row (`operation='match_legacy_metadata'`)
