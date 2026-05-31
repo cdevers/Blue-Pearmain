@@ -124,10 +124,24 @@ scanner: `zones = db.active_zones()`, `person_policies = db.get_person_policies(
 `self_name = config["photos_library"]["self_name"]`. This guarantees a legacy
 photo of `self_name` alone is not demoted, matching Apple behaviour.
 
-For an **ambiguous, all-people** match there are multiple candidate assets. We
-classify a synthesised record that unions the people signals (any named person,
-summed unknown faces, unioned labels) and uses the first candidate's lat/lon —
-the outcome is `needs_review`/`auto_private` regardless, so the union is safe.
+### Ambiguous (all-people) candidate aggregation
+
+For an **ambiguous, all-people** match there are multiple candidate legacy
+assets. Rather than synthesising a unioned record, we **classify each candidate
+independently** and take the most-private outcome, deterministically:
+
+1. **Deterministic ordering.** Sort the candidates by `asset_uuid` ascending
+   before evaluation. (Candidates already share the same wall-clock timestamp,
+   so `asset_uuid` is the stable, reproducible tiebreak.)
+2. **Classify each** shaped candidate record with `classify()`.
+3. **State precedence (most-private wins):**
+   `auto_private` > `needs_review` > `candidate_public`.
+   Pick the candidate whose state ranks highest.
+4. **Reason tiebreak.** Among candidates that produced the winning state, the
+   reason and `asset_uuid` come from the **first in sorted order**. This makes
+   the stored reason string fully reproducible regardless of DB row order.
+
+A confident match is the degenerate single-candidate case of the same rule.
 
 ## Transition rule
 
@@ -140,8 +154,7 @@ For each acted-on photo:
    scanner's guard (`scanner.py:543`).
 2. Run `classify()` on the shaped legacy record.
 3. If the new state == `candidate_public`, **no-op** (no write, no log).
-4. Otherwise call `db.set_privacy_state(photo_id, new_state, new_reason)` and
-   `db.log_operation(...)`.
+4. Otherwise write the new state and the audit row (see below).
 
 The candidate query gains `id` (needed for `set_privacy_state`):
 
@@ -150,24 +163,58 @@ SELECT id, flickr_id, date_taken, width, height, flickr_title
 FROM photos WHERE uuid IS NULL AND privacy_state = 'candidate_public'
 ```
 
-## Audit trail
+### Reason string schema (frozen)
 
-Each reclassification appends one `operation_log` row:
+The stored `privacy_reason` is structured provenance, parseable and stable:
 
-```python
-db.log_operation(
-    photo_id,
-    operation="match_legacy_apply",
-    target="privacy_state",
-    old_value="candidate_public",
-    new_value=new_state,
-    trigger=f"legacy:{asset_uuid} tier={tier}",
-    actor="bp",
-)
+```
+legacy-match[tier=<tier>,asset=<asset_uuid>]: <classifier_reason>
 ```
 
-`log_operation` is fire-and-forget (swallows errors), so journaling never
-interrupts the reclassification.
+- `<tier>` — `confident` or `ambiguous`.
+- `<asset_uuid>` — the winning candidate's `asset_uuid` (the sole asset for
+  confident; the first-in-sorted-order winner for ambiguous, per the
+  aggregation rule above).
+- `<classifier_reason>` — the verbatim reason returned by `classify()` (e.g.
+  `named person(s): Aunt May`).
+
+Example:
+`legacy-match[tier=confident,asset=A1B2-...]: 2 unidentified face(s)`
+
+## Audit trail and transaction semantics
+
+Each reclassification writes **two changes that must commit atomically** — the
+`photos.privacy_state` update and the `operation_log` row — so an interruption
+leaves both or neither. We must never end up with a demoted photo and no audit
+trail, or an audit row for a state change that didn't land.
+
+The existing helpers each commit on their own (`set_privacy_state` commits;
+`log_operation` commits and swallows errors), so they **cannot** be called
+back-to-back here. Instead, perform both writes inside a single transaction with
+one commit:
+
+```python
+with db.conn:                      # single transaction; commits or rolls back
+    db.conn.execute(
+        "UPDATE photos SET privacy_state=?, privacy_reason=?, "
+        "date_synced=?, updated_at=? WHERE id=?",
+        (new_state, reason_str, _now_iso(), _now_iso(), photo_id),
+    )
+    db.conn.execute(
+        "INSERT INTO operation_log "
+        "(occurred_at, photo_id, operation, target, old_value, new_value, "
+        " trigger, actor) VALUES (?,?,?,?,?,?,?,?)",
+        (_now_iso(), photo_id, "match_legacy_apply", "privacy_state",
+         "candidate_public", new_state,
+         f"legacy:{asset_uuid} tier={tier}", "bp"),
+    )
+```
+
+(Equivalently, a small `db` helper — e.g. `reclassify_with_audit(...)` — that
+wraps the two statements in one transaction. Pick whichever keeps `bp` thin;
+the atomicity requirement is the binding part.) Unlike the fire-and-forget
+`log_operation`, an audit-write failure here must roll the whole reclassification
+back, not be swallowed.
 
 ## Idempotency
 
@@ -205,12 +252,22 @@ Unit tests in `tests/` (pure logic, no osxphotos / no NAS):
 6. **Confident match is acted on**; **no-match is never acted on**.
 7. **Ambiguous all-people** → acted on (demoted); **ambiguous mixed** (one
    candidate people-positive, one not) → **not** acted on (untouched).
-8. **Eligibility guard** — a matched photo already in `keep_private` /
-   `approved_public` is never modified.
-9. **Idempotency** — two `--apply` passes produce one transition and one log
-   row per photo.
-10. **Audit** — a transition writes one `operation_log` row with
-    `operation="match_legacy_apply"` and the expected old/new values.
+8. **Ambiguous aggregation precedence** — candidates classify to
+   `needs_review` and `auto_private` → winning state is `auto_private`
+   (most-private wins).
+9. **Ambiguous reason determinism** — given two candidates that both yield the
+   winning state, the stored `privacy_reason` carries the lower `asset_uuid`'s
+   reason regardless of input row order (feed the same pair reversed → identical
+   reason string).
+10. **Eligibility guard (human decision preserved)** — a matched photo whose
+    legacy classifier says `auto_private` but whose current state is
+    `approved_public` is **unchanged** (no write, no log). Repeat for
+    `keep_private`.
+11. **Idempotency** — two `--apply` passes produce one transition and one log
+    row per photo.
+12. **Audit atomicity** — a transition writes exactly one `operation_log` row
+    (`operation="match_legacy_apply"`, `old="candidate_public"`,
+    `new=<state>`); the `privacy_reason` matches the frozen schema.
 
 Run: `python -m pytest tests/ -q` (all green before commit). `make lint`
 (mypy + ruff) clean on touched files.
