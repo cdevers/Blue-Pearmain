@@ -44,7 +44,9 @@ Opening the library directly over AFP is slow: a verified open-test took **243 s
 - Thumbnails are read from the live mount during the single index run (then copied into BP's thumb cache as the durable artifact), so the cache only needs the database files, not the originals/derivatives.
 
 **Cache invalidation (review point 3).** The cache is validated against `legacy_libraries` metadata before reuse:
-- **Reuse** the local cache if it exists and the source `Photos.sqlite` matches the recorded `db_mtime` + `db_size` **and** `db_head_hash` (SHA256 of the first 16 MB). The hash is the extra discriminator (review point 1): it catches restores/rsync copies that preserve mtime, and same-size replacements that bare mtime+size would miss. Reading 16 MB is cheap relative to the 1.8 GB full DB.
+- **Reuse** the local cache if it exists and the source `Photos.sqlite` matches the recorded `db_mtime` + `db_size` **and** `db_head_hash` (SHA256 of the first 16 MiB of raw file bytes). The hash is the extra discriminator (review point 1): it catches restores/rsync copies that preserve mtime, and same-size replacements that bare mtime+size would miss. Reading 16 MiB is cheap relative to the 1.8 GB full DB.
+
+**Cache-validity metadata lives in the DB.** `db_mtime`, `db_size`, and `db_head_hash` are columns on `legacy_libraries` in `curator.db` — there is no filesystem sidecar. The local cache directory under `data/legacy-cache/<library_uuid>/` holds only the copied bundle files; its validity is judged solely by comparing the live source `Photos.sqlite` against these DB-recorded values.
 - **Rebuild** if the cache is absent, any discriminator differs (library upgraded/restored/replaced), or a prior copy was incomplete (a copy completes by atomic rename of a temp dir, so a partial copy is never treated as valid).
 - `--refresh-cache` forces a rebuild regardless. Stale/partial caches are replaced, not appended to.
 
@@ -64,7 +66,7 @@ Houses per-library identity, provenance, and cache-validity metadata (the latter
 | `schema_version` | INTEGER — `LibrarySchemaVersion` from the bundle |
 | `db_mtime` | TEXT — mtime of the source `Photos.sqlite` at last index/cache |
 | `db_size` | INTEGER — size of the source `Photos.sqlite` at last index/cache |
-| `db_head_hash` | TEXT — SHA256 of the first 16 MB of source `Photos.sqlite` (cheap content discriminator) |
+| `db_head_hash` | TEXT — SHA256 of the **first 16 MiB (16,777,216 raw file bytes)** of source `Photos.sqlite` — file bytes, not SQLite pages or logical DB content (cheap content discriminator) |
 | `asset_count` | INTEGER |
 | `indexed_at` | TEXT ISO8601 |
 
@@ -95,7 +97,7 @@ Constraint: `UNIQUE(library_uuid, asset_uuid)`. Indexes on `date_taken` and `(wi
 
 **Identity vs. advisory fields:** asset identity is strictly `(library_uuid, asset_uuid)`. `fingerprint`, `original_filename`, `source_path_last_seen`, and the thumbnail cache location are all **advisory** — never identity, never the source of truth for "where is this asset."
 
-**Path canonicalization (review point 5):** `master_rel_path` is produced by a single canonical transform so the same asset never yields two spellings: POSIX `/` separators, original case preserved, leading `./` stripped, duplicate slashes collapsed, no trailing slash, Unicode normalized to **NFC** (macOS surfaces NFD). This is for stable storage/comparison and display; it is advisory, so a later phase that needs to *open* the file should re-derive the path from the live bundle rather than trust this string.
+**Path canonicalization (review point 5):** `master_rel_path` is produced by a single canonical transform, in this fixed order, so the same asset never yields two spellings: (1) convert separators to POSIX `/`; (2) collapse duplicate slashes — **after** separator normalization, so backslash-derived separators are also collapsed; (3) strip leading `./`; (4) strip trailing slash; (5) preserve original case; (6) normalize Unicode to **NFC** (macOS surfaces NFD). This is for stable storage/comparison and display; it is advisory, so a later phase that needs to *open* the file should re-derive the path from the live bundle rather than trust this string.
 
 **Thumbnail path (review point 1):** only the cache *key* is durable. The absolute path is derived at read time from the configured thumb-cache root, so moving the repo / `data/` / restoring backups never strands the DB on stale absolute paths. This deliberately diverges from the older `photos.thumbnail_path` (absolute) convention because path-independence is a first-class goal for the legacy index.
 
@@ -112,6 +114,8 @@ Migration follows the existing `migrate_019_*` idempotent pattern. Next free mig
 This prevents removed assets from lingering and producing false-positive candidates in the matching preview.
 
 A **`--limit N`** run is explicitly **non-authoritative**: it upserts only the sampled assets and performs **no deletions** (a partial run cannot speak for the whole library). Reconciliation/GC happen only on full runs.
+
+**Completion marker required before any deletion (review point 2).** Reconciliation (row hard-delete) and thumbnail GC run **only after the full run has iterated the entire source library to successful completion**. The indexer records the set of `asset_uuid`s seen during the run and performs deletions in a single final step gated on that successful completion. An **interrupted full run** (exception, kill, unmounted share mid-iteration) deletes nothing — it behaves exactly like `--limit`: upserts what it saw, reconciles nothing. This prevents a partial iteration from being mistaken for "the library no longer contains these assets" and mass-deleting valid rows.
 
 **Thumbnail orphan cleanup (review point 3):** the thumbnail cache is reconciled on full runs — cache entries whose key no longer maps to a live `legacy_assets` row for that library are pruned, so deleted assets don't leak thumbnails forever. (`--limit` runs prune nothing.)
 
@@ -131,7 +135,9 @@ A **`--limit N`** run is explicitly **non-authoritative**: it upserts only the s
 - **ambiguous** — more than one legacy candidate at the matching timestamp, or a timestamp match with conflicting dimensions or title.
 - **no-match** — zero legacy candidates at the normalized timestamp.
 
-**Title comparison (review point 4).** Title is a weak signal and is treated as a *tiebreaker only*, never a primary key. A title "conflict" exists **only when both titles are non-empty after normalization** (trim whitespace, casefold, NFC) and still differ. An empty/missing title on either side is *not* a conflict and never demotes an otherwise-confident match — this keeps the ambiguous rate from climbing on the 28% of photos lacking a Flickr title.
+**Deterministic output ordering (review point 6).** Both the console report and the CSV emit rows in a fixed sort order so re-running over an unchanged DB produces byte-identical output (stable diffs): primary key **tier** (confident, then ambiguous, then no-match), then **normalized `date_taken`** ascending, then the Flickr photo's **`flickr_id`** ascending, then (for the candidate legacy rows within a photo) **`asset_uuid`** ascending. Ties are fully broken by this composite key.
+
+**Title comparison (review point 4).** Title is a weak signal and is treated as a *tiebreaker only*, never a primary key. A title "conflict" exists **only when both titles are non-empty after normalization** (trim whitespace, casefold, NFC) and still differ. **A title that is empty after trimming counts as missing** (identical to `NULL`/absent). An empty/missing title on either side is *not* a conflict and never demotes an otherwise-confident match — this keeps the ambiguous rate from climbing on the 28% of photos lacking a Flickr title.
 
 Matching feasibility (verified against the live DB): Flickr-only `candidate_public` rows have `date_taken` 100% (34035/34035), dimensions ~100% (34034), `flickr_title` 72% (24555). The legacy assets carry all of these plus fingerprint (advisory).
 
