@@ -187,7 +187,8 @@ bp uninstall-daemons               # Remove installed launchd agents
 bp uninstall-daemons --dry-run     # Preview what would be removed without deleting
 bp export                          # Export DB state to NDJSON (photos.ndjson, zones.json, manifest.json)
 bp export --out /path/to/dir       # Custom output directory (default: ./bp-export-YYYY-MM-DD/)
-bp index-legacy --library <path>   # Index a legacy (migrated iPhoto/Photos 4) library's metadata + thumbnails into curator.db
+bp index-legacy --library <path>   # Index a legacy (migrated iPhoto/Photos 4) library's per-asset metadata into curator.db
+bp index-legacy --no-thumbnails    # Skip thumbnail copying (currently required — thumbnail support is deferred to #164)
 bp index-legacy --limit N          # Quick non-authoritative sample of the first N assets (no deletions)
 bp index-legacy --no-cache         # Read the library in place instead of the local DB cache
 bp index-legacy --refresh-cache    # Force a rebuild of the local DB cache
