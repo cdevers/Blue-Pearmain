@@ -22,18 +22,18 @@ MIGRATION_NAME = "migrate_020_operation_log"
 
 
 def _already_migrated(conn: sqlite3.Connection) -> bool:
+    # Skip only when this migration's name is recorded. Do NOT short-circuit on
+    # table existence: operation_log is bootstrapped by Database._ensure_schema,
+    # so a table-existence check would skip without ever recording the name and
+    # leave the migration perpetually "pending" (#170). The DDL below is all
+    # CREATE ... IF NOT EXISTS, so re-running it when the table exists is safe.
     try:
         row = conn.execute(
             "SELECT id FROM schema_migrations WHERE name = ?", (MIGRATION_NAME,)
         ).fetchone()
-        if row is not None:
-            return True
+        return row is not None
     except Exception:
-        pass
-    tables = {
-        r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-    }
-    return "operation_log" in tables
+        return False
 
 
 def run(db_path: str, dry_run: bool = False) -> None:

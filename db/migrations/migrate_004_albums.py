@@ -46,7 +46,7 @@ CREATE INDEX IF NOT EXISTS idx_photo_albums_pending ON photo_albums(flickr_pushe
 """
 
 
-def run(db_path: Path) -> None:
+def run(db_path: Path, dry_run: bool = False) -> None:
     from db.db import Database
 
     db = Database(db_path)
@@ -56,6 +56,11 @@ def run(db_path: Path) -> None:
     ).fetchone()
     if already:
         print(f"Migration {MIGRATION_NAME} already applied — skipping.")
+        db.close()
+        return
+
+    if dry_run:
+        print(f"[dry-run] Would apply migration {MIGRATION_NAME}.")
         db.close()
         return
 
