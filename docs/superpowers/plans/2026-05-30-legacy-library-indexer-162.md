@@ -1972,19 +1972,20 @@ The unit tests cover the cache *validity logic*; this step proves the live build
 
 - [ ] **Step 5: Interruption safety — no authoritative reconcile or thumbnail GC on a killed full run**
 
-Proves the completion-marker gate from Task 5 on the real library. Run a **non-limited** (authoritative) index and interrupt it mid-iteration:
+Proves the completion-marker gate from Task 5 on the real library. Run a **non-limited** (authoritative) index and interrupt it mid-iteration. The core invariant is the **no-disappearance** property: every `asset_uuid` present before the interrupted run must still exist after it.
 
-1. Note current state: `python bp stats --config config/config.yml` is unrelated; instead capture the legacy row count and a sample of thumbnail files:
-   Run: `python -c "import sys; sys.path.insert(0,'.'); from db.db import Database; import yaml; c=yaml.safe_load(open('config/config.yml')); d=Database(c['database']['path']); rows=d.conn.execute('SELECT library_uuid, COUNT(*) FROM legacy_assets GROUP BY library_uuid').fetchall(); print([dict(r) for r in [ {0:r[0],1:r[1]} for r in rows]])"`
-   (Simpler: just record `SELECT COUNT(*) FROM legacy_assets` and `ls` of the `legacy/<uuid>/` thumb dir.)
+1. **Snapshot the pre-interruption UUID set** (and count) to a file:
+   Run: `python -c "import sys; sys.path.insert(0,'.'); import yaml; from db.db import Database; c=yaml.safe_load(open('config/config.yml')); d=Database(c['database']['path']); uu=sorted(r[0] for r in d.conn.execute('SELECT asset_uuid FROM legacy_assets')); open('/tmp/legacy-uuids-before.txt','w').write('\n'.join(uu)); print('before count:', len(uu))"`
+   Also record the thumb dir: `ls "$(python -c "import yaml;print(yaml.safe_load(open('config/config.yml'))['thumbnails']['path'])")/legacy" 2>/dev/null`
 2. Start a full run, then interrupt it with Ctrl-C (or `kill`) after a few seconds, before it finishes iterating:
    Run: `python bp index-legacy --library "/Volumes/homes/cdevers/Pictures/Photos Library.photoslibrary" --config config/config.yml`  → press **Ctrl-C** partway through.
    Expected: the process exits non-zero with a traceback/KeyboardInterrupt; **no** "reconciled N" summary line is printed (the summary only prints on clean completion).
-3. Verify nothing was deleted:
-   Run the same count + thumb-dir checks as (1).
-   Expected: `legacy_assets` row count is **unchanged or higher** (interrupted run may have upserted some rows, but deleted none), and previously-present thumbnail files still exist. No row that existed before the interrupted run is missing afterward.
+3. **Snapshot the post-interruption UUID set and assert the before-set is fully preserved** (explicit invariant, not just a count):
+   Run: `python -c "import sys; sys.path.insert(0,'.'); import yaml; from db.db import Database; c=yaml.safe_load(open('config/config.yml')); d=Database(c['database']['path']); after=set(r[0] for r in d.conn.execute('SELECT asset_uuid FROM legacy_assets')); before=set(open('/tmp/legacy-uuids-before.txt').read().split('\n')) - {''}; missing=before - after; print('before:', len(before), 'after:', len(after), 'missing:', len(missing)); assert not missing, f'INVARIANT VIOLATED: {len(missing)} pre-existing UUIDs were deleted: {sorted(missing)[:10]}'; print('OK: no pre-existing asset_uuid disappeared')"`
+   Expected: prints `OK: no pre-existing asset_uuid disappeared` and exits 0. `after` ≥ `before` (the interrupted run may have upserted new rows, but deleted none). The assertion fails loudly if any pre-existing UUID is gone.
+4. Confirm thumbnails were not GC'd: the `legacy/` thumb dir listing from (1) is still present (no files removed).
 
-> This confirms an interrupted full run behaves like `--limit`: upserts what it saw, reconciles nothing, GCs nothing.
+> This confirms an interrupted full run behaves like `--limit`: upserts what it saw, reconciles nothing, GCs nothing. The UUID-set assertion is the operative proof — count-only validation would miss a delete-plus-insert that nets to the same count.
 
 - [ ] **Step 6: Real smoke run of the preview (deterministic output)**
 
