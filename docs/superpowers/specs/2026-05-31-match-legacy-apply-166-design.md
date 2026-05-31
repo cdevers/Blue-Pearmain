@@ -244,6 +244,15 @@ both and hands the finished strings to `db.reclassify_legacy_match(..., reason,
 trigger=...)`, so the `db` layer holds no format literal and the two provenance
 strings cannot be edited out of lockstep.
 
+**Frozen reason grammar.** The `privacy_reason` string is
+`legacy-match[tier=<tier>,asset=<asset_uuid>]: <classifier_reason>` with the
+bracketed prefix **grammar frozen** (literal `legacy-match[`, then `tier=`, a
+comma, `asset=`, `]`, then `: ` before the classifier's own reason). It is
+built only in `legacy_match.format_legacy_reason()` — never inline. Consumers
+parse the prefix positionally and **must treat the trailing
+`<classifier_reason>` text as opaque** (it is human-facing and may change
+wording freely); only the bracketed prefix is a contract.
+
 **Frozen trigger grammar.** The `trigger` string is
 `legacy:<asset_uuid> tier=<tier> clf=<classifier_version>` with **field order
 frozen** (the `legacy:` token first, then `tier=`, then `clf=`) and **spacing
@@ -339,6 +348,13 @@ output and any future automation from drifting):
 | `auto_private` | subset of `reclassified` whose winning state was `auto_private`                          |
 | `unchanged`    | selected photos that stayed `candidate_public` (no people signal, or ambiguous-mixed)    |
 | `failed`       | photos whose per-photo transaction raised; rolled back, counted, and skipped (see above) |
+
+**Counts reflect committed rows only.** A photo whose transaction rolled back
+increments `failed` and **never** `reclassified` (nor `needs_review` /
+`auto_private`) — those three count only photos whose state change actually
+committed. So `reclassified` is always the exact number of `operation_log` rows
+written this run, and a `failed` photo contributes to neither the demotion
+counts nor the audit log.
 
 **Invariant:** `reclassified + unchanged + failed == eligible`, and
 `needs_review + auto_private == reclassified`. A test asserts both.

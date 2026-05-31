@@ -402,11 +402,35 @@ def test_ambiguous_reason_is_order_independent():
                                      zones=[], self_name="Me")
     assert forward["reason"] == reverse["reason"]
     assert forward["asset_uuid"] == "A"
+
+
+def test_reason_and_trigger_share_provenance():
+    """The two contract strings, built from the same decision, must carry the
+    same asset UUID and tier — guards against the formatters drifting apart."""
+    from legacy_match import (
+        format_legacy_reason,
+        format_legacy_trigger,
+        resolve_apply_decision,
+    )
+
+    cands = [_cand("A", persons='["Aunt May"]', named_face_count=1)]
+    d = resolve_apply_decision(_photo(), cands, zones=[], self_name="Me")
+    reason = d["reason"]  # already built via format_legacy_reason
+    trigger = format_legacy_trigger(d["asset_uuid"], d["tier"], 1)
+    # Both strings encode the same provenance, just in their own grammars.
+    assert f"asset={d['asset_uuid']}" in reason
+    assert f"tier={d['tier']}" in reason
+    assert f"legacy:{d['asset_uuid']} " in trigger
+    assert f"tier={d['tier']} " in trigger
+    # Sanity: reason is exactly what the helper produces for these inputs.
+    assert reason == format_legacy_reason(
+        d["tier"], d["asset_uuid"], "named person(s): Aunt May"
+    )
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m pytest tests/test_match_legacy_apply.py -k "resolve or confident or ambiguous or no_match or geofenced" -v`
+Run: `python -m pytest tests/test_match_legacy_apply.py -k "resolve or confident or ambiguous or no_match or geofenced or provenance" -v`
 Expected: FAIL with `ImportError: cannot import name 'resolve_apply_decision'`
 
 - [ ] **Step 3: Implement `resolve_apply_decision`**
@@ -478,8 +502,8 @@ def resolve_apply_decision(
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python -m pytest tests/test_match_legacy_apply.py -k "resolve or confident or ambiguous or no_match or geofenced" -v`
-Expected: PASS (9 tests)
+Run: `python -m pytest tests/test_match_legacy_apply.py -k "resolve or confident or ambiguous or no_match or geofenced or provenance" -v`
+Expected: PASS (10 tests)
 
 - [ ] **Step 5: Commit**
 
