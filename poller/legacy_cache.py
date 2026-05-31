@@ -9,7 +9,9 @@ there is no filesystem sidecar. Build is atomic (temp dir + rename).
 
 from __future__ import annotations
 
+import hashlib
 import shutil
+import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +33,36 @@ def locate_source_db(library_path: str) -> str | None:
         if p.exists():
             return str(p)
     return None
+
+
+def read_library_uuid(source_db_path: str) -> str | None:
+    """Path-independent identity for a Photos-4 library.
+
+    osxphotos exposes no library_uuid for Photos-4 bundles, so read Apple's
+    intrinsic databaseUuid from RKAdminData and hash it into a filesystem-safe
+    id (the raw value contains chars like % and + that are poor for paths).
+    Returns None when the value cannot be read.
+    """
+    try:
+        conn = sqlite3.connect(f"file:{source_db_path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT propertyValue, blobPropertyValue FROM RKAdminData "
+            "WHERE propertyArea='database' AND propertyName='databaseUuid'"
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+    if not row:
+        return None
+    value = row[0] if row[0] is not None else row[1]
+    if value is None:
+        return None
+    raw = value.encode("utf-8") if isinstance(value, str) else bytes(value)
+    return "p4-" + hashlib.sha256(raw).hexdigest()[:24]
 
 
 def source_db_stats(db_path: str) -> dict:

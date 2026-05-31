@@ -15,7 +15,7 @@ import shutil
 from pathlib import Path
 from typing import Callable
 
-from legacy_cache import ensure_cache
+from legacy_cache import ensure_cache, locate_source_db, read_library_uuid
 from legacy_normalize import (
     canonical_rel_path,
     normalize_json_list,
@@ -28,13 +28,31 @@ log = logging.getLogger("blue-pearmain.legacy-indexer")
 _UNKNOWN = {"", "_UNKNOWN_", None}
 
 
-def _library_uuid(photosdb) -> str:
-    """Path-independent identity of the source bundle."""
+def _library_uuid(photosdb) -> str | None:
+    """Path-independent identity exposed by osxphotos, if any.
+
+    Photos 5+ may expose a string library_uuid. Photos 4 exposes none (and
+    osxphotos leaves _uuid bound to an unrelated function), so callers fall
+    back to legacy_cache.read_library_uuid against the source DB.
+    """
     for attr in ("library_uuid", "_uuid"):
         val = getattr(photosdb, attr, None)
-        if val:
-            return str(val)
-    raise ValueError("PhotosDB exposed no library UUID")
+        if isinstance(val, str) and val:
+            return val
+    return None
+
+
+def _resolve_library_uuid(photosdb, library_path: str) -> str:
+    """library_uuid from osxphotos if present, else the Photos-4 databaseUuid."""
+    uuid = _library_uuid(photosdb)
+    if uuid:
+        return uuid
+    source_db = locate_source_db(library_path)
+    if source_db:
+        uuid = read_library_uuid(source_db)
+        if uuid:
+            return uuid
+    raise ValueError(f"Could not determine a library UUID for {library_path}")
 
 
 def _face_counts(photo) -> tuple[int, int]:
@@ -111,9 +129,15 @@ def _open_photosdb(
     factory: Callable = photosdb_factory or (lambda p: osxphotos.PhotosDB(p))
     if not use_cache:
         return factory(library_path)
-    # Open once to learn the library_uuid, then cache by it.
-    probe = factory(library_path)
-    uuid = _library_uuid(probe)
+    # Read the uuid straight from the source DB (cheap) rather than opening the
+    # slow AFP-mounted bundle just to key the cache.
+    source_db = locate_source_db(library_path)
+    uuid = read_library_uuid(source_db) if source_db else None
+    if uuid is None:
+        # Fall back to a probe-open (e.g. Photos 5+ exposing library_uuid).
+        uuid = _library_uuid(factory(library_path))
+    if uuid is None:
+        raise ValueError(f"Could not determine a library UUID for {library_path}")
     bundle = ensure_cache(db, library_path, uuid, curator_db_path, force=refresh_cache)
     return factory(bundle)
 
@@ -141,7 +165,7 @@ def index_library(
         refresh_cache,
         photosdb_factory,
     )
-    library_uuid = _library_uuid(photosdb)
+    library_uuid = _resolve_library_uuid(photosdb, library_path)
     schema_version = getattr(photosdb, "db_version", None)
 
     # Ensure the library row exists before inserting assets (FK requires it).
@@ -185,7 +209,7 @@ def index_library(
     except (TypeError, ValueError):
         schema_int = None
 
-    from legacy_cache import locate_source_db, source_db_stats
+    from legacy_cache import source_db_stats
 
     lib_rec = {
         "library_uuid": library_uuid,

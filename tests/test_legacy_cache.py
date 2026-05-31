@@ -1,6 +1,7 @@
 # tests/test_legacy_cache.py
 from __future__ import annotations
 
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from legacy_cache import (  # noqa: E402
     cache_dir,
     cache_root,
     locate_source_db,
+    read_library_uuid,
     source_db_stats,
     is_cache_valid,
 )
@@ -32,6 +34,57 @@ class TestLocateSourceDb:
 
     def test_missing_returns_none(self, tmp_path):
         assert locate_source_db(str(tmp_path / "nope.photoslibrary")) is None
+
+
+def _photos4_db(tmp_path, *, uuid_value="MY%X00uFQayV48ecM+9I2A", with_table=True) -> str:
+    tmp_path = Path(tmp_path)
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    db = tmp_path / "photos.db"
+    conn = sqlite3.connect(str(db))
+    if with_table:
+        conn.execute(
+            "CREATE TABLE RKAdminData ("
+            "propertyArea TEXT, propertyName TEXT, "
+            "propertyValue TEXT, blobPropertyValue BLOB)"
+        )
+        if uuid_value is not None:
+            conn.execute(
+                "INSERT INTO RKAdminData(propertyArea, propertyName, propertyValue) "
+                "VALUES('database', 'databaseUuid', ?)",
+                (uuid_value,),
+            )
+        conn.commit()
+    conn.close()
+    return str(db)
+
+
+class TestReadLibraryUuid:
+    def test_reads_and_hashes_database_uuid(self, tmp_path):
+        src = _photos4_db(tmp_path)
+        uuid = read_library_uuid(src)
+        assert uuid is not None
+        assert uuid.startswith("p4-")
+        # filesystem-safe: no chars from the raw value
+        assert all(c not in uuid for c in "%+/ ")
+
+    def test_deterministic_for_same_value(self, tmp_path):
+        a = read_library_uuid(_photos4_db(tmp_path / "a", uuid_value="ABC"))
+        b = read_library_uuid(_photos4_db(tmp_path / "b", uuid_value="ABC"))
+        assert a == b
+
+    def test_distinct_values_differ(self, tmp_path):
+        a = read_library_uuid(_photos4_db(tmp_path / "a", uuid_value="ABC"))
+        b = read_library_uuid(_photos4_db(tmp_path / "b", uuid_value="XYZ"))
+        assert a != b
+
+    def test_missing_table_returns_none(self, tmp_path):
+        assert read_library_uuid(_photos4_db(tmp_path, with_table=False)) is None
+
+    def test_missing_row_returns_none(self, tmp_path):
+        assert read_library_uuid(_photos4_db(tmp_path, uuid_value=None)) is None
+
+    def test_unreadable_path_returns_none(self, tmp_path):
+        assert read_library_uuid(str(tmp_path / "nope.db")) is None
 
 
 class TestCacheRoot:
