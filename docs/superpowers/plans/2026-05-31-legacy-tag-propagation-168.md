@@ -159,6 +159,11 @@ def legacy_metadata_payload(tier: str, matched_assets: list[dict]) -> dict:
     if not tag_sets:
         tags: set = set()
     elif tier == CONFIDENT:
+        # Contract (classify_match): CONFIDENT => exactly one matched asset, so
+        # tag_sets[0] is the whole match. If a future classifier ever returns
+        # CONFIDENT with >1 asset, we INTENTIONALLY use only the first here
+        # rather than silently switching to intersection — do not "fix" this to
+        # iterate; revisit the classifier contract instead.
         tags = tag_sets[0]
     else:
         tags = set.intersection(*tag_sets)
@@ -469,6 +474,18 @@ def test_apply_metadata_partial_tags_unchanged_title_filled():
     assert "tags_added" not in nv
 
 
+def test_apply_metadata_audit_new_value_omits_absent_keys():
+    """new_value must omit absent keys entirely (no JSON nulls) so downstream
+    consumers can rely on key-presence. Title-only fill => only `fields`."""
+    db = _meta_db()
+    db.conn.execute("UPDATE photos SET proposed_tags = ? WHERE id = 1", (json.dumps(["beach"]),))
+    db.conn.commit()
+    db.apply_legacy_metadata(1, add_tags=["beach"], title="T", trigger="t")  # tags unchanged
+    nv = json.loads(_logs(db)[0]["new_value"])
+    assert nv == {"fields": ["proposed_title"]}   # exact shape: no tags_added, no tags_repaired
+    assert None not in nv.values()
+
+
 def test_apply_metadata_repairs_malformed_tags_and_flags_it():
     db = _meta_db()
     db.conn.execute("UPDATE photos SET proposed_tags = ? WHERE id = 1", ('"not-a-list"',))
@@ -600,21 +617,22 @@ In `db/db.py`, directly after `_json_loads_safe` (ends ~line 43), add:
 def _decode_proposed_tags(raw: str | None) -> tuple[list[str], bool]:
     """Decode a stored proposed_tags JSON string to (tags, was_malformed).
 
-    Canonical stored form is a de-duplicated list of stripped, non-blank
-    strings. Returns that canonical list plus was_malformed=True iff the raw
-    decoded value was not already canonical, so any non-canonical row is
+    Canonical stored form is a SORTED, de-duplicated list of stripped, non-blank
+    strings — the exact shape apply_legacy_metadata writes (it always stores
+    sorted(set(...))). Returns that canonical list plus was_malformed=True iff
+    the raw decoded value was not already canonical, so any non-canonical row is
     rewritten ("repaired") on the next write:
       - NULL/blank     -> ([], False)
       - decode error   -> ([], True)
       - non-list JSON  -> ([], True)   (bare string, dict, number)
-      - list with junk -> drop non-strings, strip strings, drop blanks, de-dupe
-                          (order-preserving); flag True if anything was
-                          dropped/trimmed/de-duped.
+      - list with junk -> drop non-strings, strip strings, drop blanks, de-dupe,
+                          sort; flag True if anything was dropped/trimmed/
+                          de-duped/re-ordered.
     We do NOT str()-coerce non-strings (that would turn None into the tag
-    "none"). De-dup, whitespace, blank, and non-string cleanup ALL count as
-    repair, so tags_repaired is one honest signal: "the stored value wasn't
-    canonical". (Re-sorting a clean-but-unsorted list is normalisation, not
-    repair, and is not flagged.)
+    "none"). Non-string, whitespace, blank, duplicate, AND order deviations all
+    count as repair, so tags_repaired is one honest signal that means exactly
+    "the stored value did not match the canonical sorted form". Helper and
+    writer therefore share one definition of canonical (sorted).
     """
     if not raw:
         return [], False
@@ -630,6 +648,7 @@ def _decode_proposed_tags(raw: str | None) -> tuple[list[str], bool]:
             s = item.strip()
             if s and s not in cleaned:
                 cleaned.append(s)
+    cleaned.sort()
     return cleaned, cleaned != val
 ```
 
@@ -664,6 +683,13 @@ In `db/db.py`, directly after the `reclassify_legacy_match` method (ends ~line 6
         operation_log row iff something changed; new_value.fields is in schema
         order, tags_added is the delta, tags_repaired flags a repaired malformed
         row. Returns True iff anything changed.
+
+        Concurrency: this does a read -> compute -> write that is NOT isolated
+        against another writer mutating the same row between the SELECT and the
+        UPDATE. That is safe under BP's single-writer model — `match-legacy
+        --apply` is a one-shot CLI command, not run concurrently with another
+        writer to `photos`. The write itself (UPDATE + operation_log INSERT) is
+        atomic via the single `with self.conn:` transaction.
         """
         row = self.conn.execute(
             "SELECT proposed_tags, proposed_title, proposed_description FROM photos WHERE id = ?",
@@ -742,7 +768,7 @@ In `db/db.py`, directly after the `reclassify_legacy_match` method (ends ~line 6
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py -q -k apply_metadata`
-Expected: PASS (15 tests).
+Expected: PASS (16 tests).
 
 - [ ] **Step 6: Lint and commit**
 
@@ -1341,8 +1367,10 @@ EOF
 - Intentional non-atomicity between privacy demotion (txn 1) and metadata propagation (txn 2) documented in prose at the head of Task 4 (not only in tests). ✓
 - Column-order divergence between fresh `schema.sql` and migrated (appended) `proposed_title` noted in Task 2; code/tests reference columns by name only. ✓
 - `proposed_title` via schema.sql + inline guard → Task 2. ✓
-- DB-layer merge, no analyzer import, JSON decode/coerce, malformed repair + `tags_repaired` → Task 3 (`_decode_proposed_tags`, repair tests). Canonical stored form = de-duped list of stripped non-blank strings; non-strings dropped (not str()-coerced), whitespace trimmed, blanks dropped, duplicates collapsed — all flagged as repair via one honest `tags_repaired` signal → `..._list_with_non_string_members_is_repaired`, `..._dedupes_duplicate_historical_tags`, `..._strips_whitespace_in_stored_tags`; clean lists not flagged → `..._clean_string_list_only_no_repair_flag`. ✓
-- Aggregate audit row, `fields` schema order, `tags_added` as new-members-introduced (set difference, not length delta) → Task 3 tests. ✓
+- DB-layer merge, no analyzer import, JSON decode/coerce, malformed repair + `tags_repaired` → Task 3 (`_decode_proposed_tags`, repair tests). Canonical stored form = **sorted**, de-duped list of stripped non-blank strings — the same shape the writer emits, so helper and writer agree on one definition; non-strings dropped (not str()-coerced), whitespace trimmed, blanks dropped, duplicates collapsed, order normalised — all flagged as repair via one honest `tags_repaired` signal → `..._list_with_non_string_members_is_repaired`, `..._dedupes_duplicate_historical_tags`, `..._strips_whitespace_in_stored_tags`; clean sorted lists not flagged → `..._clean_string_list_only_no_repair_flag`. ✓
+- Aggregate audit row, `fields` schema order, `tags_added` as new-members-introduced (set difference, not length delta), absent keys omitted (no JSON null) → Task 3 tests (`..._audit_new_value_omits_absent_keys`). ✓
+- read→compute→write isolation documented as safe under BP's single-writer CLI model (write itself atomic) → `apply_legacy_metadata` docstring. ✓
+- CONFIDENT tag selection (`tag_sets[0]`) documents that extra confident candidates are intentionally ignored, guarding against a future "fix" → Task 1 inline comment. ✓
 - Two independent writes; `reclassify_legacy_match` untouched; demotion failure does not block metadata → Task 4 (`demoted_..._reclassified_and_tagged`, `demotion_failure_does_not_block_metadata`, separate try/except blocks). ✓
 - `legacy_metadata_payload` branches on tier explicitly (CONFIDENT → single asset, AMBIGUOUS → intersection) — not reliant on confident-implies-cardinality-1 → Task 1. ✓
 - All matched photos (demoted or not) → Task 4 (`matched_not_demoted` test; restructured loop drops the `continue`). ✓
