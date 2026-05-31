@@ -840,8 +840,7 @@ def cmd_match_legacy_preview(args: argparse.Namespace) -> None:
     from collections import defaultdict
     sys.path.insert(0, str(ROOT / "poller"))
     from db.db import Database
-    from deduplicator import _normalise_to_utc_second
-    from legacy_match import order_rows, preview_rows
+    from legacy_match import normalise_wall_clock, order_rows, preview_rows
 
     with open(args.config) as f:
         config = yaml.safe_load(f)
@@ -866,10 +865,10 @@ def cmd_match_legacy_preview(args: argparse.Namespace) -> None:
                 sys.exit(2)
             library_uuid = libs[0]["library_uuid"]
 
-        # Index legacy assets by normalized UTC-second timestamp.
+        # Index legacy assets by local wall-clock timestamp (see legacy_match).
         by_date: dict[str, list[dict]] = defaultdict(list)
         for asset in db.iter_legacy_assets(library_uuid):
-            norm = _normalise_to_utc_second(asset.get("date_taken")) if asset.get("date_taken") else None
+            norm = normalise_wall_clock(asset.get("date_taken"))
             if norm:
                 by_date[norm].append(asset)
 
@@ -881,7 +880,7 @@ def cmd_match_legacy_preview(args: argparse.Namespace) -> None:
 
         pairs = []
         for p in photos:
-            norm = _normalise_to_utc_second(p["date_taken"]) if p["date_taken"] else None
+            norm = normalise_wall_clock(p["date_taken"])
             candidates = by_date.get(norm, []) if norm else []
             pairs.append((dict(p), candidates))
 

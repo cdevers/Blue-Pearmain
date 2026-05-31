@@ -3,8 +3,14 @@
 
 Pure logic: given a Flickr-only photo dict and candidate legacy_assets rows,
 classify into confident / ambiguous / no-match and emit deterministically
-ordered rows for the report/CSV. Reuses the existing UTC-second normalizer so
-legacy matching is consistent with reupload/orphan matching.
+ordered rows for the report/CSV.
+
+Timestamp matching is done on local wall-clock time, NOT UTC. Flickr
+date_taken is naive local capture time (EXIF DateTimeOriginal) and legacy
+Apple dates are tz-aware in the photo's local zone; the same shot therefore
+has identical wall-clock digits on both sides. Converting to UTC (as the
+reupload/orphan matcher does, where both sides are Flickr-naive) would inject
+the local offset as a false ~4-5h skew and miss nearly every match.
 """
 
 from __future__ import annotations
@@ -13,8 +19,24 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from deduplicator import _normalise_to_utc_second  # noqa: E402
+from deduplicator import _parse_dt  # noqa: E402
 from legacy_normalize import normalize_title  # noqa: E402
+
+
+def normalise_wall_clock(value) -> str | None:
+    """Normalise a timestamp to local wall-clock 'YYYY-MM-DD HH:MM:SS'.
+
+    Strips any timezone offset (keeping the local wall-clock digits) rather
+    than converting to UTC, so naive Flickr times compare correctly against
+    tz-aware legacy times. Returns None on empty/unparseable input.
+    """
+    if not value:
+        return None
+    dt = _parse_dt(value)
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+
 
 CONFIDENT = "confident"
 AMBIGUOUS = "ambiguous"
@@ -24,7 +46,7 @@ _TIER_ORDER = {CONFIDENT: 0, AMBIGUOUS: 1, NO_MATCH: 2}
 
 
 def _norm_dt(value) -> str | None:
-    return _normalise_to_utc_second(value) if value else None
+    return normalise_wall_clock(value)
 
 
 def _dims_match(photo: dict, cand: dict) -> bool:

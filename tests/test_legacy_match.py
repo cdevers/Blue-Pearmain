@@ -40,12 +40,24 @@ class TestClassify:
         assert tier == "confident"
         assert [m["asset_uuid"] for m in matches] == ["A"]
 
-    def test_naive_flickr_vs_tzaware_apple_same_utc_second(self):
-        # Flickr naive (UTC) vs Apple tz-aware that normalize to the same second.
+    def test_naive_flickr_vs_tzaware_apple_same_wall_clock(self):
+        # Flickr naive capture time vs Apple tz-aware: match on local
+        # wall-clock, NOT UTC. EXIF/Flickr date_taken is local time, so the
+        # same shot has the same wall-clock on both sides regardless of offset.
         photo = _photo(date_taken="2010-06-01 16:00:00")
-        cand = _cand("A", date_taken="2010-06-01T12:00:00-04:00")
+        cand = _cand("A", date_taken="2010-06-01T16:00:00-04:00")
         tier, _ = classify_match(photo, [cand])
         assert tier == "confident"
+
+    def test_utc_equal_but_wall_clock_differs_is_no_match(self):
+        # Regression guard for #162: these two are equal once converted to UTC
+        # (both 20:00Z) but their local wall-clocks differ by 4h, so they are
+        # NOT the same photo and must not match.
+        photo = _photo(date_taken="2010-06-01 16:00:00")
+        cand = _cand("A", date_taken="2010-06-01T12:00:00-04:00")
+        tier, matches = classify_match(photo, [cand])
+        assert tier == "no-match"
+        assert matches == []
 
     def test_no_match_when_no_timestamp_candidate(self):
         tier, matches = classify_match(_photo(), [_cand("A", date_taken="2011-01-01 00:00:00")])
