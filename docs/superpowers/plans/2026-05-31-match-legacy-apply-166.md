@@ -15,8 +15,8 @@
 ## File Structure
 
 - `analyzer/privacy.py` — add `CLASSIFIER_VERSION` constant (versions the rules in `classify()`).
-- `poller/legacy_match.py` — add pure helpers: `_json_list`, `shape_legacy_for_classify`, `is_people_positive`, `CLASSIFIER_PRECEDENCE`, `resolve_apply_decision`.
-- `db/db.py` — add `reclassify_legacy_match(...)` (atomic state + audit write).
+- `poller/legacy_match.py` — add pure helpers: `_json_list`, `shape_legacy_for_classify`, `is_people_positive`, `CLASSIFIER_PRECEDENCE`, `resolve_apply_decision`, and the two frozen-format helpers `format_legacy_reason` / `format_legacy_trigger` (single source of truth for the `privacy_reason` and `operation_log.trigger` contract strings).
+- `db/db.py` — add `reclassify_legacy_match(photo_id, new_state, reason, *, trigger)` (atomic state + audit write); takes pre-formatted `reason`/`trigger`, carries no format literal.
 - `poller/legacy_apply.py` — **new**: `apply_legacy_matches(db, library_uuid, *, self_name, zones, person_policies, classifier_version)` orchestration returning the frozen counts dict `{eligible, reclassified, needs_review, auto_private, unchanged, failed}` (per-photo atomic, continues past failures).
 - `bp` — rename `match-legacy-preview` subcommand → `match-legacy`; add `--apply`; rename `cmd_match_legacy_preview` → `cmd_match_legacy`; call the orchestration in apply mode.
 - `tests/test_match_legacy_apply.py` — **new**: decision-logic + orchestration + atomicity tests.
@@ -384,6 +384,11 @@ def test_ambiguous_precedence_most_private_wins():
     d = resolve_apply_decision(_photo(), cands, zones=zones, self_name="Me")
     assert d["state"] == "auto_private"
     assert d["asset_uuid"] == "B"
+    # Order-independence: reversing the candidates must not change the winner.
+    rev = resolve_apply_decision(_photo(), list(reversed(cands)),
+                                 zones=zones, self_name="Me")
+    assert rev["state"] == "auto_private"
+    assert rev["asset_uuid"] == "B"
 
 
 def test_ambiguous_reason_is_order_independent():
@@ -411,6 +416,20 @@ In `poller/legacy_match.py`, add (after `is_people_positive`):
 ```python
 # Most-private wins: lower rank = more private.
 CLASSIFIER_PRECEDENCE = {"auto_private": 0, "needs_review": 1, "candidate_public": 2}
+
+
+def format_legacy_reason(tier: str, asset_uuid: str, classifier_reason: str) -> str:
+    """Frozen privacy_reason schema (#166). Single source of truth — never build
+    this string inline; both this and format_legacy_trigger encode tier+asset and
+    must stay in lockstep."""
+    return f"legacy-match[tier={tier},asset={asset_uuid}]: {classifier_reason}"
+
+
+def format_legacy_trigger(asset_uuid: str, tier: str, classifier_version: int) -> str:
+    """Frozen operation_log.trigger schema (#166). Single source of truth — the
+    orchestrator builds the string here and hands db the finished value, so the
+    db layer carries no format literal and the two provenance strings can't drift."""
+    return f"legacy:{asset_uuid} tier={tier} clf={classifier_version}"
 
 
 def resolve_apply_decision(
@@ -453,7 +472,7 @@ def resolve_apply_decision(
         "tier": tier,
         "state": state,
         "asset_uuid": asset_uuid,
-        "reason": f"legacy-match[tier={tier},asset={asset_uuid}]: {reason}",
+        "reason": format_legacy_reason(tier, asset_uuid, reason),
     }
 ```
 
@@ -506,11 +525,14 @@ def _apply_db():
 
 
 def test_reclassify_writes_state_and_audit_atomically():
+    from analyzer.privacy import CLASSIFIER_VERSION
+    from legacy_match import format_legacy_reason, format_legacy_trigger
+
     db = _apply_db()
     db.reclassify_legacy_match(
         1, "needs_review",
-        "legacy-match[tier=confident,asset=A]: named person(s): Aunt May",
-        asset_uuid="A", tier="confident", classifier_version=1,
+        format_legacy_reason("confident", "A", "named person(s): Aunt May"),
+        trigger=format_legacy_trigger("A", "confident", CLASSIFIER_VERSION),
     )
     row = db.conn.execute(
         "SELECT privacy_state, privacy_reason FROM photos WHERE id = 1"
@@ -528,7 +550,7 @@ def test_reclassify_writes_state_and_audit_atomically():
     assert log[0]["old_value"] == "candidate_public"
     assert log[0]["new_value"] == "needs_review"
     assert log[0]["actor"] == "bp"
-    assert log[0]["trigger"] == "legacy:A tier=confident clf=1"
+    assert log[0]["trigger"] == f"legacy:A tier=confident clf={CLASSIFIER_VERSION}"
 
 
 class _AuditFailConn:
@@ -563,8 +585,8 @@ def test_reclassify_rolls_back_when_audit_insert_fails():
     real = db.conn
     db._local.conn = _AuditFailConn(real)
     try:
-        db.reclassify_legacy_match(1, "needs_review", "x", asset_uuid="A",
-                                   tier="confident", classifier_version=1)
+        db.reclassify_legacy_match(1, "needs_review", "x",
+                                   trigger="legacy:A tier=confident clf=1")
         raised = False
     except sqlite3.OperationalError:
         raised = True
@@ -598,15 +620,16 @@ In `db/db.py`, immediately after `set_privacy_state` (after line 577), add:
         new_state: str,
         reason: str,
         *,
-        asset_uuid: str,
-        tier: str,
-        classifier_version: int,
+        trigger: str,
     ) -> None:
         """Atomically set privacy_state and append the audit row (one txn).
 
-        Unlike log_operation (fire-and-forget), an audit-write failure here
-        rolls the whole reclassification back — never a state change without
-        its audit trail.
+        `reason` and `trigger` are pre-formatted by the caller via
+        legacy_match.format_legacy_reason / format_legacy_trigger — this method
+        carries no format literal, so the two provenance strings stay in lockstep
+        at their single source. Unlike log_operation (fire-and-forget), an
+        audit-write failure here rolls the whole reclassification back — never a
+        state change without its audit trail.
         """
         now = _now_iso()
         with self.conn:
@@ -620,9 +643,7 @@ In `db/db.py`, immediately after `set_privacy_state` (after line 577), add:
                 "(occurred_at, photo_id, operation, target, old_value, "
                 " new_value, trigger, actor) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (now, photo_id, "match_legacy_apply", "privacy_state",
-                 "candidate_public", new_state,
-                 f"legacy:{asset_uuid} tier={tier} clf={classifier_version}",
-                 "bp"),
+                 "candidate_public", new_state, trigger, "bp"),
             )
 ```
 
@@ -813,13 +834,15 @@ def test_apply_isolates_per_photo_failure_and_continues(monkeypatch):
     assert demoted == 1
 
 
-def _assert_pure_noop(db, pid):
+def _assert_pure_noop(db, pid, updated_at_before):
     """A no-op must touch neither photos nor operation_log for this photo."""
     row = db.conn.execute(
-        "SELECT privacy_state, privacy_reason FROM photos WHERE id = ?", (pid,)
+        "SELECT privacy_state, privacy_reason, updated_at FROM photos WHERE id = ?",
+        (pid,),
     ).fetchone()
     assert row["privacy_state"] == "candidate_public"
     assert row["privacy_reason"] == "no people detected"   # byte-for-byte unchanged
+    assert row["updated_at"] == updated_at_before          # true no-op: no touch
     logs = db.conn.execute(
         "SELECT COUNT(*) AS n FROM operation_log WHERE photo_id = ?", (pid,)
     ).fetchone()["n"]
@@ -834,11 +857,14 @@ def test_apply_confident_candidate_verdict_is_pure_noop():
     _seed_photo(db, 1, "100")
     # Self-only person, no other signal -> classify() -> candidate_public.
     _seed_asset(db, "A", persons='["Me"]', named_face_count=1)
+    before = db.conn.execute(
+        "SELECT updated_at FROM photos WHERE id = 1"
+    ).fetchone()["updated_at"]
     counts = apply_legacy_matches(db, "L", self_name="Me", zones=[],
                                   person_policies={}, classifier_version=1)
     assert counts["unchanged"] == 1
     assert counts["reclassified"] == 0
-    _assert_pure_noop(db, 1)
+    _assert_pure_noop(db, 1, before)
 
 
 def test_apply_ambiguous_mixed_skip_is_pure_noop():
@@ -850,11 +876,14 @@ def test_apply_ambiguous_mixed_skip_is_pure_noop():
     # Two assets at the same wall-clock -> ambiguous; mixed people signal -> skip.
     _seed_asset(db, "A", persons='["Aunt May"]', named_face_count=1)
     _seed_asset(db, "B")  # no people signal -> mixed -> not acted on
+    before = db.conn.execute(
+        "SELECT updated_at FROM photos WHERE id = 1"
+    ).fetchone()["updated_at"]
     counts = apply_legacy_matches(db, "L", self_name="Me", zones=[],
                                   person_policies={}, classifier_version=1)
     assert counts["unchanged"] == 1
     assert counts["reclassified"] == 0
-    _assert_pure_noop(db, 1)
+    _assert_pure_noop(db, 1, before)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -880,7 +909,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from legacy_match import normalise_wall_clock, resolve_apply_decision  # noqa: E402
+from legacy_match import (  # noqa: E402
+    format_legacy_trigger,
+    normalise_wall_clock,
+    resolve_apply_decision,
+)
 
 
 def apply_legacy_matches(
@@ -928,11 +961,13 @@ def apply_legacy_matches(
         if decision is None:
             counts["unchanged"] += 1
             continue
+        trigger = format_legacy_trigger(
+            decision["asset_uuid"], decision["tier"], classifier_version,
+        )
         try:
             db.reclassify_legacy_match(
                 photo["id"], decision["state"], decision["reason"],
-                asset_uuid=decision["asset_uuid"], tier=decision["tier"],
-                classifier_version=classifier_version,
+                trigger=trigger,
             )
         except Exception:
             # Per-photo atomicity: the failed write already rolled back. Isolate

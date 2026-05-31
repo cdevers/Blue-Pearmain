@@ -205,8 +205,7 @@ with db.conn:                      # single transaction; commits or rolls back
         "(occurred_at, photo_id, operation, target, old_value, new_value, "
         " trigger, actor) VALUES (?,?,?,?,?,?,?,?)",
         (_now_iso(), photo_id, "match_legacy_apply", "privacy_state",
-         "candidate_public", new_state,
-         f"legacy:{asset_uuid} tier={tier} clf={CLASSIFIER_VERSION}", "bp"),
+         "candidate_public", new_state, trigger, "bp"),  # trigger pre-formatted
     )
 ```
 
@@ -237,6 +236,13 @@ The `trigger` format is fixed: space-separated `key=value` tokens, leading
 schema (`legacy-match[tier=<tier>,asset=<asset_uuid>]: <classifier_reason>`), so
 both the human-facing reason and the machine-facing trigger carry provenance.
 A test asserts each of these fields by value, not just row presence.
+
+Because these two strings are a compatibility contract, they are **built in
+exactly one place each** — `legacy_match.format_legacy_reason()` and
+`legacy_match.format_legacy_trigger()` — never inline. The orchestrator formats
+both and hands the finished strings to `db.reclassify_legacy_match(..., reason,
+trigger=...)`, so the `db` layer holds no format literal and the two provenance
+strings cannot be edited out of lockstep.
 
 ### Failure scope across the run
 
@@ -391,15 +397,19 @@ Run: `python -m pytest tests/ -q` (all green before commit). `make lint`
   apply path; `id` added to the candidate query; update dispatch + arg defaults.
 - **Modify** `poller/legacy_match.py` — add pure helpers: shape a legacy asset
   into a `classify()`-ready dict (including `_UNKNOWN_` reconstruction), a
-  predicate for "people-positive", and `resolve_apply_decision()` (tier gating +
-  per-candidate classify + ordering + most-private precedence + frozen reason).
+  predicate for "people-positive", `resolve_apply_decision()` (tier gating +
+  per-candidate classify + ordering + most-private precedence + frozen reason),
+  and `format_legacy_reason` / `format_legacy_trigger` (single source for the two
+  frozen contract strings).
 - **Create** `poller/legacy_apply.py` — `apply_legacy_matches(db, library_uuid,
   *, self_name, zones, person_policies, classifier_version)` orchestration:
   query eligible photos, build the wall-clock index, call
   `resolve_apply_decision`, write via the atomic db helper, return a counts dict.
   Keeps `bp` thin and the loop unit-testable against a temp DB.
-- **Modify** `db/db.py` — add `reclassify_legacy_match(...)` performing the
-  atomic `privacy_state` + `operation_log` write in one transaction.
+- **Modify** `db/db.py` — add `reclassify_legacy_match(photo_id, new_state,
+  reason, *, trigger)` performing the atomic `privacy_state` + `operation_log`
+  write in one transaction; stores the pre-formatted `reason`/`trigger` and holds
+  no format literal of its own.
 - **Modify** `analyzer/privacy.py` — add the `CLASSIFIER_VERSION` constant
   stamped into each audit row.
 - **Create** `tests/test_match_legacy_apply.py` — the tests above.
