@@ -207,7 +207,9 @@ Behaviour:
 - Read the current row's `proposed_tags`, `proposed_title`, `proposed_description`.
 - `proposed_tags` is stored as JSON text. **Decode** it with the existing
   `_json_loads_safe` helper (→ list, or `[]` if NULL/blank) before merging, and
-  **re-encode** with `json.dumps` when persisting. Merge: `merged = sorted(set(current) |
+  **re-encode** with `json.dumps` when persisting. Guard against malformed historical
+  rows: a decoded value that is **not a list** (e.g. a bare string or dict) is coerced to
+  `[]`, so the set-union never iterates string characters or dict keys. Merge: `merged = sorted(set(current) |
   set(add_tags))`; update only if `merged != current`. (Plain set-union — no `analyzer`
   import; inputs are already lowercased/normalised by `propose_tags` upstream, and stored
   `proposed_tags` are normalised. Decoding first avoids unioning the *characters* of the
@@ -221,10 +223,12 @@ Behaviour:
   changed columns) + **one aggregate** `INSERT INTO operation_log`:
   `operation='match_legacy_metadata'`, `target='legacy_metadata'`, `old_value=NULL`,
   `new_value=` a compact JSON summary of what changed, e.g.
-  `{"fields": ["proposed_tags", "proposed_description"], "tags_added": 3}`. `tags_added`
-  is the **delta** — count of tags newly added this write (`len(merged) - len(current)`),
-  not the final merged total; it is omitted when `proposed_tags` didn't change.
-  `trigger=?`, `actor='bp'`. Return True.
+  `{"fields": ["proposed_tags", "proposed_description"], "tags_added": 3}`. `fields` is
+  emitted in fixed **schema order** — `proposed_tags`, `proposed_title`,
+  `proposed_description` — independent of which changed or in what order they were
+  checked, so audit snapshots stay stable. `tags_added` is the **delta** — count of tags
+  newly added this write (`len(merged) - len(current)`), not the final merged total; it
+  is omitted when `proposed_tags` didn't change. `trigger=?`, `actor='bp'`. Return True.
 
 `reclassify_legacy_match` is **not** modified.
 
@@ -249,6 +253,7 @@ In the per-photo loop, after the existing demotion handling:
 ```python
 tier, matched = classify_match(photo, candidates)
 if matched:  # confident or ambiguous; no-match has matched == []
+    counts["metadata_attempted"] += 1
     payload = legacy_metadata_payload(tier, matched)
     meta_trigger = format_legacy_metadata_trigger(tier, matched, classifier_version)
     try:
@@ -269,8 +274,11 @@ if matched:  # confident or ambiguous; no-match has matched == []
   reads the photo's current tags and merges internally. The existing `SELECT` is
   unchanged.
 - `matched[0]` (confident source) is deterministic — `candidates` come from
-  `iter_legacy_assets` (`ORDER BY asset_uuid`), so the title/description source and the
-  confident trigger are stable across reruns.
+  `iter_legacy_assets` (`ORDER BY asset_uuid`) and `classify_match` preserves that
+  ordering, so the title/description source and the confident trigger are stable across
+  reruns. **Contract:** callers must not reorder `candidates`/`matched` before calling
+  `legacy_metadata_payload` (e.g. don't `sorted(..., key=score)` in between) — that would
+  silently change which asset's title/description gets staged.
 - The demotion path (`resolve_apply_decision` → `reclassify_legacy_match`) is unchanged
   and runs independently of the metadata step. Order: do the demotion first (critical),
   then metadata (additive).
@@ -285,24 +293,32 @@ counts = {
     "auto_private": 0,
     "unchanged": 0,
     "failed": 0,
-    "metadata_applied": 0,  # NEW: photos that had any metadata propagated (tags/title/desc)
-    "metadata_failed": 0,   # NEW: photos whose metadata write raised
+    "metadata_attempted": 0,  # NEW: photos with a legacy match (metadata step entered)
+    "metadata_applied": 0,    # NEW: of those, photos where something actually changed
+    "metadata_failed": 0,     # NEW: of those, photos whose metadata write raised
 }
 ```
 
-`metadata_applied` is named for the behaviour: it counts photos where *any* of
-tags/title/description actually changed (the db method returned True), not tags alone.
+`metadata_attempted` is incremented for every matched photo (the `if matched:` branch),
+so it equals the number of Flickr-only candidate_public photos that matched a legacy
+asset. `metadata_applied` is the subset where the db method returned True (any of
+tags/title/description actually changed); the remainder
+(`metadata_attempted - metadata_applied - metadata_failed`) are no-ops — matched but
+already fully staged. Separating these lets an operator distinguish "12 matched" from
+"80 matched, 68 already staged."
+
 Existing keys keep their #166 meaning. `unchanged` still means *privacy unchanged*; a
 photo can be both `unchanged` (privacy) and `metadata_applied`. The #166 invariants
 still hold: `reclassified + unchanged + failed == eligible`, and
-`needs_review + auto_private == reclassified`. New invariant:
-`metadata_applied + metadata_failed <= eligible` (only matched photos are touched, and
-only when something actually changed).
+`needs_review + auto_private == reclassified`. New invariants:
+`metadata_attempted <= eligible` and
+`metadata_applied + metadata_failed <= metadata_attempted`.
 
 ### CLI
 
-The `--apply` summary in `bp cmd_match_legacy` gains two lines (metadata_applied,
-metadata_failed). No new flags. The `match-legacy` preview path is unchanged.
+The `--apply` summary in `bp cmd_match_legacy` gains lines for metadata_attempted,
+metadata_applied, and metadata_failed. No new flags. The `match-legacy` preview path is
+unchanged.
 
 ---
 
@@ -351,14 +367,21 @@ New tests (`tests/test_legacy_tag_propagation.py`):
     `new_value.fields` is `["proposed_tags"]`; `tags_added` = delta count only.
   - `tags_added` is the delta (newly added), not the final merged total.
   - decodes JSON `proposed_tags` before merge (union of tag strings, not characters).
+  - malformed current `proposed_tags` (bare string / dict / non-list JSON) → coerced to
+    `[]`, merge yields just `add_tags`, no crash.
+  - `new_value.fields` is in schema order (`proposed_tags`, `proposed_title`,
+    `proposed_description`) regardless of which changed.
   - writes exactly one aggregate operation_log row (`operation='match_legacy_metadata'`)
     when something changes; none when nothing does; `new_value` lists the changed fields.
   - txn atomicity: a forced failure rolls back the photos update.
 - **`apply_legacy_matches` orchestration:**
   - matched-but-not-demoted photo gets `metadata_applied`, stays candidate_public.
   - demoted photo gets both reclassified (txn 1) and metadata_applied (txn 2).
-  - no-match photo: untouched, not counted as metadata_applied.
-  - idempotent rerun: counts stable, no duplicate tags, no new audit rows.
+  - no-match photo: untouched, not counted as metadata_attempted or metadata_applied.
+  - `metadata_attempted` == number of matched photos; a matched-but-already-staged photo
+    counts toward attempted but not applied (no-op).
+  - idempotent rerun: counts stable (applied drops to 0, attempted unchanged), no
+    duplicate tags, no new audit rows.
   - metadata_failed isolates one bad write and continues.
   - counts invariants hold.
 
