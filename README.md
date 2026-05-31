@@ -77,6 +77,7 @@ bp doctor                          # Checks config, DB, Photos library, photoscr
 bp doctor --check-flickr           # Also makes a live Flickr API call
 bp migrate                         # Apply all pending DB migrations in order
 bp migrate --dry-run               # Preview which migrations would run without applying them
+bp migrate --baseline              # Mark all pending migrations applied WITHOUT running DDL (resync schema_migrations)
 
 # 5. Install git hooks (pre-commit: keep uv.lock in sync + lint staged files;
 #    pre-push: run tests + lint before pushing, and block direct pushes to main)
@@ -174,7 +175,7 @@ bp sync-metadata                   # Diff cached metadata, generate proposals
 bp sync-metadata --dry-run         # Detect differences without writing anything
 bp sync-metadata --conflicts-only  # Record conflicts only; skip Photos writes
 bp sync-metadata --force           # Process all photos, ignoring last-harmonized timestamp
-bp migrate [--dry-run]             # Apply all pending DB migrations in order
+bp migrate [--dry-run] [--baseline]  # Apply pending DB migrations (--baseline marks applied without running DDL)
 bp checkpoint                      # Checkpoint and truncate the WAL file
 bp checkpoint --mode passive       # Checkpoint without truncating (safe with active readers)
 bp prune-proposals                 # Supersede spurious managed-tag proposals; delete resolved proposals older than 90 days

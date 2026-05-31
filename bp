@@ -17,7 +17,7 @@ Usage:
     bp install-daemons [--dry-run]  Install launchd agents to ~/Library/LaunchAgents
     bp uninstall-daemons [--dry-run] Remove installed launchd agents
     bp ui                           Start the review UI (http://localhost:5173)
-    bp migrate [--dry-run]          Apply all pending DB migrations in order
+    bp migrate [--dry-run] [--baseline]  Apply pending DB migrations (--baseline: mark applied without running DDL)
     bp doctor [--check-flickr]      Validate config, environment, and DB state
 
 Global options:
@@ -760,8 +760,15 @@ def cmd_migrate(args: argparse.Namespace) -> None:
         print("All migrations already applied.")
         return
 
+    dry_run = getattr(args, "dry_run", False)
+    baseline = getattr(args, "baseline", False)
+
+    if baseline:
+        _baseline_migrations(db_path, pending, dry_run=dry_run)
+        return
+
     for name, file_path in pending:
-        if getattr(args, "dry_run", False):
+        if dry_run:
             print(f"  [dry-run] Would apply: {name}")
         else:
             print(f"  Applying: {name}…")
@@ -771,10 +778,52 @@ def cmd_migrate(args: argparse.Namespace) -> None:
             module.run(db_path, dry_run=False)
 
     count = len(pending)
-    if getattr(args, "dry_run", False):
+    if dry_run:
         print(f"\n{count} migration(s) would be applied.")
     else:
         print(f"\n{count} migration(s) applied.")
+
+
+def _baseline_migrations(
+    db_path: str,
+    pending: list[tuple[str, Path]],
+    *,
+    dry_run: bool,
+) -> None:
+    """Record pending migration names as applied WITHOUT running their DDL.
+
+    Use once on a live DB whose schema already exists but whose
+    schema_migrations table is out of sync — avoids re-running destructive
+    table-rebuild migrations. Idempotent (INSERT OR IGNORE).
+    """
+    import sqlite3
+    from datetime import datetime, timezone
+
+    if dry_run:
+        for name, _ in pending:
+            print(f"  [dry-run] Would mark applied (baseline): {name}")
+        print(f"\n{len(pending)} migration(s) would be marked applied (baseline).")
+        return
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations "
+            "(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, "
+            "applied_at TEXT NOT NULL)"
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        for name, _ in pending:
+            print(f"  Marking applied (baseline): {name}")
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations (name, applied_at) VALUES (?, ?)",
+                (name, now),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    print(f"\n{len(pending)} migration(s) marked applied (baseline; no DDL run).")
 
 
 def _resolve_legacy_library_path(args: argparse.Namespace, config: dict) -> str:
@@ -1136,6 +1185,11 @@ def main():
     p_mig.add_argument(
         "--dry-run", action="store_true",
         help="Show what would be applied without modifying the DB",
+    )
+    p_mig.add_argument(
+        "--baseline", action="store_true",
+        help="Mark all pending migrations as applied WITHOUT running their DDL "
+             "(resync schema_migrations on a DB whose schema already exists)",
     )
 
     # status
