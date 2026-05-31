@@ -206,7 +206,7 @@ with db.conn:                      # single transaction; commits or rolls back
         " trigger, actor) VALUES (?,?,?,?,?,?,?,?)",
         (_now_iso(), photo_id, "match_legacy_apply", "privacy_state",
          "candidate_public", new_state,
-         f"legacy:{asset_uuid} tier={tier}", "bp"),
+         f"legacy:{asset_uuid} tier={tier} clf={CLASSIFIER_VERSION}", "bp"),
     )
 ```
 
@@ -215,6 +215,17 @@ wraps the two statements in one transaction. Pick whichever keeps `bp` thin;
 the atomicity requirement is the binding part.) Unlike the fire-and-forget
 `log_operation`, an audit-write failure here must roll the whole reclassification
 back, not be swallowed.
+
+### Recording the classifier ruleset version
+
+The classifier's rules evolve. To keep historical reclassifications
+explainable, the audit row records which ruleset produced the decision. Add a
+module-level `CLASSIFIER_VERSION` constant to `analyzer/privacy.py` (a small
+integer, bumped by hand whenever the rules in `classify()` change) and embed it
+in the `operation_log.trigger` string as `clf=<N>` (shown above). This way a
+future rules change can be correlated against the version stamped on each
+historical decision, rather than guessing which logic was in force. The
+constant lives next to the rules it versions so the two stay in sync.
 
 ## Idempotency
 
@@ -267,7 +278,13 @@ Unit tests in `tests/` (pure logic, no osxphotos / no NAS):
     row per photo.
 12. **Audit atomicity** — a transition writes exactly one `operation_log` row
     (`operation="match_legacy_apply"`, `old="candidate_public"`,
-    `new=<state>`); the `privacy_reason` matches the frozen schema.
+    `new=<state>`, `trigger` contains `clf=<CLASSIFIER_VERSION>`); the
+    `privacy_reason` matches the frozen schema.
+13. **Rollback on audit failure** — monkeypatch the `operation_log` INSERT to
+    raise mid-transaction; assert the photo's `privacy_state` is still
+    `candidate_public`, `privacy_reason` is unchanged, and no `operation_log`
+    row was written. Proves the transactional invariant directly rather than
+    inferring it.
 
 Run: `python -m pytest tests/ -q` (all green before commit). `make lint`
 (mypy + ruff) clean on touched files.
@@ -277,9 +294,12 @@ Run: `python -m pytest tests/ -q` (all green before commit). `make lint`
 - **Modify** `bp` — rename `match-legacy-preview` → `match-legacy`; add
   `--apply`; extend `cmd_match_legacy_preview` → `cmd_match_legacy` with the
   apply path; `id` added to the candidate query; update dispatch + arg defaults.
-- **Modify** `poller/legacy_match.py` — add a helper to shape a legacy asset (or
-  unioned candidate set) into a `classify()`-ready dict, including `_UNKNOWN_`
-  reconstruction, and a predicate for "people-positive".
+- **Modify** `poller/legacy_match.py` — add a helper to shape a legacy asset
+  into a `classify()`-ready dict (including `_UNKNOWN_` reconstruction), a
+  predicate for "people-positive", and the per-candidate aggregation
+  (ordering + most-private precedence).
+- **Modify** `analyzer/privacy.py` — add the `CLASSIFIER_VERSION` constant
+  stamped into each audit row.
 - **Create** `tests/test_match_legacy_apply.py` — the tests above.
 - **Modify** `README.md` — document `bp match-legacy [--apply]` (replacing the
   `match-legacy-preview` mention).
