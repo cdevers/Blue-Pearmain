@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -201,6 +202,30 @@ def test_limit_run_does_not_reconcile(tmp_path):
         photosdb_factory=_factory([FakePhoto("A"), FakePhoto("B")]),
     )
     assert db.legacy_asset_count("LIB-UUID") == 2
+
+
+def test_logs_progress_every_interval(tmp_path, caplog, monkeypatch):
+    db = _db(tmp_path)
+    monkeypatch.setattr(legacy_indexer, "PROGRESS_INTERVAL", 2)
+    photos = [FakePhoto(str(i)) for i in range(5)]
+    with caplog.at_level(logging.INFO, logger="blue-pearmain.legacy-indexer"):
+        legacy_indexer.index_library(
+            "/fake/Old.photoslibrary",
+            db,
+            curator_db_path=str(tmp_path / "curator.db"),
+            thumb_root=tmp_path / "thumbs",
+            copy_thumbnails=False,
+            use_cache=False,
+            photosdb_factory=_factory(photos),
+        )
+    progress = [
+        r.getMessage()
+        for r in caplog.records
+        if "indexed 2" in r.getMessage() or "indexed 4" in r.getMessage()
+    ]
+    # Progress at 2 and 4 (not at the final 5, which isn't a multiple of 2).
+    assert any("indexed 2 " in m for m in progress)
+    assert any("indexed 4 " in m for m in progress)
 
 
 def test_interrupted_full_run_does_not_reconcile(tmp_path):

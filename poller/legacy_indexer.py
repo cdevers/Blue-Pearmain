@@ -27,6 +27,10 @@ log = logging.getLogger("blue-pearmain.legacy-indexer")
 
 _UNKNOWN = {"", "_UNKNOWN_", None}
 
+# Emit a progress line every this many assets — a full library is ~237k assets
+# and osxphotos opens it silently for minutes first, so silence is alarming.
+PROGRESS_INTERVAL = 1000
+
 
 def _library_uuid(photosdb) -> str | None:
     """Path-independent identity exposed by osxphotos, if any.
@@ -190,6 +194,8 @@ def index_library(
         thumb_ok += status == "ok"
         thumb_missing += status == "missing"
         thumb_error += status == "error"
+        if indexed % PROGRESS_INTERVAL == 0:
+            log.info("indexed %d assets so far...", indexed)
 
     # Authoritative reconciliation — only after a successful FULL iteration.
     # An exception above propagates and skips this block (interrupted == no delete).
