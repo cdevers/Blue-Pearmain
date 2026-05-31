@@ -17,7 +17,7 @@
 - `analyzer/privacy.py` — add `CLASSIFIER_VERSION` constant (versions the rules in `classify()`).
 - `poller/legacy_match.py` — add pure helpers: `_json_list`, `shape_legacy_for_classify`, `is_people_positive`, `CLASSIFIER_PRECEDENCE`, `resolve_apply_decision`.
 - `db/db.py` — add `reclassify_legacy_match(...)` (atomic state + audit write).
-- `poller/legacy_apply.py` — **new**: `apply_legacy_matches(db, library_uuid, *, self_name, zones, person_policies, classifier_version)` orchestration returning a counts dict.
+- `poller/legacy_apply.py` — **new**: `apply_legacy_matches(db, library_uuid, *, self_name, zones, person_policies, classifier_version)` orchestration returning the frozen counts dict `{eligible, reclassified, needs_review, auto_private, unchanged, failed}` (per-photo atomic, continues past failures).
 - `bp` — rename `match-legacy-preview` subcommand → `match-legacy`; add `--apply`; rename `cmd_match_legacy_preview` → `cmd_match_legacy`; call the orchestration in apply mode.
 - `tests/test_match_legacy_apply.py` — **new**: decision-logic + orchestration + atomicity tests.
 - `README.md` — document `bp match-legacy [--apply]`.
@@ -761,6 +761,54 @@ def test_apply_is_idempotent():
         "SELECT COUNT(*) AS n FROM operation_log WHERE photo_id = 1"
     ).fetchone()["n"]
     assert logs == 1
+
+
+def test_apply_counts_contract_invariants():
+    from legacy_apply import apply_legacy_matches
+
+    db = _orch_db()
+    _seed_photo(db, 1, "100")                    # -> reclassified (people)
+    _seed_asset(db, "A", persons='["Aunt May"]', named_face_count=1)
+    _seed_photo(db, 2, "200", date_taken="2012-01-01 09:00:00")  # -> unchanged
+    _seed_asset(db, "B", date_taken="2012-01-01T09:00:00-00:00")  # no signal
+    counts = apply_legacy_matches(db, "L", self_name="Me", zones=[],
+                                  person_policies={}, classifier_version=1)
+    assert set(counts) == {"eligible", "reclassified", "needs_review",
+                           "auto_private", "unchanged", "failed"}
+    assert counts["eligible"] == 2
+    assert counts["reclassified"] + counts["unchanged"] + counts["failed"] \
+        == counts["eligible"]
+    assert counts["needs_review"] + counts["auto_private"] == counts["reclassified"]
+
+
+def test_apply_isolates_per_photo_failure_and_continues(monkeypatch):
+    from legacy_apply import apply_legacy_matches
+
+    db = _orch_db()
+    _seed_photo(db, 1, "100")
+    _seed_asset(db, "A", persons='["Aunt May"]', named_face_count=1)
+    _seed_photo(db, 2, "200", date_taken="2012-01-01 09:00:00")
+    _seed_asset(db, "B", persons='["Uncle Ben"]', named_face_count=1,
+                date_taken="2012-01-01T09:00:00-00:00")
+
+    real = db.reclassify_legacy_match
+    calls = {"n": 0}
+
+    def flaky(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("boom")  # first photo's write fails
+        return real(*a, **k)
+
+    monkeypatch.setattr(db, "reclassify_legacy_match", flaky)
+    counts = apply_legacy_matches(db, "L", self_name="Me", zones=[],
+                                  person_policies={}, classifier_version=1)
+    assert counts["failed"] == 1
+    assert counts["reclassified"] == 1   # second photo still processed
+    demoted = db.conn.execute(
+        "SELECT COUNT(*) AS n FROM photos WHERE privacy_state = 'needs_review'"
+    ).fetchone()["n"]
+    assert demoted == 1
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -799,8 +847,16 @@ def apply_legacy_matches(
     classifier_version: int,
 ) -> dict:
     """Reclassify eligible (candidate_public, Flickr-only) photos from their
-    legacy matches. Returns a counts dict:
-        {reclassified, needs_review, auto_private, unchanged}
+    legacy matches. Returns the frozen counts dict (#166):
+        {eligible, reclassified, needs_review, auto_private, unchanged, failed}
+
+    Atomicity is per photo (db.reclassify_legacy_match commits or rolls back a
+    single photo). A photo whose write raises is rolled back, counted under
+    `failed`, and the run continues — one bad row never aborts the batch. The
+    operation is idempotent, so a failed photo is retried on the next pass.
+
+    Invariants: reclassified + unchanged + failed == eligible, and
+    needs_review + auto_private == reclassified.
     """
     by_date: dict[str, list[dict]] = defaultdict(list)
     for asset in db.iter_legacy_assets(library_uuid):
@@ -813,7 +869,8 @@ def apply_legacy_matches(
         "FROM photos WHERE uuid IS NULL AND privacy_state = 'candidate_public'"
     ).fetchall()
 
-    counts = {"reclassified": 0, "needs_review": 0, "auto_private": 0, "unchanged": 0}
+    counts = {"eligible": len(photos), "reclassified": 0, "needs_review": 0,
+              "auto_private": 0, "unchanged": 0, "failed": 0}
     for p in photos:
         photo = dict(p)
         norm = normalise_wall_clock(photo.get("date_taken"))
@@ -825,13 +882,19 @@ def apply_legacy_matches(
         if decision is None:
             counts["unchanged"] += 1
             continue
-        db.reclassify_legacy_match(
-            photo["id"], decision["state"], decision["reason"],
-            asset_uuid=decision["asset_uuid"], tier=decision["tier"],
-            classifier_version=classifier_version,
-        )
+        try:
+            db.reclassify_legacy_match(
+                photo["id"], decision["state"], decision["reason"],
+                asset_uuid=decision["asset_uuid"], tier=decision["tier"],
+                classifier_version=classifier_version,
+            )
+        except Exception:
+            # Per-photo atomicity: the failed write already rolled back. Isolate
+            # the failure, count it, and keep processing later photos (#166).
+            counts["failed"] += 1
+            continue
         counts["reclassified"] += 1
-        counts[decision["state"]] = counts.get(decision["state"], 0) + 1
+        counts[decision["state"]] += 1
 
     return counts
 ```
@@ -839,7 +902,7 @@ def apply_legacy_matches(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_match_legacy_apply.py -k apply -v`
-Expected: PASS (4 tests)
+Expected: PASS (6 tests)
 
 - [ ] **Step 5: Commit**
 
@@ -885,10 +948,12 @@ Then, immediately before the `finally:` of that function (after the preview `pri
                 classifier_version=CLASSIFIER_VERSION,
             )
             print("Applied legacy reclassification:")
+            print(f"  eligible     : {counts['eligible']} candidate_public photos evaluated")
             print(f"  reclassified : {counts['reclassified']} photos moved out of candidate_public")
             print(f"    needs_review : {counts['needs_review']}")
             print(f"    auto_private : {counts['auto_private']}")
             print(f"  unchanged    : {counts['unchanged']}")
+            print(f"  failed       : {counts['failed']} (rolled back and skipped)")
 ```
 
 - [ ] **Step 2: Rename the subcommand parser**

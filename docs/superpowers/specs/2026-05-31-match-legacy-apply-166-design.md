@@ -216,6 +216,26 @@ the atomicity requirement is the binding part.) Unlike the fire-and-forget
 `log_operation`, an audit-write failure here must roll the whole reclassification
 back, not be swallowed.
 
+### Failure scope across the run
+
+Atomicity is **per photo**, and the run continues past a failure. The two
+guarantees compose like this:
+
+- **Within one photo:** the `privacy_state` update and its `operation_log` row
+  commit together or not at all (the transaction above).
+- **Across the batch:** `apply_legacy_matches` evaluates and writes one photo at
+  a time. If a single photo's transaction raises, that photo is rolled back,
+  counted under `failed`, and processing **continues** with the next photo. One
+  bad row never aborts the whole run.
+
+This is the right default because the operation is idempotent and re-runnable: a
+photo that failed (or was never reached) is still `candidate_public` on the next
+`--apply` pass and gets another attempt, so an isolated failure costs nothing
+but a retry. Aborting the entire batch on the first error would instead strand
+all the already-correct work behind one transient fault. Per-photo failures are
+surfaced in the `failed` count (and logged), so they are visible rather than
+silent.
+
 ### Recording the classifier ruleset version
 
 The classifier's rules evolve. To keep historical reclassifications
@@ -226,6 +246,14 @@ in the `operation_log.trigger` string as `clf=<N>` (shown above). This way a
 future rules change can be correlated against the version stamped on each
 historical decision, rather than guessing which logic was in force. The
 constant lives next to the rules it versions so the two stay in sync.
+
+This value exists **purely for provenance** — nothing in BP reads it back to
+make decisions. A stale version (the rules changed but the constant was not
+bumped) is acceptable and at worst makes one batch of audit rows look like they
+came from an earlier ruleset; it never produces a wrong privacy decision or a
+crash. Treat bumping it as a courtesy to your future self, not a blocking
+maintenance obligation. We deliberately avoid any machinery (hashing,
+auto-derivation) that would turn a forgotten bump into a hard failure.
 
 ## Idempotency
 
@@ -240,16 +268,38 @@ Preview mode prints today's report unchanged. `--apply` additionally prints:
 
 ```
 Applied legacy reclassification:
+  eligible     : <e> candidate_public photos evaluated
   reclassified : <n> photos moved out of candidate_public
     needs_review : <a>
     auto_private : <b>
   unchanged    : <c> (matched but no people signal, or no/ambiguous-mixed match)
+  failed       : <f> (per-photo write/audit errors, rolled back and skipped)
 ```
+
+### Frozen counts contract
+
+`apply_legacy_matches()` returns a `dict[str, int]` with **exactly** these keys
+(the CLI summary above is just a render of them; freezing them now keeps CLI
+output and any future automation from drifting):
+
+| key            | meaning                                                                                |
+| -------------- | -------------------------------------------------------------------------------------- |
+| `eligible`     | photos selected for evaluation (`WHERE privacy_state='candidate_public'`)               |
+| `reclassified` | photos demoted out of `candidate_public` (equals `needs_review + auto_private`)          |
+| `needs_review` | subset of `reclassified` whose winning state was `needs_review`                          |
+| `auto_private` | subset of `reclassified` whose winning state was `auto_private`                          |
+| `unchanged`    | selected photos that stayed `candidate_public` (no people signal, or ambiguous-mixed)    |
+| `failed`       | photos whose per-photo transaction raised; rolled back, counted, and skipped (see above) |
+
+**Invariant:** `reclassified + unchanged + failed == eligible`, and
+`needs_review + auto_private == reclassified`. A test asserts both.
 
 The eligibility guard (only `candidate_public`, never human-reviewed states)
 is the candidate query's `WHERE privacy_state = 'candidate_public'` clause —
 ineligible photos are never selected, so there is no separate "skipped" count.
-`unchanged` covers every selected photo that was not demoted.
+`unchanged` covers every selected photo that was not demoted, including the
+ambiguous-mixed case (no separate `skipped_ambiguous` bucket — those photos are
+genuinely left in `candidate_public`, which is what `unchanged` means).
 
 ## Testing (TDD)
 
@@ -289,6 +339,13 @@ Unit tests in `tests/` (pure logic, no osxphotos / no NAS):
     `candidate_public`, `privacy_reason` is unchanged, and no `operation_log`
     row was written. Proves the transactional invariant directly rather than
     inferring it.
+14. **Counts contract** — over a mixed batch, `apply_legacy_matches()` returns a
+    dict with exactly the frozen keys, and the invariants hold:
+    `reclassified + unchanged + failed == eligible` and
+    `needs_review + auto_private == reclassified`.
+15. **Failure isolation** — with two eligible photos where the first photo's
+    audit write is monkeypatched to raise, assert the second photo is still
+    reclassified, `failed == 1`, and the run did not abort.
 
 Run: `python -m pytest tests/ -q` (all green before commit). `make lint`
 (mypy + ruff) clean on touched files.
