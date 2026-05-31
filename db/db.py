@@ -17,7 +17,7 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 
 # ---------------------------------------------------------------------------
@@ -2413,3 +2413,114 @@ class Database:
             result["flickr_cache_age_hours"] = None
             result["photos_cache_age_hours"] = None
         return result
+
+    # -----------------------------------------------------------------------
+    # Legacy library index (#162)
+    # -----------------------------------------------------------------------
+
+    _LEGACY_LIBRARY_COLS = (
+        "library_uuid",
+        "display_name",
+        "source_path_last_seen",
+        "schema_version",
+        "db_mtime",
+        "db_size",
+        "db_head_hash",
+        "asset_count",
+        "indexed_at",
+    )
+
+    _LEGACY_ASSET_COLS = (
+        "library_uuid",
+        "asset_uuid",
+        "original_filename",
+        "fingerprint",
+        "date_taken",
+        "width",
+        "height",
+        "latitude",
+        "longitude",
+        "title",
+        "description",
+        "keywords",
+        "labels",
+        "persons",
+        "named_face_count",
+        "unknown_face_count",
+        "master_rel_path",
+        "thumbnail_cache_key",
+        "thumbnail_status",
+        "indexed_at",
+    )
+
+    def set_legacy_library(self, rec: dict) -> None:
+        """Upsert a legacy_libraries row by library_uuid. Missing keys default
+        to NULL; indexed_at defaults to now if absent."""
+        rec = dict(rec)
+        rec.setdefault("indexed_at", _now_iso())
+        cols = [c for c in self._LEGACY_LIBRARY_COLS if c in rec]
+        placeholders = ", ".join("?" for _ in cols)
+        updates = ", ".join(f"{c}=excluded.{c}" for c in cols if c != "library_uuid")
+        self.conn.execute(
+            f"INSERT INTO legacy_libraries ({', '.join(cols)}) VALUES ({placeholders}) "
+            f"ON CONFLICT(library_uuid) DO UPDATE SET {updates}",
+            [rec[c] for c in cols],
+        )
+        self.conn.commit()
+
+    def get_legacy_library(self, library_uuid: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM legacy_libraries WHERE library_uuid = ?", (library_uuid,)
+        ).fetchone()
+        return _row_to_dict(row) if row else None
+
+    def upsert_legacy_asset(self, rec: dict) -> None:
+        """Upsert one legacy_assets row, idempotent on (library_uuid, asset_uuid)."""
+        rec = dict(rec)
+        rec.setdefault("indexed_at", _now_iso())
+        cols = list(self._LEGACY_ASSET_COLS)
+        placeholders = ", ".join("?" for _ in cols)
+        updates = ", ".join(
+            f"{c}=excluded.{c}" for c in cols if c not in ("library_uuid", "asset_uuid")
+        )
+        self.conn.execute(
+            f"INSERT INTO legacy_assets ({', '.join(cols)}) VALUES ({placeholders}) "
+            f"ON CONFLICT(library_uuid, asset_uuid) DO UPDATE SET {updates}",
+            [rec.get(c) for c in cols],
+        )
+        self.conn.commit()
+
+    def legacy_asset_count(self, library_uuid: str) -> int:
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM legacy_assets WHERE library_uuid = ?", (library_uuid,)
+        ).fetchone()
+        return int(row[0])
+
+    def iter_legacy_assets(self, library_uuid: str) -> Iterator[dict]:
+        """Yield legacy_assets rows for a library as dicts, ordered by asset_uuid."""
+        for row in self.conn.execute(
+            "SELECT * FROM legacy_assets WHERE library_uuid = ? ORDER BY asset_uuid",
+            (library_uuid,),
+        ):
+            yield _row_to_dict(row)
+
+    def delete_legacy_assets_not_in(
+        self, library_uuid: str, seen_asset_uuids: set[str]
+    ) -> list[str]:
+        """Hard-delete rows for this library whose asset_uuid was NOT seen this run.
+        Returns the thumbnail_cache_keys of deleted rows (for thumbnail GC).
+        Authoritative reconciliation — callers must only invoke after a FULL run
+        completes successfully (never for --limit / interrupted runs)."""
+        rows = self.conn.execute(
+            "SELECT asset_uuid, thumbnail_cache_key FROM legacy_assets WHERE library_uuid = ?",
+            (library_uuid,),
+        ).fetchall()
+        to_delete = [r for r in rows if r["asset_uuid"] not in seen_asset_uuids]
+        removed_keys = [r["thumbnail_cache_key"] for r in to_delete if r["thumbnail_cache_key"]]
+        for r in to_delete:
+            self.conn.execute(
+                "DELETE FROM legacy_assets WHERE library_uuid = ? AND asset_uuid = ?",
+                (library_uuid, r["asset_uuid"]),
+            )
+        self.conn.commit()
+        return removed_keys

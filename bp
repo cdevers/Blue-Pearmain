@@ -777,6 +777,142 @@ def cmd_migrate(args: argparse.Namespace) -> None:
         print(f"\n{count} migration(s) applied.")
 
 
+def _resolve_legacy_library_path(args: argparse.Namespace, config: dict) -> str:
+    """--library wins; else fall back to optional config legacy_library.path."""
+    if getattr(args, "library", None):
+        return str(Path(args.library).expanduser())
+    cfg = (config.get("legacy_library") or {}).get("path")
+    if cfg:
+        return str(Path(cfg).expanduser())
+    print("Error: no library path. Pass --library <path> or set legacy_library.path in config.",
+          file=sys.stderr)
+    sys.exit(2)
+
+
+def cmd_index_legacy(args: argparse.Namespace) -> None:
+    """Index a legacy (migrated iPhoto/Photos 4) library into curator.db."""
+    import yaml
+    sys.path.insert(0, str(ROOT / "poller"))
+    from db.db import Database
+    from legacy_indexer import index_library
+    from bp_logging import configure
+
+    configure("legacy-indexer", args.verbose)
+
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+
+    db_path = str(Path(config["database"]["path"]).expanduser())
+    thumb_root = Path(config["thumbnails"]["path"]).expanduser()
+    library_path = _resolve_legacy_library_path(args, config)
+
+    if not Path(library_path).exists():
+        print(f"Error: library not found / not mounted: {library_path}", file=sys.stderr)
+        sys.exit(1)
+
+    db = Database(db_path)
+    try:
+        stats = index_library(
+            library_path, db,
+            curator_db_path=db_path,
+            thumb_root=thumb_root,
+            copy_thumbnails=not args.no_thumbnails,
+            limit=args.limit,
+            use_cache=not args.no_cache,
+            refresh_cache=args.refresh_cache,
+        )
+    finally:
+        db.close()
+
+    print(
+        f"Indexed {stats['indexed']} assets from library {stats['library_uuid']} "
+        f"(thumbs ok={stats['thumb_ok']} missing={stats['thumb_missing']} "
+        f"error={stats['thumb_error']}; "
+        f"{'authoritative, reconciled ' + str(stats['reconciled']) if stats['authoritative'] else 'non-authoritative (--limit), no deletions'})."
+    )
+
+
+def cmd_match_legacy_preview(args: argparse.Namespace) -> None:
+    """Non-destructive report: which legacy assets likely match Flickr-only
+    candidate_public photos. Writes nothing to photos."""
+    import csv
+    import yaml
+    from collections import defaultdict
+    sys.path.insert(0, str(ROOT / "poller"))
+    from db.db import Database
+    from legacy_match import normalise_wall_clock, order_rows, preview_rows
+
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+    db_path = str(Path(config["database"]["path"]).expanduser())
+    db = Database(db_path)
+
+    try:
+        # Determine library_uuid: explicit flag, else the single indexed library.
+        if getattr(args, "library_uuid", None):
+            library_uuid = args.library_uuid
+        else:
+            libs = db.conn.execute(
+                "SELECT library_uuid FROM legacy_libraries ORDER BY indexed_at DESC"
+            ).fetchall()
+            if not libs:
+                print("No indexed legacy library found. Run 'bp index-legacy' first.",
+                      file=sys.stderr)
+                sys.exit(1)
+            if len(libs) > 1 and not args.library_uuid:
+                print("Multiple legacy libraries indexed; pass --library-uuid <uuid>.",
+                      file=sys.stderr)
+                sys.exit(2)
+            library_uuid = libs[0]["library_uuid"]
+
+        # Index legacy assets by local wall-clock timestamp (see legacy_match).
+        by_date: dict[str, list[dict]] = defaultdict(list)
+        for asset in db.iter_legacy_assets(library_uuid):
+            norm = normalise_wall_clock(asset.get("date_taken"))
+            if norm:
+                by_date[norm].append(asset)
+
+        # Flickr-only candidate_public photos.
+        photos = db.conn.execute(
+            "SELECT flickr_id, date_taken, width, height, flickr_title "
+            "FROM photos WHERE uuid IS NULL AND privacy_state = 'candidate_public'"
+        ).fetchall()
+
+        pairs = []
+        for p in photos:
+            norm = normalise_wall_clock(p["date_taken"])
+            candidates = by_date.get(norm, []) if norm else []
+            pairs.append((dict(p), candidates))
+
+        rows = order_rows(preview_rows(pairs))
+
+        counts = {"confident": 0, "ambiguous": 0, "no-match": 0}
+        seen_photos: dict[str, set[str]] = {"confident": set(), "ambiguous": set(), "no-match": set()}
+        for r in rows:
+            seen_photos[r["tier"]].add(r["flickr_id"])
+        for tier in counts:
+            counts[tier] = len(seen_photos[tier])
+
+        print("Legacy match preview (non-destructive — no writes to photos)")
+        print(f"  library_uuid : {library_uuid}")
+        print(f"  photos       : {len(photos)} Flickr-only candidate_public")
+        print(f"  confident    : {counts['confident']}")
+        print(f"  ambiguous    : {counts['ambiguous']}")
+        print(f"  no-match     : {counts['no-match']}")
+
+        if args.csv:
+            fields = ["tier", "date_norm", "flickr_id", "asset_uuid", "width", "height",
+                      "flickr_title", "legacy_title", "legacy_persons"]
+            with open(args.csv, "w", newline="") as fh:
+                w = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
+                w.writeheader()
+                for r in rows:
+                    w.writerow(r)
+            print(f"  CSV written  : {args.csv} ({len(rows)} rows)")
+    finally:
+        db.close()
+
+
 def cmd_all(args):
     """
     Run the full periodic maintenance sequence:
@@ -1054,6 +1190,32 @@ def main():
         help="Output directory (default: ./bp-export-YYYY-MM-DD/)",
     )
 
+    # index-legacy
+    p_idxleg = sub.add_parser(
+        "index-legacy",
+        help="Index a legacy (migrated iPhoto/Photos 4) library into curator.db",
+    )
+    p_idxleg.add_argument("--library", default=None,
+                          help="Path to the .photoslibrary bundle (overrides config legacy_library.path)")
+    p_idxleg.add_argument("--no-thumbnails", action="store_true",
+                          help="Skip copying thumbnails into BP's cache")
+    p_idxleg.add_argument("--limit", type=int, default=None, metavar="N",
+                          help="Index only the first N assets (non-authoritative: no deletions)")
+    p_idxleg.add_argument("--no-cache", action="store_true",
+                          help="Read the library in place instead of the local DB cache")
+    p_idxleg.add_argument("--refresh-cache", action="store_true",
+                          help="Force a rebuild of the local DB cache")
+
+    # match-legacy-preview
+    p_mlp = sub.add_parser(
+        "match-legacy-preview",
+        help="Report likely matches between legacy assets and Flickr-only candidate_public photos (no writes)",
+    )
+    p_mlp.add_argument("--library-uuid", default=None,
+                       help="Which indexed library to match against (default: the most recently indexed)")
+    p_mlp.add_argument("--csv", default=None, metavar="PATH",
+                       help="Also write the full tiered report to a CSV file")
+
     args = parser.parse_args()
 
     # Attach config/verbose to all subcommands
@@ -1081,6 +1243,12 @@ def main():
     if not hasattr(args, "prune"):          args.prune = False
     if not hasattr(args, "apply"):          args.apply = False
     if not hasattr(args, "out"):           args.out = None
+    if not hasattr(args, "library"):        args.library = None
+    if not hasattr(args, "no_thumbnails"):  args.no_thumbnails = False
+    if not hasattr(args, "no_cache"):       args.no_cache = False
+    if not hasattr(args, "refresh_cache"):  args.refresh_cache = False
+    if not hasattr(args, "library_uuid"):   args.library_uuid = None
+    if not hasattr(args, "csv"):            args.csv = None
 
     dispatch = {
         "pipeline":      cmd_pipeline,
@@ -1106,6 +1274,8 @@ def main():
         "deduplicator":      cmd_deduplicator,
         "prune-proposals":   cmd_prune_proposals,
         "export":            cmd_export,
+        "index-legacy":          cmd_index_legacy,
+        "match-legacy-preview":  cmd_match_legacy_preview,
     }
     dispatch[args.command](args)
 
