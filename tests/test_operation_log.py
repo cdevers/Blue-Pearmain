@@ -82,6 +82,78 @@ class TestMigration020(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_records_name_when_run_creates_table(self):
+        path = _tmp_db_path()
+        try:
+            run_migration(path)
+            conn = sqlite3.connect(path)
+            row = conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE name = ?",
+                ("migrate_020_operation_log",),
+            ).fetchone()
+            conn.close()
+            self.assertIsNotNone(row, "MIGRATION_NAME must be recorded after a real run")
+        finally:
+            os.unlink(path)
+
+    def test_records_name_when_table_already_exists_but_unrecorded(self):
+        # Regression for #170: operation_log gets bootstrapped by
+        # Database._ensure_schema before the migration's name is recorded.
+        # run() must still record MIGRATION_NAME instead of self-skipping on
+        # table existence, otherwise `bp migrate` reports it pending forever.
+        path = _tmp_db_path()
+        try:
+            conn = sqlite3.connect(path)
+            # Mirror the bootstrap shape from Database._ensure_schema so the
+            # migration's IF-NOT-EXISTS indexes (photo_id, operation,
+            # occurred_at) apply cleanly.
+            conn.execute(
+                "CREATE TABLE operation_log ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, occurred_at TEXT NOT NULL, "
+                "photo_id INTEGER, operation TEXT NOT NULL, target TEXT, "
+                "old_value TEXT, new_value TEXT, trigger TEXT, "
+                "actor TEXT NOT NULL DEFAULT 'bp')"
+            )
+            conn.commit()
+            conn.close()
+
+            run_migration(path)
+
+            conn = sqlite3.connect(path)
+            row = conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE name = ?",
+                ("migrate_020_operation_log",),
+            ).fetchone()
+            conn.close()
+            self.assertIsNotNone(
+                row,
+                "MIGRATION_NAME must be recorded even when operation_log "
+                "already exists (pre-bootstrapped)",
+            )
+        finally:
+            os.unlink(path)
+
+    def test_dry_run_does_not_create_or_record(self):
+        path = _tmp_db_path()
+        try:
+            run_migration(path, dry_run=True)
+            conn = sqlite3.connect(path)
+            tables = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            recorded = conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE name = ?",
+                ("migrate_020_operation_log",),
+            ).fetchone()
+            conn.close()
+            self.assertNotIn("operation_log", tables)
+            self.assertIsNone(recorded)
+        finally:
+            os.unlink(path)
+
 
 def _make_db() -> Database:
     """Create a fresh DB with migration 020 applied and placeholder photo rows."""
