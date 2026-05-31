@@ -1,7 +1,9 @@
 # tests/test_match_legacy_apply.py
 from __future__ import annotations
 
+import sqlite3
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
@@ -273,3 +275,100 @@ def test_reason_and_trigger_share_provenance():
     assert f"tier={d['tier']} " in trigger
     # Sanity: reason is exactly what the helper produces for these inputs.
     assert reason == format_legacy_reason(d["tier"], d["asset_uuid"], "named person(s): Aunt May")
+
+
+def _apply_db():
+    """Fresh Database with operation_log migration and one candidate_public photo."""
+    from db.db import Database
+    from db.migrations.migrate_020_operation_log import run as run_op_log
+
+    f = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    f.close()
+    db = Database(Path(f.name))
+    run_op_log(str(f.name))
+    db.conn.execute(
+        "INSERT INTO photos (id, uuid, privacy_state, privacy_reason) "
+        "VALUES (1, NULL, 'candidate_public', 'no people detected')"
+    )
+    db.conn.commit()
+    return db
+
+
+def test_reclassify_writes_state_and_audit_atomically():
+    from analyzer.privacy import CLASSIFIER_VERSION
+    from legacy_match import format_legacy_reason, format_legacy_trigger
+
+    db = _apply_db()
+    db.reclassify_legacy_match(
+        1,
+        "needs_review",
+        format_legacy_reason("confident", "A", "named person(s): Aunt May"),
+        trigger=format_legacy_trigger("A", "confident", CLASSIFIER_VERSION),
+    )
+    row = db.conn.execute(
+        "SELECT privacy_state, privacy_reason FROM photos WHERE id = 1"
+    ).fetchone()
+    assert row["privacy_state"] == "needs_review"
+    assert "Aunt May" in row["privacy_reason"]
+    log = db.conn.execute(
+        "SELECT operation, target, old_value, new_value, trigger, actor "
+        "FROM operation_log WHERE photo_id = 1"
+    ).fetchall()
+    assert len(log) == 1
+    # Frozen audit-row shape (#166): assert every field by value, not presence.
+    assert log[0]["operation"] == "match_legacy_apply"
+    assert log[0]["target"] == "privacy_state"
+    assert log[0]["old_value"] == "candidate_public"
+    assert log[0]["new_value"] == "needs_review"
+    assert log[0]["actor"] == "bp"
+    assert log[0]["trigger"] == f"legacy:A tier=confident clf={CLASSIFIER_VERSION}"
+
+
+class _AuditFailConn:
+    """Wraps a real sqlite3 connection but raises on the operation_log INSERT.
+
+    sqlite3.Connection methods are read-only (can't monkeypatch .execute on the
+    instance), so we delegate through a wrapper and swap it onto db._local.conn.
+    Context-manager + all other attrs delegate to the real connection, so the
+    `with self.conn:` transaction (commit/rollback) still operates on it.
+    """
+
+    def __init__(self, real):
+        self._real = real
+
+    def execute(self, sql, *args, **kwargs):
+        if sql.lstrip().upper().startswith("INSERT INTO OPERATION_LOG"):
+            raise sqlite3.OperationalError("simulated audit failure")
+        return self._real.execute(sql, *args, **kwargs)
+
+    def __enter__(self):
+        return self._real.__enter__()
+
+    def __exit__(self, *exc):
+        return self._real.__exit__(*exc)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+def test_reclassify_rolls_back_when_audit_insert_fails():
+    db = _apply_db()
+    real = db.conn
+    db._local.conn = _AuditFailConn(real)
+    try:
+        db.reclassify_legacy_match(1, "needs_review", "x", trigger="legacy:A tier=confident clf=1")
+        raised = False
+    except sqlite3.OperationalError:
+        raised = True
+    finally:
+        db._local.conn = real  # restore for assertions
+    assert raised
+    row = db.conn.execute(
+        "SELECT privacy_state, privacy_reason FROM photos WHERE id = 1"
+    ).fetchone()
+    assert row["privacy_state"] == "candidate_public"
+    assert row["privacy_reason"] == "no people detected"
+    count = db.conn.execute(
+        "SELECT COUNT(*) AS n FROM operation_log WHERE photo_id = 1"
+    ).fetchone()["n"]
+    assert count == 0

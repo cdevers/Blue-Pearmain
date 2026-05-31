@@ -576,6 +576,46 @@ class Database:
         )
         self.conn.commit()
 
+    def reclassify_legacy_match(
+        self,
+        photo_id: int,
+        new_state: str,
+        reason: str,
+        *,
+        trigger: str,
+    ) -> None:
+        """Atomically set privacy_state and append the audit row (one txn).
+
+        `reason` and `trigger` are pre-formatted by the caller via
+        legacy_match.format_legacy_reason / format_legacy_trigger — this method
+        carries no format literal, so the two provenance strings stay in lockstep
+        at their single source. Unlike log_operation (fire-and-forget), an
+        audit-write failure here rolls the whole reclassification back — never a
+        state change without its audit trail.
+        """
+        now = _now_iso()
+        with self.conn:
+            self.conn.execute(
+                "UPDATE photos SET privacy_state = ?, privacy_reason = ?, "
+                "date_synced = ?, updated_at = ? WHERE id = ?",
+                (new_state, reason, now, now, photo_id),
+            )
+            self.conn.execute(
+                "INSERT INTO operation_log "
+                "(occurred_at, photo_id, operation, target, old_value, "
+                " new_value, trigger, actor) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    now,
+                    photo_id,
+                    "match_legacy_apply",
+                    "privacy_state",
+                    "candidate_public",
+                    new_state,
+                    trigger,
+                    "bp",
+                ),
+            )
+
     # -----------------------------------------------------------------------
     # Star ratings
     # -----------------------------------------------------------------------
