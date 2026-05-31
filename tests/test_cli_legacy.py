@@ -26,14 +26,15 @@ def test_index_legacy_registered():
     assert "--refresh-cache" in r.stdout
 
 
-def test_match_legacy_preview_registered():
-    r = _run("match-legacy-preview", "--help")
+def test_match_legacy_registered():
+    r = _run("match-legacy", "--help")
     assert r.returncode == 0
     assert "--csv" in r.stdout
+    assert "--apply" in r.stdout
 
 
 def test_top_level_help_lists_commands():
     r = _run("--help")
     assert r.returncode == 0
     assert "index-legacy" in r.stdout
-    assert "match-legacy-preview" in r.stdout
+    assert "match-legacy" in r.stdout

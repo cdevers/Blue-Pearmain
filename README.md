@@ -193,8 +193,9 @@ bp index-legacy --no-thumbnails    # Skip thumbnail copying (currently required 
 bp index-legacy --limit N          # Quick non-authoritative sample of the first N assets (no deletions)
 bp index-legacy --no-cache         # Read the library in place instead of the local DB cache
 bp index-legacy --refresh-cache    # Force a rebuild of the local DB cache
-bp match-legacy-preview            # Non-destructive report: likely matches between legacy assets and Flickr-only candidate_public photos
-bp match-legacy-preview --csv PATH # Also write the full tiered report to a CSV file
+bp match-legacy                    # Non-destructive report: likely matches between legacy assets and Flickr-only candidate_public photos
+bp match-legacy --csv PATH         # Also write the full tiered report to a CSV file
+bp match-legacy --apply            # Reclassify confident (and all-people ambiguous) matches out of the candidate_public review queue via the shared privacy classifier
 bp ui                              # Start the review UI (http://localhost:5173)
 bp ui --host 0.0.0.0               # Also bind to LAN interfaces (e.g. for iPad access)
 ```

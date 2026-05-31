@@ -32,6 +32,10 @@ HUMAN_CONFIDENCE_THRESHOLD = 0.35
 # Minimum face quality to count a face (filters ghost detections)
 FACE_QUALITY_THRESHOLD = 0.0
 
+# Ruleset version for classify(). Bump by hand whenever the rules in
+# classify() change, so audit rows can be correlated to the logic in force.
+CLASSIFIER_VERSION = 1
+
 
 def classify(
     photo: dict,
