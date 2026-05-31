@@ -20,8 +20,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from deduplicator import _parse_dt  # noqa: E402
 from legacy_normalize import normalize_title  # noqa: E402
+
+from analyzer.privacy import PEOPLE_LABELS  # noqa: E402
 
 
 def normalise_wall_clock(value) -> str | None:
@@ -163,3 +166,15 @@ def shape_legacy_for_classify(asset: dict) -> dict:
         "persons": persons,
         "labels": _json_list(asset.get("labels")),
     }
+
+
+def is_people_positive(asset: dict) -> bool:
+    """True if the legacy asset shows any people signal classify() would act on."""
+    if int(asset.get("named_face_count") or 0) > 0:
+        return True
+    if int(asset.get("unknown_face_count") or 0) > 0:
+        return True
+    if _json_list(asset.get("persons")):
+        return True
+    labels = {lbl.lower() for lbl in _json_list(asset.get("labels"))}
+    return bool(labels & PEOPLE_LABELS)

@@ -63,3 +63,43 @@ def test_shape_accepts_list_inputs_and_null_counts():
     )
     assert shaped["persons"] == ["Bob"]
     assert shaped["labels"] == ["x"]
+
+
+def test_people_positive_named_faces():
+    from legacy_match import is_people_positive
+
+    assert is_people_positive(
+        {"named_face_count": 1, "unknown_face_count": 0, "persons": "[]", "labels": "[]"}
+    )
+
+
+def test_people_positive_unknown_faces():
+    from legacy_match import is_people_positive
+
+    assert is_people_positive(
+        {"named_face_count": 0, "unknown_face_count": 3, "persons": "[]", "labels": "[]"}
+    )
+
+
+def test_people_positive_named_persons_list():
+    from legacy_match import is_people_positive
+
+    assert is_people_positive(
+        {"named_face_count": 0, "unknown_face_count": 0, "persons": '["Bob"]', "labels": "[]"}
+    )
+
+
+def test_people_positive_people_label():
+    from legacy_match import is_people_positive
+
+    assert is_people_positive(
+        {"named_face_count": 0, "unknown_face_count": 0, "persons": "[]", "labels": '["Crowd"]'}
+    )
+
+
+def test_not_people_positive_when_no_signals():
+    from legacy_match import is_people_positive
+
+    assert not is_people_positive(
+        {"named_face_count": 0, "unknown_face_count": 0, "persons": "[]", "labels": '["beach"]'}
+    )
