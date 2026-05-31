@@ -128,9 +128,14 @@ def _build_row(photo, library_uuid: str, library_path: str) -> dict:
 def _open_photosdb(
     library_path, db, library_uuid_hint, curator_db_path, use_cache, refresh_cache, photosdb_factory
 ):
-    import osxphotos
+    if photosdb_factory is not None:
+        factory: Callable = photosdb_factory
+    else:
+        import osxphotos
 
-    factory: Callable = photosdb_factory or (lambda p: osxphotos.PhotosDB(p))
+        def factory(path):
+            return osxphotos.PhotosDB(path)
+
     if not use_cache:
         return factory(library_path)
     # Read the uuid straight from the source DB (cheap) rather than opening the
