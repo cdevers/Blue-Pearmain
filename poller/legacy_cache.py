@@ -19,10 +19,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from legacy_normalize import head_hash  # noqa: E402
 
-# Candidate locations of the primary asset DB, newest schema first.
+# Candidate locations of the primary asset DB. This tool targets Photos-4
+# (migrated iPhoto) libraries, so prefer photos.db: a migrated bundle can carry
+# a leftover Photos.sqlite, but photos.db is the DB osxphotos actually reads and
+# the only one holding RKAdminData.databaseUuid.
 _DB_CANDIDATES = (
-    "database/Photos.sqlite",  # Photos 5+
     "database/photos.db",  # Photos 4 (our target)
+    "database/Photos.sqlite",  # Photos 5+ fallback
 )
 
 
@@ -43,8 +46,11 @@ def read_library_uuid(source_db_path: str) -> str | None:
     id (the raw value contains chars like % and + that are poor for paths).
     Returns None when the value cannot be read.
     """
+    # immutable=1 reads only the main DB file, bypassing the WAL. The source
+    # lives on a read-only AFP mount where a plain mode=ro connection can't open
+    # the -wal/-shm sidecars; databaseUuid is write-once so this is safe.
     try:
-        conn = sqlite3.connect(f"file:{source_db_path}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{source_db_path}?immutable=1", uri=True)
     except sqlite3.Error:
         return None
     try:

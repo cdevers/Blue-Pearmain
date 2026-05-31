@@ -35,6 +35,13 @@ class TestLocateSourceDb:
     def test_missing_returns_none(self, tmp_path):
         assert locate_source_db(str(tmp_path / "nope.photoslibrary")) is None
 
+    def test_prefers_photos4_db_when_both_exist(self, tmp_path):
+        # A migrated Photos-4 bundle can carry a leftover Photos.sqlite; photos.db
+        # is the one osxphotos reads and the only one with databaseUuid.
+        lib = _fake_library(tmp_path)
+        (lib / "database" / "Photos.sqlite").write_bytes(b"x")
+        assert locate_source_db(str(lib)) == str(lib / "database" / "photos.db")
+
 
 def _photos4_db(tmp_path, *, uuid_value="MY%X00uFQayV48ecM+9I2A", with_table=True) -> str:
     tmp_path = Path(tmp_path)
