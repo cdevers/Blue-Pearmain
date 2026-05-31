@@ -372,3 +372,291 @@ def test_reclassify_rolls_back_when_audit_insert_fails():
         "SELECT COUNT(*) AS n FROM operation_log WHERE photo_id = 1"
     ).fetchone()["n"]
     assert count == 0
+
+
+def _orch_db():
+    """Database with operation_log + legacy_index migrations and helpers ready."""
+    from db.db import Database
+    from db.migrations.migrate_020_operation_log import run as run_op_log
+    from db.migrations.migrate_026_legacy_index import run_on_conn as run_legacy
+
+    f = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    f.close()
+    db = Database(Path(f.name))
+    run_op_log(str(f.name))
+    run_legacy(db.conn)
+    db.set_legacy_library({"library_uuid": "L", "asset_count": 0})
+    return db
+
+
+def _seed_photo(db, pid, flickr_id, state="candidate_public", date_taken="2010-06-01 12:00:00"):
+    db.conn.execute(
+        "INSERT INTO photos (id, uuid, flickr_id, privacy_state, privacy_reason, "
+        "date_taken, width, height, flickr_title) "
+        "VALUES (?, NULL, ?, ?, 'no people detected', ?, 4000, 3000, '')",
+        (pid, flickr_id, state, date_taken),
+    )
+    db.conn.commit()
+
+
+def _seed_asset(db, asset_uuid, **over):
+    row = {
+        "library_uuid": "L",
+        "asset_uuid": asset_uuid,
+        "original_filename": "img.jpg",
+        "fingerprint": "fp",
+        "date_taken": "2010-06-01T12:00:00-00:00",
+        "width": 4000,
+        "height": 3000,
+        "latitude": None,
+        "longitude": None,
+        "title": "",
+        "description": None,
+        "keywords": "[]",
+        "labels": "[]",
+        "persons": "[]",
+        "named_face_count": 0,
+        "unknown_face_count": 0,
+        "master_rel_path": "m.jpg",
+        "thumbnail_cache_key": asset_uuid,
+        "thumbnail_status": "ok",
+    }
+    row.update(over)
+    db.upsert_legacy_asset(row)
+
+
+def test_apply_demotes_matched_people_photo():
+    from legacy_apply import apply_legacy_matches
+
+    db = _orch_db()
+    _seed_photo(db, 1, "100")
+    _seed_asset(db, "A", persons='["Aunt May"]', named_face_count=1)
+    counts = apply_legacy_matches(
+        db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1
+    )
+    assert counts["reclassified"] == 1
+    assert counts["needs_review"] == 1
+    assert counts["auto_private"] == 0
+    state = db.conn.execute("SELECT privacy_state FROM photos WHERE id = 1").fetchone()[
+        "privacy_state"
+    ]
+    assert state == "needs_review"
+
+
+def test_apply_leaves_people_free_match_unchanged():
+    from legacy_apply import apply_legacy_matches
+
+    db = _orch_db()
+    _seed_photo(db, 1, "100")
+    _seed_asset(db, "A")  # no people signal
+    counts = apply_legacy_matches(
+        db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1
+    )
+    assert counts["reclassified"] == 0
+    assert counts["unchanged"] == 1
+    state = db.conn.execute("SELECT privacy_state FROM photos WHERE id = 1").fetchone()[
+        "privacy_state"
+    ]
+    assert state == "candidate_public"
+
+
+def test_apply_never_touches_human_reviewed_photo():
+    from legacy_apply import apply_legacy_matches
+
+    db = _orch_db()
+    _seed_photo(db, 1, "100", state="approved_public")
+    _seed_asset(db, "A", persons='["Aunt May"]', named_face_count=1, latitude=10.0, longitude=20.0)
+    zones = [
+        {
+            "name": "home",
+            "label": "home",
+            "latitude": 10.0,
+            "longitude": 20.0,
+            "radius_m": 100.0,
+            "policy": "auto_private",
+        }
+    ]
+    counts = apply_legacy_matches(
+        db, "L", self_name="Me", zones=zones, person_policies={}, classifier_version=1
+    )
+    assert counts["reclassified"] == 0
+    state = db.conn.execute("SELECT privacy_state FROM photos WHERE id = 1").fetchone()[
+        "privacy_state"
+    ]
+    assert state == "approved_public"
+    logs = db.conn.execute("SELECT COUNT(*) AS n FROM operation_log WHERE photo_id = 1").fetchone()[
+        "n"
+    ]
+    assert logs == 0
+
+
+def test_apply_is_idempotent():
+    from legacy_apply import apply_legacy_matches
+
+    db = _orch_db()
+    _seed_photo(db, 1, "100")
+    _seed_asset(db, "A", persons='["Aunt May"]', named_face_count=1)
+    first = apply_legacy_matches(
+        db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1
+    )
+    second = apply_legacy_matches(
+        db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1
+    )
+    assert first["reclassified"] == 1
+    assert second["reclassified"] == 0
+    logs = db.conn.execute("SELECT COUNT(*) AS n FROM operation_log WHERE photo_id = 1").fetchone()[
+        "n"
+    ]
+    assert logs == 1
+
+
+def test_apply_counts_contract_invariants():
+    from legacy_apply import apply_legacy_matches
+
+    db = _orch_db()
+    _seed_photo(db, 1, "100")  # -> reclassified (people)
+    _seed_asset(db, "A", persons='["Aunt May"]', named_face_count=1)
+    _seed_photo(db, 2, "200", date_taken="2012-01-01 09:00:00")  # -> unchanged
+    _seed_asset(db, "B", date_taken="2012-01-01T09:00:00-00:00")  # no signal
+    counts = apply_legacy_matches(
+        db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1
+    )
+    assert set(counts) == {
+        "eligible",
+        "reclassified",
+        "needs_review",
+        "auto_private",
+        "unchanged",
+        "failed",
+    }
+    assert counts["eligible"] == 2
+    assert counts["reclassified"] + counts["unchanged"] + counts["failed"] == counts["eligible"]
+    assert counts["needs_review"] + counts["auto_private"] == counts["reclassified"]
+
+
+def test_apply_isolates_per_photo_failure_and_continues(monkeypatch):
+    from legacy_apply import apply_legacy_matches
+
+    db = _orch_db()
+    _seed_photo(db, 1, "100")
+    _seed_asset(db, "A", persons='["Aunt May"]', named_face_count=1)
+    _seed_photo(db, 2, "200", date_taken="2012-01-01 09:00:00")
+    _seed_asset(
+        db, "B", persons='["Uncle Ben"]', named_face_count=1, date_taken="2012-01-01T09:00:00-00:00"
+    )
+
+    real = db.reclassify_legacy_match
+    calls = {"n": 0}
+
+    def flaky(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("boom")  # first photo's write fails
+        return real(*a, **k)
+
+    monkeypatch.setattr(db, "reclassify_legacy_match", flaky)
+    counts = apply_legacy_matches(
+        db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1
+    )
+    assert counts["failed"] == 1
+    assert counts["reclassified"] == 1  # second photo still processed
+    demoted = db.conn.execute(
+        "SELECT COUNT(*) AS n FROM photos WHERE privacy_state = 'needs_review'"
+    ).fetchone()["n"]
+    assert demoted == 1
+
+
+def test_apply_resumes_failed_photo_on_rerun(monkeypatch):
+    """candidate_public scope is the resume point: a photo that failed last run
+    is still candidate_public and gets re-attempted; a succeeded photo is not."""
+    from legacy_apply import apply_legacy_matches
+
+    db = _orch_db()
+    _seed_photo(db, 1, "100")  # A: will succeed first pass
+    _seed_asset(db, "A", persons='["Aunt May"]', named_face_count=1)
+    _seed_photo(db, 2, "200", date_taken="2012-01-01 09:00:00")  # B: fails first
+    _seed_asset(
+        db, "B", persons='["Uncle Ben"]', named_face_count=1, date_taken="2012-01-01T09:00:00-00:00"
+    )
+
+    real = db.reclassify_legacy_match
+
+    def fail_photo_2(photo_id, *a, **k):
+        if photo_id == 2:
+            raise RuntimeError("boom")
+        return real(photo_id, *a, **k)
+
+    # First pass: A succeeds, B fails.
+    monkeypatch.setattr(db, "reclassify_legacy_match", fail_photo_2)
+    first = apply_legacy_matches(
+        db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1
+    )
+    assert first["reclassified"] == 1 and first["failed"] == 1
+
+    # Second pass: patch removed. Only B is still candidate_public, so only B is
+    # attempted; A was demoted and is no longer re-seen.
+    monkeypatch.setattr(db, "reclassify_legacy_match", real)
+    second = apply_legacy_matches(
+        db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1
+    )
+    assert second["eligible"] == 1  # only B remains candidate_public
+    assert second["reclassified"] == 1 and second["failed"] == 0
+    states = dict(db.conn.execute("SELECT id, privacy_state FROM photos").fetchall())
+    assert states[1] == "needs_review" and states[2] == "needs_review"
+    # Each photo logged exactly once across both passes (no dup for A).
+    logs = dict(
+        db.conn.execute(
+            "SELECT photo_id, COUNT(*) AS n FROM operation_log GROUP BY photo_id"
+        ).fetchall()
+    )
+    assert logs == {1: 1, 2: 1}
+
+
+def _assert_pure_noop(db, pid, updated_at_before):
+    """A no-op must touch neither photos nor operation_log for this photo."""
+    row = db.conn.execute(
+        "SELECT privacy_state, privacy_reason, updated_at FROM photos WHERE id = ?",
+        (pid,),
+    ).fetchone()
+    assert row["privacy_state"] == "candidate_public"
+    assert row["privacy_reason"] == "no people detected"  # byte-for-byte unchanged
+    assert row["updated_at"] == updated_at_before  # true no-op: no touch
+    logs = db.conn.execute(
+        "SELECT COUNT(*) AS n FROM operation_log WHERE photo_id = ?", (pid,)
+    ).fetchone()["n"]
+    assert logs == 0
+
+
+def test_apply_confident_candidate_verdict_is_pure_noop():
+    """Confident match whose classifier verdict is candidate_public: no write."""
+    from legacy_apply import apply_legacy_matches
+
+    db = _orch_db()
+    _seed_photo(db, 1, "100")
+    # Self-only person, no other signal -> classify() -> candidate_public.
+    _seed_asset(db, "A", persons='["Me"]', named_face_count=1)
+    before = db.conn.execute("SELECT updated_at FROM photos WHERE id = 1").fetchone()["updated_at"]
+    counts = apply_legacy_matches(
+        db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1
+    )
+    assert counts["unchanged"] == 1
+    assert counts["reclassified"] == 0
+    _assert_pure_noop(db, 1, before)
+
+
+def test_apply_ambiguous_mixed_skip_is_pure_noop():
+    """Ambiguous-mixed match (one people-positive candidate, one not): skipped."""
+    from legacy_apply import apply_legacy_matches
+
+    db = _orch_db()
+    _seed_photo(db, 1, "100")
+    # Two assets at the same wall-clock -> ambiguous; mixed people signal -> skip.
+    _seed_asset(db, "A", persons='["Aunt May"]', named_face_count=1)
+    _seed_asset(db, "B")  # no people signal -> mixed -> not acted on
+    before = db.conn.execute("SELECT updated_at FROM photos WHERE id = 1").fetchone()["updated_at"]
+    counts = apply_legacy_matches(
+        db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1
+    )
+    assert counts["unchanged"] == 1
+    assert counts["reclassified"] == 0
+    _assert_pure_noop(db, 1, before)
