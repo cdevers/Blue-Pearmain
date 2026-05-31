@@ -15,6 +15,7 @@ the local offset as a false ~4-5h skew and miss nearly every match.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -131,3 +132,34 @@ def order_rows(rows: list[dict]) -> list[dict]:
             r.get("asset_uuid", ""),
         ),
     )
+
+
+def _json_list(value) -> list[str]:
+    """Parse a stored JSON-list field (string or already-decoded list)."""
+    if isinstance(value, list):
+        return [str(x) for x in value if x]
+    if isinstance(value, str) and value:
+        try:
+            data = json.loads(value)
+        except (ValueError, TypeError):
+            return []
+        if isinstance(data, list):
+            return [str(x) for x in data if x]
+    return []
+
+
+def shape_legacy_for_classify(asset: dict) -> dict:
+    """Build a classify()-ready record from a legacy_assets row.
+
+    Reconstructs `_UNKNOWN_` sentinels from unknown_face_count so the shared
+    classifier counts unknown faces the same way it does for Apple records.
+    """
+    persons = _json_list(asset.get("persons"))
+    unknown = int(asset.get("unknown_face_count") or 0)
+    persons = persons + ["_UNKNOWN_"] * unknown
+    return {
+        "latitude": asset.get("latitude"),
+        "longitude": asset.get("longitude"),
+        "persons": persons,
+        "labels": _json_list(asset.get("labels")),
+    }
