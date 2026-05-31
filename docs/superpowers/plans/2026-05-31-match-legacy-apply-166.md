@@ -834,6 +834,49 @@ def test_apply_isolates_per_photo_failure_and_continues(monkeypatch):
     assert demoted == 1
 
 
+def test_apply_resumes_failed_photo_on_rerun(monkeypatch):
+    """candidate_public scope is the resume point: a photo that failed last run
+    is still candidate_public and gets re-attempted; a succeeded photo is not."""
+    from legacy_apply import apply_legacy_matches
+
+    db = _orch_db()
+    _seed_photo(db, 1, "100")  # A: will succeed first pass
+    _seed_asset(db, "A", persons='["Aunt May"]', named_face_count=1)
+    _seed_photo(db, 2, "200", date_taken="2012-01-01 09:00:00")  # B: fails first
+    _seed_asset(db, "B", persons='["Uncle Ben"]', named_face_count=1,
+                date_taken="2012-01-01T09:00:00-00:00")
+
+    real = db.reclassify_legacy_match
+
+    def fail_photo_2(photo_id, *a, **k):
+        if photo_id == 2:
+            raise RuntimeError("boom")
+        return real(photo_id, *a, **k)
+
+    # First pass: A succeeds, B fails.
+    monkeypatch.setattr(db, "reclassify_legacy_match", fail_photo_2)
+    first = apply_legacy_matches(db, "L", self_name="Me", zones=[],
+                                 person_policies={}, classifier_version=1)
+    assert first["reclassified"] == 1 and first["failed"] == 1
+
+    # Second pass: patch removed. Only B is still candidate_public, so only B is
+    # attempted; A was demoted and is no longer re-seen.
+    monkeypatch.setattr(db, "reclassify_legacy_match", real)
+    second = apply_legacy_matches(db, "L", self_name="Me", zones=[],
+                                  person_policies={}, classifier_version=1)
+    assert second["eligible"] == 1      # only B remains candidate_public
+    assert second["reclassified"] == 1 and second["failed"] == 0
+    states = dict(db.conn.execute(
+        "SELECT id, privacy_state FROM photos"
+    ).fetchall())
+    assert states[1] == "needs_review" and states[2] == "needs_review"
+    # Each photo logged exactly once across both passes (no dup for A).
+    logs = dict(db.conn.execute(
+        "SELECT photo_id, COUNT(*) AS n FROM operation_log GROUP BY photo_id"
+    ).fetchall())
+    assert logs == {1: 1, 2: 1}
+
+
 def _assert_pure_noop(db, pid, updated_at_before):
     """A no-op must touch neither photos nor operation_log for this photo."""
     row = db.conn.execute(
@@ -929,6 +972,10 @@ def apply_legacy_matches(
     legacy matches. Returns the frozen counts dict (#166):
         {eligible, reclassified, needs_review, auto_private, unchanged, failed}
 
+    `classifier_version` is captured once by the caller and threaded unchanged to
+    every photo here — never re-read per photo — so one run is internally
+    consistent and version monkeypatching in tests is deterministic.
+
     Atomicity is per photo (db.reclassify_legacy_match commits or rolls back a
     single photo). A photo whose write raises is rolled back, counted under
     `failed`, and the run continues — one bad row never aborts the batch. The
@@ -983,7 +1030,7 @@ def apply_legacy_matches(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_match_legacy_apply.py -k apply -v`
-Expected: PASS (8 tests)
+Expected: PASS (9 tests)
 
 - [ ] **Step 5: Commit**
 

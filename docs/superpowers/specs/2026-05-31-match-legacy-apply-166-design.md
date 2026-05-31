@@ -244,6 +244,16 @@ both and hands the finished strings to `db.reclassify_legacy_match(..., reason,
 trigger=...)`, so the `db` layer holds no format literal and the two provenance
 strings cannot be edited out of lockstep.
 
+**Frozen trigger grammar.** The `trigger` string is
+`legacy:<asset_uuid> tier=<tier> clf=<classifier_version>` with **field order
+frozen** (the `legacy:` token first, then `tier=`, then `clf=`) and **spacing
+frozen** (single ASCII spaces between the three tokens, no trailing space). Do
+not reorder, re-space, or "prettify" it — audit consumers parse it positionally.
+Conversely, parsers **must treat any unknown trailing tokens as opaque**: future
+versions may append ` key=value` suffixes, and existing consumers must ignore
+what they don't recognize rather than fail. Adding a suffix is the only
+backward-compatible way to extend this string.
+
 ### Failure scope across the run
 
 Atomicity is **per photo**, and the run continues past a failure. The two
@@ -285,6 +295,14 @@ auto-derivation) that would turn a forgotten bump into a hard failure.
 **Version mismatches never block execution and never affect classification
 outcome** — the value is recorded and read by humans, never gated on. It must
 not become a migration gate or compatibility check.
+
+`classifier_version` is **captured once at the start of a run** (the CLI reads
+`analyzer.privacy.CLASSIFIER_VERSION` once and passes it down into
+`apply_legacy_matches`, which threads the same value to every photo). It is not
+re-read per photo. This keeps a single run internally consistent even if the
+constant were somehow changed mid-run, and makes tests that monkeypatch the
+version deterministic — every row in one batch carries the version that was in
+force when the batch began.
 
 ## Idempotency
 
@@ -386,6 +404,11 @@ Unit tests in `tests/` (pure logic, no osxphotos / no NAS):
     `privacy_reason` is byte-for-byte unchanged, and the `operation_log` row
     count is unchanged (zero rows written). Guards the invariant that a no-op
     touches neither `photos` nor `operation_log`.
+17. **Resume after partial failure** — photo A succeeds and photo B's write is
+    monkeypatched to fail on the first pass; on a second pass (patch removed)
+    only B is attempted (A is no longer `candidate_public`, so it is never
+    re-seen) and B is reclassified. Verifies that `candidate_public` scope is a
+    natural resume point — no separate checkpoint state is needed.
 
 Run: `python -m pytest tests/ -q` (all green before commit). `make lint`
 (mypy + ruff) clean on touched files.
