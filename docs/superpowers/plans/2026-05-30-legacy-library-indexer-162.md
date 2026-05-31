@@ -1954,12 +1954,47 @@ Expected: prints `Indexed 200 assets from library <uuid> (... non-authoritative 
 
 > If osxphotos proves unreliable on this library, the spec's documented fallback is a direct read-only SQL reader behind the same `index_library` interface; that is a separate task, not part of this plan.
 
-- [ ] **Step 4: Real smoke run of the preview**
+- [ ] **Step 4: Cache reuse vs. rebuild expectations**
 
-Run: `python bp match-legacy-preview --csv /tmp/legacy-preview.csv --config config/config.yml`
-Expected: prints tier counts and writes the CSV. Sanity-check that confident matches look right and that re-running produces a byte-identical CSV (`md5 /tmp/legacy-preview.csv` twice).
+The unit tests cover the cache *validity logic*; this step proves the live build/reuse/refresh contract end-to-end. Use `-v` so the indexer logs which path it took.
 
-- [ ] **Step 5: Update README**
+1. **First run builds the cache** (default cache on). After Step 3's run, confirm the cache exists:
+   Run: `ls "$(dirname $(python -c 'import yaml;print(yaml.safe_load(open("config/config.yml"))["database"]["path"])'))/legacy-cache"`
+   Expected: a `<library_uuid>/database/` directory is present (the freshly built cache).
+2. **Second identical run reuses the cache** (source `Photos.sqlite` unchanged → mtime+size+head-hash match):
+   Run: `python bp index-legacy --library "/Volumes/homes/cdevers/Pictures/Photos Library.photoslibrary" --limit 200 -v --config config/config.yml`
+   Expected: logs indicate the existing cache was reused (no rebuild); run completes noticeably faster than the first (no multi-GB copy).
+3. **`--refresh-cache` forces a rebuild** even though the source is unchanged:
+   Run: `python bp index-legacy --library "/Volumes/homes/cdevers/Pictures/Photos Library.photoslibrary" --limit 200 --refresh-cache -v --config config/config.yml`
+   Expected: logs/timing show the cache directory was rebuilt (the multi-GB copy runs again).
+
+> If the indexer doesn't log enough to distinguish reuse from rebuild, add an `INFO` log line in `ensure_cache`/`build_cache` (`poller/legacy_cache.py`) here — reused vs. rebuilt — so the contract is observable. This is a legitimate part of making the cache layer verifiable, not scope creep.
+
+- [ ] **Step 5: Interruption safety — no authoritative reconcile or thumbnail GC on a killed full run**
+
+Proves the completion-marker gate from Task 5 on the real library. Run a **non-limited** (authoritative) index and interrupt it mid-iteration:
+
+1. Note current state: `python bp stats --config config/config.yml` is unrelated; instead capture the legacy row count and a sample of thumbnail files:
+   Run: `python -c "import sys; sys.path.insert(0,'.'); from db.db import Database; import yaml; c=yaml.safe_load(open('config/config.yml')); d=Database(c['database']['path']); rows=d.conn.execute('SELECT library_uuid, COUNT(*) FROM legacy_assets GROUP BY library_uuid').fetchall(); print([dict(r) for r in [ {0:r[0],1:r[1]} for r in rows]])"`
+   (Simpler: just record `SELECT COUNT(*) FROM legacy_assets` and `ls` of the `legacy/<uuid>/` thumb dir.)
+2. Start a full run, then interrupt it with Ctrl-C (or `kill`) after a few seconds, before it finishes iterating:
+   Run: `python bp index-legacy --library "/Volumes/homes/cdevers/Pictures/Photos Library.photoslibrary" --config config/config.yml`  → press **Ctrl-C** partway through.
+   Expected: the process exits non-zero with a traceback/KeyboardInterrupt; **no** "reconciled N" summary line is printed (the summary only prints on clean completion).
+3. Verify nothing was deleted:
+   Run the same count + thumb-dir checks as (1).
+   Expected: `legacy_assets` row count is **unchanged or higher** (interrupted run may have upserted some rows, but deleted none), and previously-present thumbnail files still exist. No row that existed before the interrupted run is missing afterward.
+
+> This confirms an interrupted full run behaves like `--limit`: upserts what it saw, reconciles nothing, GCs nothing.
+
+- [ ] **Step 6: Real smoke run of the preview (deterministic output)**
+
+Run: `python bp match-legacy-preview --csv /tmp/legacy-preview-1.csv --config config/config.yml`
+Then re-run to a second file: `python bp match-legacy-preview --csv /tmp/legacy-preview-2.csv --config config/config.yml`
+Expected: prints tier counts; confident matches look plausible on inspection; and the two CSVs are identical:
+Run: `diff /tmp/legacy-preview-1.csv /tmp/legacy-preview-2.csv && echo IDENTICAL`
+Expected: no diff output, prints `IDENTICAL` (proves the deterministic ordering produces stable, reviewable diffs).
+
+- [ ] **Step 7: Update README**
 
 Add the two commands to the command reference in `README.md` (follow the existing list style; do not cite a specific test count — the README uses a general coverage statement). Suggested wording:
 
@@ -1973,18 +2008,18 @@ Add the two commands to the command reference in `README.md` (follow the existin
   Writes nothing to `photos`.
 ```
 
-- [ ] **Step 6: Mark the spec done**
+- [ ] **Step 8: Mark the spec done**
 
 Edit the spec's `## Release` section to note the plan is written and link this plan file; add `✓ plan written` to the status. (Leave the design body unchanged.)
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add README.md docs/superpowers/specs/2026-05-30-legacy-library-indexer-162-design.md
 git commit -m "docs(#162): README commands + spec status for legacy indexer"
 ```
 
-- [ ] **Step 8: Label the issue**
+- [ ] **Step 10: Label the issue**
 
 Run: `gh issue edit 162 --add-label has-plan`
 Expected: confirms the label was added.
