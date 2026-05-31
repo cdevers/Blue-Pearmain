@@ -86,6 +86,14 @@ from analyzer.tagger import propose_tags  # add to existing imports
 def legacy_metadata_payload(tier: str, matched_assets: list[dict]) -> dict:
     """Build the legacy-derived staging payload for a matched photo.
 
+    Contract (mirrors classify_match's output):
+      confident ⇒ exactly one matched asset
+      ambiguous ⇒ two or more matched assets
+      no-match  ⇒ this function is never called (orchestrator guards on `matched`)
+    The `if tag_sets else set()` guard is defensive only; callers must honour the
+    contract above, and a test asserts confident/ambiguous arity so an upstream
+    regression surfaces instead of silently emitting empty metadata.
+
     add_tags: propose_tags() per matched asset, then combined by match confidence:
               confident (one asset) → that asset's tags; ambiguous (N assets) →
               the INTERSECTION across all candidates (tags shared by every one), so
@@ -162,6 +170,11 @@ if "proposed_title" not in existing:
     self.conn.commit()
 ```
 
+This is the **existing** `_ensure_schema` idiom verbatim (guarded `PRAGMA table_info`
+check → `ALTER` → `self.conn.commit()`, one per additive column, as already done for
+`display_rotation`/`is_video`/`bp_rating`). Don't introduce a transaction wrapper or a
+new mutation helper — match the surrounding code.
+
 `_ensure_schema` runs in `Database.__init__`, so **every** DB construction — fresh,
 existing, and all test DBs (which build via `Database(path)`) — gets the column. No
 test-bootstrap path can bypass it, and no separate `migrate_0XX` file is needed.
@@ -191,11 +204,14 @@ def apply_legacy_metadata(
 ```
 
 Behaviour:
-- Read the current `proposed_tags`, `proposed_title`, `proposed_description`.
-- `proposed_tags`: `merged = sorted(set(current) | set(add_tags))`; update only if
-  `merged != current`. (Plain set-union — no `analyzer` import; inputs are already
-  lowercased/normalised by `propose_tags` upstream, and existing `proposed_tags` are
-  stored normalised. This keeps db.py from depending on the analyzer layer.)
+- Read the current row's `proposed_tags`, `proposed_title`, `proposed_description`.
+- `proposed_tags` is stored as JSON text. **Decode** it with the existing
+  `_json_loads_safe` helper (→ list, or `[]` if NULL/blank) before merging, and
+  **re-encode** with `json.dumps` when persisting. Merge: `merged = sorted(set(current) |
+  set(add_tags))`; update only if `merged != current`. (Plain set-union — no `analyzer`
+  import; inputs are already lowercased/normalised by `propose_tags` upstream, and stored
+  `proposed_tags` are normalised. Decoding first avoids unioning the *characters* of the
+  JSON string.)
 - Scalars (`proposed_title`, `proposed_description`): update only when the **current**
   value is empty (`(current or "").strip() == ""`) *and* the incoming value is non-empty.
   The incoming value is already `.strip()`-ed by `legacy_metadata_payload`.
@@ -204,8 +220,10 @@ Behaviour:
 - If something changed → single `with self.conn:` txn: `UPDATE photos SET ...` (only the
   changed columns) + **one aggregate** `INSERT INTO operation_log`:
   `operation='match_legacy_metadata'`, `target='legacy_metadata'`, `old_value=NULL`,
-  `new_value=` a compact JSON summary of what changed (e.g.
-  `{"fields": ["proposed_tags", "proposed_description"], "tags_added": 3}`),
+  `new_value=` a compact JSON summary of what changed, e.g.
+  `{"fields": ["proposed_tags", "proposed_description"], "tags_added": 3}`. `tags_added`
+  is the **delta** — count of tags newly added this write (`len(merged) - len(current)`),
+  not the final merged total; it is omitted when `proposed_tags` didn't change.
   `trigger=?`, `actor='bp'`. Return True.
 
 `reclassify_legacy_match` is **not** modified.
@@ -316,6 +334,8 @@ New tests (`tests/test_legacy_tag_propagation.py`):
   - ambiguous with no shared tags → `add_tags == []`.
   - label blocklist/remap applied (e.g. `people` dropped, `automobile`→`car`).
   - empty keywords/labels → `add_tags == []`, title/description still filled if confident.
+  - arity contract: confident input has exactly one asset, ambiguous has ≥2 (assert via
+    `classify_match` output, so an upstream regression in tiering is caught here).
 - **`format_legacy_metadata_trigger` (pure):**
   - confident → string contains the source `asset_uuid`.
   - ambiguous → no single uuid; contains `n=<candidate count>`.
@@ -325,6 +345,12 @@ New tests (`tests/test_legacy_tag_propagation.py`):
     treats a whitespace-only existing value as empty (so it gets filled).
   - rerun with same input → returns False, no UPDATE, no new log row (idempotent).
   - add_tags already all present and scalars already filled → returns False.
+  - **partial — tags unchanged + empty title filled** → returns True; `new_value.fields`
+    is `["proposed_title"]`; no `tags_added`.
+  - **partial — title already present + new tags added** → returns True;
+    `new_value.fields` is `["proposed_tags"]`; `tags_added` = delta count only.
+  - `tags_added` is the delta (newly added), not the final merged total.
+  - decodes JSON `proposed_tags` before merge (union of tag strings, not characters).
   - writes exactly one aggregate operation_log row (`operation='match_legacy_metadata'`)
     when something changes; none when nothing does; `new_value` lists the changed fields.
   - txn atomicity: a forced failure rolls back the photos update.
