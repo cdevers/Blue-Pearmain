@@ -181,3 +181,5 @@ Run `python -m pytest tests/ -q` and `make lint` (mypy-clean, no bare `# type: i
 ## Release
 
 Branch + green PR (no direct commits to `main`). Reference **#162** in commits; relates to **#12**. Version bump to **1.4.0** on merge (via branch + PR per branch-protection policy). Add the `has-plan` label to #162 once the implementation plan is written.
+
+✓ plan written — `docs/superpowers/plans/2026-05-30-legacy-library-indexer-162.md`. Implemented on branch `feat/legacy-library-indexer-162` (Tasks 1–7 complete; migration 026, `legacy_normalize`/`legacy_cache`/`legacy_indexer`/`legacy_match`, and the `bp index-legacy` / `bp match-legacy-preview` subcommands).
