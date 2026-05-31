@@ -17,7 +17,7 @@
 - `poller/legacy_match.py` — **modify.** Add `from analyzer.tagger import propose_tags`; add pure functions `legacy_metadata_payload(tier, matched_assets)` and `format_legacy_metadata_trigger(tier, matched_assets, classifier_version)`. Uses existing `CONFIDENT`, `_json_list`.
 - `db/schema.sql` — **modify.** Add `proposed_title TEXT` next to `proposed_description`.
 - `db/db.py` — **modify.** Add module-level `_decode_proposed_tags(raw) -> (list, bool)`; add guarded `proposed_title` ALTER in `_ensure_schema`; add method `apply_legacy_metadata(...)` next to `reclassify_legacy_match`.
-- `poller/legacy_apply.py` — **modify.** Import the new helpers; add the metadata step + `metadata_attempted`/`metadata_applied`/`metadata_failed` counts in `apply_legacy_matches`.
+- `poller/legacy_apply.py` — **modify.** Import the new helpers; add the metadata step + `metadata_matched`/`metadata_applied`/`metadata_failed` counts in `apply_legacy_matches`.
 - `bp` — **modify.** Print the three new count lines in `cmd_match_legacy`'s `--apply` branch.
 - `tests/test_legacy_tag_propagation.py` — **create.** All new tests.
 - `README.md` — **modify.** Note the new propagation behaviour.
@@ -255,6 +255,13 @@ EOF
 - Modify: `db/schema.sql:91` (next to `proposed_description`)
 - Modify: `db/db.py` `_ensure_schema` (additive block ~line 410, after the `bp_rating` guard ~line 424)
 - Test: `tests/test_legacy_tag_propagation.py`
+
+> **Note — column order differs by DB age:** on a *fresh* DB, `schema.sql` puts
+> `proposed_title` adjacent to `proposed_description`; on a *migrated* DB the
+> guarded `ALTER` appends it at the end of `photos`. Both are functionally
+> identical (we always reference columns by name), but tests and code must never
+> assume positional column order or rely on `SELECT *` ordering. This matches
+> every other additive column in `_ensure_schema`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -513,6 +520,33 @@ def test_apply_metadata_clean_string_list_only_no_repair_flag():
     assert "tags_repaired" not in nv  # clean list of strings is not a repair
 
 
+def test_apply_metadata_dedupes_duplicate_historical_tags():
+    db = _meta_db()
+    db.conn.execute("UPDATE photos SET proposed_tags = ? WHERE id = 1", (json.dumps(["beach", "beach"]),))
+    db.conn.commit()
+    changed = db.apply_legacy_metadata(1, add_tags=[], trigger="t")  # no new tags
+    assert changed is True  # forced by the de-dup repair
+    assert json.loads(
+        db.conn.execute("SELECT proposed_tags FROM photos WHERE id = 1").fetchone()["proposed_tags"]
+    ) == ["beach"]
+    nv = json.loads(_logs(db)[0]["new_value"])
+    assert nv["tags_repaired"] is True
+    assert "tags_added" not in nv  # de-dup introduced no new members
+
+
+def test_apply_metadata_strips_whitespace_in_stored_tags():
+    db = _meta_db()
+    db.conn.execute("UPDATE photos SET proposed_tags = ? WHERE id = 1", (json.dumps(["  beach  ", ""]),))
+    db.conn.commit()
+    changed = db.apply_legacy_metadata(1, add_tags=[], trigger="t")
+    assert changed is True
+    assert json.loads(
+        db.conn.execute("SELECT proposed_tags FROM photos WHERE id = 1").fetchone()["proposed_tags"]
+    ) == ["beach"]  # stripped, blank dropped
+    nv = json.loads(_logs(db)[0]["new_value"])
+    assert nv["tags_repaired"] is True
+
+
 def test_apply_metadata_rolls_back_when_audit_insert_fails():
     db = _meta_db()
     real = db.conn
@@ -566,13 +600,21 @@ In `db/db.py`, directly after `_json_loads_safe` (ends ~line 43), add:
 def _decode_proposed_tags(raw: str | None) -> tuple[list[str], bool]:
     """Decode a stored proposed_tags JSON string to (tags, was_malformed).
 
-    NULL/blank -> ([], False). A decode error or a non-list value (bare string,
-    dict, number) -> ([], True): malformed historical data we will repair in
-    place. A valid list -> keep only string members; if any non-string members
-    (numbers, nulls, nested objects) were dropped, flag was_malformed=True so the
-    dirty row is rewritten rather than left in place. We do NOT str()-coerce
-    non-strings: that would turn None into the literal tag "none". A clean
-    list-of-strings -> (members, False).
+    Canonical stored form is a de-duplicated list of stripped, non-blank
+    strings. Returns that canonical list plus was_malformed=True iff the raw
+    decoded value was not already canonical, so any non-canonical row is
+    rewritten ("repaired") on the next write:
+      - NULL/blank     -> ([], False)
+      - decode error   -> ([], True)
+      - non-list JSON  -> ([], True)   (bare string, dict, number)
+      - list with junk -> drop non-strings, strip strings, drop blanks, de-dupe
+                          (order-preserving); flag True if anything was
+                          dropped/trimmed/de-duped.
+    We do NOT str()-coerce non-strings (that would turn None into the tag
+    "none"). De-dup, whitespace, blank, and non-string cleanup ALL count as
+    repair, so tags_repaired is one honest signal: "the stored value wasn't
+    canonical". (Re-sorting a clean-but-unsorted list is normalisation, not
+    repair, and is not flagged.)
     """
     if not raw:
         return [], False
@@ -580,10 +622,15 @@ def _decode_proposed_tags(raw: str | None) -> tuple[list[str], bool]:
         val = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         return [], True
-    if isinstance(val, list):
-        clean = [x for x in val if isinstance(x, str)]
-        return clean, len(clean) != len(val)
-    return [], True
+    if not isinstance(val, list):
+        return [], True
+    cleaned: list[str] = []
+    for item in val:
+        if isinstance(item, str):
+            s = item.strip()
+            if s and s not in cleaned:
+                cleaned.append(s)
+    return cleaned, cleaned != val
 ```
 
 - [ ] **Step 4: Implement `apply_legacy_metadata`**
@@ -695,7 +742,7 @@ In `db/db.py`, directly after the `reclassify_legacy_match` method (ends ~line 6
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py -q -k apply_metadata`
-Expected: PASS (13 tests).
+Expected: PASS (15 tests).
 
 - [ ] **Step 6: Lint and commit**
 
@@ -722,6 +769,18 @@ EOF
 **Files:**
 - Modify: `poller/legacy_apply.py` (imports ~line 16; counts dict ~line 59; per-photo loop ~line 67)
 - Test: `tests/test_legacy_tag_propagation.py`
+
+> **Design note — intentional non-atomicity (do not "fix"):** privacy demotion
+> (`reclassify_legacy_match`, txn 1) and metadata propagation
+> (`apply_legacy_metadata`, txn 2) are two *independent* writes. If the demotion
+> fails and rolls back, the metadata step still runs, and vice versa. This is
+> deliberate: the two carry different review value (a failed privacy demotion
+> must not suppress useful tag/title staging, and staged tags must not depend on
+> a privacy decision succeeding). Each write is individually atomic + audited; we
+> do not wrap them in one transaction. A future maintainer may be tempted to make
+> them all-or-nothing — that would regress the behaviour locked by
+> `test_orch_demotion_failure_does_not_block_metadata` and
+> `test_orch_metadata_failure_isolated`.
 
 - [ ] **Step 1: Write the failing orchestration tests**
 
@@ -777,7 +836,7 @@ def test_orch_matched_not_demoted_photo_is_tagged():
     )
     assert counts["reclassified"] == 0       # no people => stays public
     assert counts["unchanged"] == 1          # privacy unchanged
-    assert counts["metadata_attempted"] == 1
+    assert counts["metadata_matched"] == 1
     assert counts["metadata_applied"] == 1
     assert counts["metadata_failed"] == 0
     row = db.conn.execute(
@@ -798,7 +857,7 @@ def test_orch_demoted_photo_is_reclassified_and_tagged():
         db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1
     )
     assert counts["reclassified"] == 1
-    assert counts["metadata_attempted"] == 1
+    assert counts["metadata_matched"] == 1
     assert counts["metadata_applied"] == 1
     row = db.conn.execute("SELECT privacy_state, proposed_tags FROM photos WHERE id = 1").fetchone()
     assert row["privacy_state"] == "needs_review"
@@ -818,7 +877,7 @@ def test_orch_no_match_photo_not_attempted():
     counts = apply_legacy_matches(
         db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1
     )
-    assert counts["metadata_attempted"] == 0
+    assert counts["metadata_matched"] == 0
     assert counts["metadata_applied"] == 0
     assert db.conn.execute("SELECT proposed_tags FROM photos WHERE id = 1").fetchone()["proposed_tags"] is None
 
@@ -832,7 +891,7 @@ def test_orch_idempotent_rerun_no_duplicate_tags_or_logs():
     first = apply_legacy_matches(db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1)
     second = apply_legacy_matches(db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1)
     assert first["metadata_applied"] == 1
-    assert second["metadata_attempted"] == 1   # still matches
+    assert second["metadata_matched"] == 1   # still matches
     assert second["metadata_applied"] == 0     # nothing left to change
     assert json.loads(
         db.conn.execute("SELECT proposed_tags FROM photos WHERE id = 1").fetchone()["proposed_tags"]
@@ -856,7 +915,7 @@ def test_orch_ambiguous_intersection_merges_with_existing_tags_idempotent():
     _seed_asset_168(db, "B", keywords='["beach", "picnic"]', title="Outing")
 
     first = apply_legacy_matches(db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1)
-    assert first["metadata_attempted"] == 1
+    assert first["metadata_matched"] == 1
     assert first["metadata_applied"] == 1
     row = db.conn.execute(
         "SELECT proposed_tags, proposed_title FROM photos WHERE id = 1"
@@ -865,13 +924,33 @@ def test_orch_ambiguous_intersection_merges_with_existing_tags_idempotent():
     assert row["proposed_title"] is None                          # ambiguous => no scalar
 
     second = apply_legacy_matches(db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1)
-    assert second["metadata_attempted"] == 1
+    assert second["metadata_matched"] == 1
     assert second["metadata_applied"] == 0                        # nothing left to change
     assert json.loads(
         db.conn.execute("SELECT proposed_tags FROM photos WHERE id = 1").fetchone()["proposed_tags"]
     ) == ["beach", "old"]
     meta_logs = [r for r in _logs(db) if r["operation"] == "match_legacy_metadata"]
     assert len(meta_logs) == 1
+
+
+def test_orch_ambiguous_zero_shared_tags_is_noop():
+    """Ambiguous match whose candidates share no tags: counted as matched, but
+    the empty payload changes nothing — no apply, no audit row, no scalar."""
+    from legacy_apply import apply_legacy_matches
+
+    db = _orch_db_168()
+    _seed_photo_168(db, 1, "100")
+    _seed_asset_168(db, "A", keywords='["beach"]', title="X")      # disjoint...
+    _seed_asset_168(db, "B", keywords='["mountain"]', title="Y")   # ...no intersection
+
+    counts = apply_legacy_matches(db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1)
+    assert counts["metadata_matched"] == 1
+    assert counts["metadata_applied"] == 0
+    assert counts["metadata_failed"] == 0
+    assert db.conn.execute(
+        "SELECT proposed_tags FROM photos WHERE id = 1"
+    ).fetchone()["proposed_tags"] is None
+    assert [r for r in _logs(db) if r["operation"] == "match_legacy_metadata"] == []
 
 
 def test_orch_metadata_failure_isolated(monkeypatch):
@@ -888,7 +967,7 @@ def test_orch_metadata_failure_isolated(monkeypatch):
     counts = apply_legacy_matches(
         db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1
     )
-    assert counts["metadata_attempted"] == 1
+    assert counts["metadata_matched"] == 1
     assert counts["metadata_applied"] == 0
     assert counts["metadata_failed"] == 1
 
@@ -913,7 +992,7 @@ def test_orch_demotion_failure_does_not_block_metadata(monkeypatch):
     )
     assert counts["failed"] == 1            # demotion failed and rolled back
     assert counts["reclassified"] == 0
-    assert counts["metadata_attempted"] == 1
+    assert counts["metadata_matched"] == 1
     assert counts["metadata_applied"] == 1  # metadata still applied
     assert json.loads(
         db.conn.execute("SELECT proposed_tags FROM photos WHERE id = 1").fetchone()["proposed_tags"]
@@ -923,7 +1002,7 @@ def test_orch_demotion_failure_does_not_block_metadata(monkeypatch):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py -q -k orch`
-Expected: FAIL with `KeyError: 'metadata_attempted'`.
+Expected: FAIL with `KeyError: 'metadata_matched'`.
 
 - [ ] **Step 3: Add the new imports**
 
@@ -969,17 +1048,17 @@ Replace with:
         "auto_private": 0,
         "unchanged": 0,
         "failed": 0,
-        "metadata_attempted": 0,
+        "metadata_matched": 0,
         "metadata_applied": 0,
         "metadata_failed": 0,
     }
 ```
 
 **Count semantics (keep aligned with the CLI/README wording in Tasks 5–6):**
-- `metadata_attempted` = photos with a legacy match for which propagation was attempted (the CLI labels this **"matched"**). A confident/ambiguous match always increments it, even if the resulting payload is empty (e.g. ambiguous with no shared tags) and the DB write ends up a no-op.
+- `metadata_matched` = photos with a legacy match (CLI label: **"matched"**). A confident/ambiguous match always increments it, even if the resulting payload is empty (e.g. ambiguous with no shared tags) and the DB write ends up a no-op. The internal key name deliberately matches the CLI label to avoid the "attempted vs matched" cognitive gap.
 - `metadata_applied` = photos where `apply_legacy_metadata` actually changed something (returned True). The CLI labels this **"updated"**.
 - `metadata_failed` = photos where the metadata write raised (CLI: **"failed"**).
-So `attempted` is a match count, not a DB-mutation count; `applied + (no-op) + failed == attempted`.
+So `metadata_matched` is a match count, not a DB-mutation count; `applied + (no-op) + failed == matched`.
 
 - [ ] **Step 5: Add the metadata step in the per-photo loop**
 
@@ -1029,7 +1108,7 @@ The demotion path uses `continue` on success-counting. The metadata step must ru
         # and recomputing keeps #166's resolve_apply_decision untouched.
         tier, matched = classify_match(photo, candidates)
         if matched:
-            counts["metadata_attempted"] += 1
+            counts["metadata_matched"] += 1
             payload = legacy_metadata_payload(tier, matched)
             meta_trigger = format_legacy_metadata_trigger(tier, matched, classifier_version)
             try:
@@ -1097,7 +1176,7 @@ now live inside the `if decision is not None:` block (move them there if Step 5'
                 counts["failed"] += 1
         tier, matched = classify_match(photo, candidates)
         if matched:
-            counts["metadata_attempted"] += 1
+            counts["metadata_matched"] += 1
             payload = legacy_metadata_payload(tier, matched)
             meta_trigger = format_legacy_metadata_trigger(tier, matched, classifier_version)
             try:
@@ -1114,7 +1193,7 @@ now live inside the `if decision is not None:` block (move them there if Step 5'
 - [ ] **Step 7: Run the new orchestration tests to verify they pass**
 
 Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py -q -k orch`
-Expected: PASS (7 tests).
+Expected: PASS (8 tests).
 
 - [ ] **Step 8: Run the full #166 apply suite to confirm no regression**
 
@@ -1131,7 +1210,7 @@ git commit -m "$(cat <<'EOF'
 feat(#168): propagate legacy metadata in apply_legacy_matches
 
 Metadata step runs for every photo with a legacy match (demoted or not),
-independent of the privacy demotion (two txns). Adds metadata_attempted /
+independent of the privacy demotion (two txns). Adds metadata_matched /
 metadata_applied / metadata_failed counts.
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
@@ -1155,7 +1234,7 @@ In `bp`, the `--apply` summary currently ends (lines 980-981):
 ```
 Add directly below line 981:
 ```python
-            print(f"  metadata     : {counts['metadata_attempted']} matched, "
+            print(f"  metadata     : {counts['metadata_matched']} matched, "
                   f"{counts['metadata_applied']} updated, "
                   f"{counts['metadata_failed']} failed")
 ```
@@ -1233,7 +1312,7 @@ gh pr create --title "feat(#168): propagate legacy keywords/tags into matched ph
 ## Summary
 - `match-legacy --apply` now stages matched legacy keywords+labels into `proposed_tags` (merge/dedupe/idempotent) and fills the empty `proposed_title`/`proposed_description` staging fields from confident matches.
 - Ambiguous matches use tag **intersection** (shared tags only); scalars are confident-only.
-- New `proposed_title` column; new `metadata_attempted`/`metadata_applied`/`metadata_failed` counts.
+- New `proposed_title` column; new `metadata_matched`/`metadata_applied`/`metadata_failed` counts.
 - No Flickr writes. Closes #168.
 
 ## Test plan
@@ -1257,15 +1336,17 @@ EOF
 - Confident = single-asset tags; ambiguous = intersection → Task 1 tests. ✓
 - Title/description confident-only, fill-if-empty, whitespace=empty → Task 1 (None for ambiguous; `whitespace_only_scalars_become_none`), Task 3 (`does_not_clobber`, `whitespace_existing`, `whitespace_incoming_scalar_is_not_staged`, `stores_stripped_scalar`). DB layer strips incoming scalars defensively (stdlib only, no analyzer coupling). ✓
 - Tag normalization is the caller's contract (analyzer.tagger.propose_tags); db.py does not re-normalize/import analyzer — documented in `apply_legacy_metadata` docstring; the set-union de-dupes and drops empties. ✓
-- End-to-end ambiguous intersection merged with existing tags + idempotent → Task 4 (`ambiguous_intersection_merges_with_existing_tags_idempotent`). ✓
-- Count semantics (`metadata_attempted` = matched count, CLI "matched"; not DB-mutation count) documented in Task 4 and kept aligned with CLI/README wording. ✓
+- End-to-end ambiguous intersection merged with existing tags + idempotent → Task 4 (`ambiguous_intersection_merges_with_existing_tags_idempotent`); ambiguous with zero shared tags is a no-op (matched but not applied, no audit row, no scalar) → `ambiguous_zero_shared_tags_is_noop`. ✓
+- Count semantics (`metadata_matched` = matched count, CLI "matched"; not DB-mutation count; key renamed to match the CLI label) documented in Task 4 and kept aligned with CLI/README wording. ✓
+- Intentional non-atomicity between privacy demotion (txn 1) and metadata propagation (txn 2) documented in prose at the head of Task 4 (not only in tests). ✓
+- Column-order divergence between fresh `schema.sql` and migrated (appended) `proposed_title` noted in Task 2; code/tests reference columns by name only. ✓
 - `proposed_title` via schema.sql + inline guard → Task 2. ✓
-- DB-layer merge, no analyzer import, JSON decode/coerce, malformed repair + `tags_repaired` → Task 3 (`_decode_proposed_tags`, repair tests). Non-string list members are dropped (not str()-coerced) and flagged as a repair → `test_apply_metadata_list_with_non_string_members_is_repaired`; clean string lists are not flagged → `test_apply_metadata_clean_string_list_only_no_repair_flag`. ✓
+- DB-layer merge, no analyzer import, JSON decode/coerce, malformed repair + `tags_repaired` → Task 3 (`_decode_proposed_tags`, repair tests). Canonical stored form = de-duped list of stripped non-blank strings; non-strings dropped (not str()-coerced), whitespace trimmed, blanks dropped, duplicates collapsed — all flagged as repair via one honest `tags_repaired` signal → `..._list_with_non_string_members_is_repaired`, `..._dedupes_duplicate_historical_tags`, `..._strips_whitespace_in_stored_tags`; clean lists not flagged → `..._clean_string_list_only_no_repair_flag`. ✓
 - Aggregate audit row, `fields` schema order, `tags_added` as new-members-introduced (set difference, not length delta) → Task 3 tests. ✓
 - Two independent writes; `reclassify_legacy_match` untouched; demotion failure does not block metadata → Task 4 (`demoted_..._reclassified_and_tagged`, `demotion_failure_does_not_block_metadata`, separate try/except blocks). ✓
 - `legacy_metadata_payload` branches on tier explicitly (CONFIDENT → single asset, AMBIGUOUS → intersection) — not reliant on confident-implies-cardinality-1 → Task 1. ✓
 - All matched photos (demoted or not) → Task 4 (`matched_not_demoted` test; restructured loop drops the `continue`). ✓
-- Counts `metadata_attempted`/`applied`/`failed` + invariants → Task 4 tests. ✓
+- Counts `metadata_matched`/`applied`/`failed` + invariants → Task 4 tests. ✓
 - Idempotency → Task 3 + Task 4 rerun tests. ✓
 - CLI summary → Task 5. ✓
 - README → Task 6. ✓
