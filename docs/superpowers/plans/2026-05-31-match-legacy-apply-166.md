@@ -518,15 +518,17 @@ def test_reclassify_writes_state_and_audit_atomically():
     assert row["privacy_state"] == "needs_review"
     assert "Aunt May" in row["privacy_reason"]
     log = db.conn.execute(
-        "SELECT operation, old_value, new_value, trigger FROM operation_log "
-        "WHERE photo_id = 1"
+        "SELECT operation, target, old_value, new_value, trigger, actor "
+        "FROM operation_log WHERE photo_id = 1"
     ).fetchall()
     assert len(log) == 1
+    # Frozen audit-row shape (#166): assert every field by value, not presence.
     assert log[0]["operation"] == "match_legacy_apply"
+    assert log[0]["target"] == "privacy_state"
     assert log[0]["old_value"] == "candidate_public"
     assert log[0]["new_value"] == "needs_review"
-    assert "clf=1" in log[0]["trigger"]
-    assert "tier=confident" in log[0]["trigger"]
+    assert log[0]["actor"] == "bp"
+    assert log[0]["trigger"] == "legacy:A tier=confident clf=1"
 
 
 class _AuditFailConn:
@@ -809,6 +811,50 @@ def test_apply_isolates_per_photo_failure_and_continues(monkeypatch):
         "SELECT COUNT(*) AS n FROM photos WHERE privacy_state = 'needs_review'"
     ).fetchone()["n"]
     assert demoted == 1
+
+
+def _assert_pure_noop(db, pid):
+    """A no-op must touch neither photos nor operation_log for this photo."""
+    row = db.conn.execute(
+        "SELECT privacy_state, privacy_reason FROM photos WHERE id = ?", (pid,)
+    ).fetchone()
+    assert row["privacy_state"] == "candidate_public"
+    assert row["privacy_reason"] == "no people detected"   # byte-for-byte unchanged
+    logs = db.conn.execute(
+        "SELECT COUNT(*) AS n FROM operation_log WHERE photo_id = ?", (pid,)
+    ).fetchone()["n"]
+    assert logs == 0
+
+
+def test_apply_confident_candidate_verdict_is_pure_noop():
+    """Confident match whose classifier verdict is candidate_public: no write."""
+    from legacy_apply import apply_legacy_matches
+
+    db = _orch_db()
+    _seed_photo(db, 1, "100")
+    # Self-only person, no other signal -> classify() -> candidate_public.
+    _seed_asset(db, "A", persons='["Me"]', named_face_count=1)
+    counts = apply_legacy_matches(db, "L", self_name="Me", zones=[],
+                                  person_policies={}, classifier_version=1)
+    assert counts["unchanged"] == 1
+    assert counts["reclassified"] == 0
+    _assert_pure_noop(db, 1)
+
+
+def test_apply_ambiguous_mixed_skip_is_pure_noop():
+    """Ambiguous-mixed match (one people-positive candidate, one not): skipped."""
+    from legacy_apply import apply_legacy_matches
+
+    db = _orch_db()
+    _seed_photo(db, 1, "100")
+    # Two assets at the same wall-clock -> ambiguous; mixed people signal -> skip.
+    _seed_asset(db, "A", persons='["Aunt May"]', named_face_count=1)
+    _seed_asset(db, "B")  # no people signal -> mixed -> not acted on
+    counts = apply_legacy_matches(db, "L", self_name="Me", zones=[],
+                                  person_policies={}, classifier_version=1)
+    assert counts["unchanged"] == 1
+    assert counts["reclassified"] == 0
+    _assert_pure_noop(db, 1)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -902,7 +948,7 @@ def apply_legacy_matches(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_match_legacy_apply.py -k apply -v`
-Expected: PASS (6 tests)
+Expected: PASS (8 tests)
 
 - [ ] **Step 5: Commit**
 

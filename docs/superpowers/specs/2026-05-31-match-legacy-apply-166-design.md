@@ -216,6 +216,28 @@ the atomicity requirement is the binding part.) Unlike the fire-and-forget
 `log_operation`, an audit-write failure here must roll the whole reclassification
 back, not be swallowed.
 
+### Frozen audit-row shape
+
+Every reclassification writes exactly one `operation_log` row with this **frozen
+payload** (reports and tooling may depend on it, so the strings are part of the
+contract, not ad hoc):
+
+| column      | frozen value                                                              |
+| ----------- | ------------------------------------------------------------------------- |
+| `operation` | the literal `match_legacy_apply`                                          |
+| `target`    | the literal `privacy_state`                                               |
+| `old_value` | the literal `candidate_public` (the only eligible source state)           |
+| `new_value` | the winning state — `needs_review` or `auto_private`                      |
+| `trigger`   | `legacy:<asset_uuid> tier=<tier> clf=<classifier_version>` (exact format) |
+| `actor`     | the literal `bp`                                                          |
+
+The `trigger` format is fixed: space-separated `key=value` tokens, leading
+`legacy:<asset_uuid>` token, then `tier=` then `clf=`. The matching
+`asset_uuid` and `tier` also appear in `privacy_reason` via the frozen reason
+schema (`legacy-match[tier=<tier>,asset=<asset_uuid>]: <classifier_reason>`), so
+both the human-facing reason and the machine-facing trigger carry provenance.
+A test asserts each of these fields by value, not just row presence.
+
 ### Failure scope across the run
 
 Atomicity is **per photo**, and the run continues past a failure. The two
@@ -254,6 +276,9 @@ came from an earlier ruleset; it never produces a wrong privacy decision or a
 crash. Treat bumping it as a courtesy to your future self, not a blocking
 maintenance obligation. We deliberately avoid any machinery (hashing,
 auto-derivation) that would turn a forgotten bump into a hard failure.
+**Version mismatches never block execution and never affect classification
+outcome** — the value is recorded and read by humans, never gated on. It must
+not become a migration gate or compatibility check.
 
 ## Idempotency
 
@@ -330,10 +355,13 @@ Unit tests in `tests/` (pure logic, no osxphotos / no NAS):
     `keep_private`.
 11. **Idempotency** — two `--apply` passes produce one transition and one log
     row per photo.
-12. **Audit atomicity** — a transition writes exactly one `operation_log` row
-    (`operation="match_legacy_apply"`, `old="candidate_public"`,
-    `new=<state>`, `trigger` contains `clf=<CLASSIFIER_VERSION>`); the
-    `privacy_reason` matches the frozen schema.
+12. **Audit payload (frozen shape)** — a transition writes exactly one
+    `operation_log` row whose fields match the frozen audit-row shape by value:
+    `operation="match_legacy_apply"`, `target="privacy_state"`,
+    `old_value="candidate_public"`, `new_value=<state>`, `actor="bp"`, and
+    `trigger == f"legacy:{asset_uuid} tier={tier} clf={CLASSIFIER_VERSION}"`
+    (exact string, not just a `clf=` substring); the `privacy_reason` matches
+    the frozen reason schema.
 13. **Rollback on audit failure** — monkeypatch the `operation_log` INSERT to
     raise mid-transaction; assert the photo's `privacy_state` is still
     `candidate_public`, `privacy_reason` is unchanged, and no `operation_log`
@@ -346,6 +374,12 @@ Unit tests in `tests/` (pure logic, no osxphotos / no NAS):
 15. **Failure isolation** — with two eligible photos where the first photo's
     audit write is monkeypatched to raise, assert the second photo is still
     reclassified, `failed == 1`, and the run did not abort.
+16. **No-op means truly no write** — for both no-op cases (a confident match
+    whose classifier verdict is `candidate_public`, and an ambiguous-mixed
+    match that is skipped), assert the photo stays `candidate_public`, its
+    `privacy_reason` is byte-for-byte unchanged, and the `operation_log` row
+    count is unchanged (zero rows written). Guards the invariant that a no-op
+    touches neither `photos` nor `operation_log`.
 
 Run: `python -m pytest tests/ -q` (all green before commit). `make lint`
 (mypy + ruff) clean on touched files.
