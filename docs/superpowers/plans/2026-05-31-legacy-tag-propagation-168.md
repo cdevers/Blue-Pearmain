@@ -97,6 +97,16 @@ def test_payload_empty_keywords_and_labels():
     assert out["add_tags"] == []
     assert out["title"] == "T"
     assert out["description"] is None             # whitespace/"" -> None
+
+
+def test_payload_whitespace_only_scalars_become_none():
+    from legacy_match import CONFIDENT, legacy_metadata_payload
+
+    out = legacy_metadata_payload(
+        CONFIDENT, [{"keywords": "[]", "labels": "[]", "title": "   ", "description": "\t\n"}]
+    )
+    assert out["title"] is None                   # whitespace-only stripped to None
+    assert out["description"] is None
 ```
 
 - [ ] **Step 2: Run the payload tests to verify they fail**
@@ -166,7 +176,7 @@ def legacy_metadata_payload(tier: str, matched_assets: list[dict]) -> dict:
 - [ ] **Step 5: Run the payload tests to verify they pass**
 
 Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py -q`
-Expected: PASS (5 tests).
+Expected: PASS (6 tests).
 
 - [ ] **Step 6: Add the trigger tests**
 
@@ -217,7 +227,7 @@ def format_legacy_metadata_trigger(
 - [ ] **Step 9: Run all Task 1 tests to verify they pass**
 
 Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py -q`
-Expected: PASS (7 tests).
+Expected: PASS (8 tests).
 
 - [ ] **Step 10: Lint and commit**
 
@@ -412,6 +422,27 @@ def test_apply_metadata_whitespace_existing_scalar_treated_as_empty():
     assert db.conn.execute("SELECT proposed_title FROM photos WHERE id = 1").fetchone()["proposed_title"] == "Legacy"
 
 
+def test_apply_metadata_whitespace_incoming_scalar_is_not_staged():
+    db = _meta_db()
+    changed = db.apply_legacy_metadata(1, add_tags=["beach"], title="   ", description="\t\n", trigger="t")
+    assert changed is True  # tags changed
+    row = db.conn.execute(
+        "SELECT proposed_title, proposed_description FROM photos WHERE id = 1"
+    ).fetchone()
+    assert row["proposed_title"] is None        # whitespace-only incoming not staged
+    assert row["proposed_description"] is None
+    nv = json.loads(_logs(db)[0]["new_value"])
+    assert nv["fields"] == ["proposed_tags"]     # only tags, no scalar fields
+
+
+def test_apply_metadata_stores_stripped_scalar():
+    db = _meta_db()
+    db.apply_legacy_metadata(1, add_tags=[], title="  Trip  ", trigger="t")
+    assert db.conn.execute(
+        "SELECT proposed_title FROM photos WHERE id = 1"
+    ).fetchone()["proposed_title"] == "Trip"
+
+
 def test_apply_metadata_idempotent_rerun_returns_false():
     db = _meta_db()
     db.apply_legacy_metadata(1, add_tags=["beach"], title="T", trigger="t")
@@ -571,11 +602,18 @@ In `db/db.py`, directly after the `reclassify_legacy_match` method (ends ~line 6
     ) -> bool:
         """Stage propagated legacy metadata for one photo (one txn).
 
+        Contract: add_tags must already be normalised (lowercased, de-duped,
+        blocklist/remap applied) by the caller via analyzer.tagger.propose_tags.
+        db.py deliberately does NOT import analyzer (frozen ownership boundary:
+        analyzer normalises, db merges/persists). The set-union below de-dupes
+        and drops empty strings, but does not re-normalise.
+
         proposed_tags: set-union of add_tags into the photo's existing tags
         (decoded via _decode_proposed_tags; non-list/malformed values are
         repaired in place). proposed_title / proposed_description: filled only
         when currently empty (NULL or whitespace-only) and the incoming value is
-        non-empty — never clobbers a human draft. Writes ONE aggregate
+        non-empty after stripping — never clobbers a human draft, never stages a
+        whitespace-only value. Stored stripped. Writes ONE aggregate
         operation_log row iff something changed; new_value.fields is in schema
         order, tags_added is the delta, tags_repaired flags a repaired malformed
         row. Returns True iff anything changed.
@@ -588,6 +626,12 @@ In `db/db.py`, directly after the `reclassify_legacy_match` method (ends ~line 6
         merged = sorted(set(current) | {t for t in add_tags if t})
         tags_changed = merged != current or malformed
 
+        # Scalar hygiene at the persistence boundary: treat whitespace-only
+        # incoming title/description as empty, and store the stripped form.
+        # (stdlib only — no analyzer coupling.)
+        title_in = (title or "").strip()
+        desc_in = (description or "").strip()
+
         sets: list[str] = []
         params: list = []
         changed_fields: list[str] = []
@@ -595,14 +639,14 @@ In `db/db.py`, directly after the `reclassify_legacy_match` method (ends ~line 6
             changed_fields.append("proposed_tags")
             sets.append("proposed_tags = ?")
             params.append(json.dumps(merged))
-        if title and not (row["proposed_title"] or "").strip():
+        if title_in and not (row["proposed_title"] or "").strip():
             changed_fields.append("proposed_title")
             sets.append("proposed_title = ?")
-            params.append(title)
-        if description and not (row["proposed_description"] or "").strip():
+            params.append(title_in)
+        if desc_in and not (row["proposed_description"] or "").strip():
             changed_fields.append("proposed_description")
             sets.append("proposed_description = ?")
-            params.append(description)
+            params.append(desc_in)
 
         if not changed_fields:
             return False
@@ -651,7 +695,7 @@ In `db/db.py`, directly after the `reclassify_legacy_match` method (ends ~line 6
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py -q -k apply_metadata`
-Expected: PASS (11 tests).
+Expected: PASS (13 tests).
 
 - [ ] **Step 6: Lint and commit**
 
@@ -797,6 +841,39 @@ def test_orch_idempotent_rerun_no_duplicate_tags_or_logs():
     assert len(meta_logs) == 1  # only the first run logged
 
 
+def test_orch_ambiguous_intersection_merges_with_existing_tags_idempotent():
+    """End-to-end: a photo with existing proposed_tags matched ambiguously to
+    two assets gets (existing ∪ shared-tag intersection), and a rerun is a
+    no-op (no duplicate tags, no second metadata log)."""
+    from legacy_apply import apply_legacy_matches
+
+    db = _orch_db_168()
+    _seed_photo_168(db, 1, "100")
+    db.conn.execute("UPDATE photos SET proposed_tags = ? WHERE id = 1", (json.dumps(["old"]),))
+    db.conn.commit()
+    # Two assets at the same timestamp => ambiguous; intersection of tags = {beach}.
+    _seed_asset_168(db, "A", keywords='["beach", "birthday"]', title="Party")
+    _seed_asset_168(db, "B", keywords='["beach", "picnic"]', title="Outing")
+
+    first = apply_legacy_matches(db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1)
+    assert first["metadata_attempted"] == 1
+    assert first["metadata_applied"] == 1
+    row = db.conn.execute(
+        "SELECT proposed_tags, proposed_title FROM photos WHERE id = 1"
+    ).fetchone()
+    assert json.loads(row["proposed_tags"]) == ["beach", "old"]   # merged, deduped, sorted
+    assert row["proposed_title"] is None                          # ambiguous => no scalar
+
+    second = apply_legacy_matches(db, "L", self_name="Me", zones=[], person_policies={}, classifier_version=1)
+    assert second["metadata_attempted"] == 1
+    assert second["metadata_applied"] == 0                        # nothing left to change
+    assert json.loads(
+        db.conn.execute("SELECT proposed_tags FROM photos WHERE id = 1").fetchone()["proposed_tags"]
+    ) == ["beach", "old"]
+    meta_logs = [r for r in _logs(db) if r["operation"] == "match_legacy_metadata"]
+    assert len(meta_logs) == 1
+
+
 def test_orch_metadata_failure_isolated(monkeypatch):
     from legacy_apply import apply_legacy_matches
 
@@ -897,6 +974,12 @@ Replace with:
         "metadata_failed": 0,
     }
 ```
+
+**Count semantics (keep aligned with the CLI/README wording in Tasks 5–6):**
+- `metadata_attempted` = photos with a legacy match for which propagation was attempted (the CLI labels this **"matched"**). A confident/ambiguous match always increments it, even if the resulting payload is empty (e.g. ambiguous with no shared tags) and the DB write ends up a no-op.
+- `metadata_applied` = photos where `apply_legacy_metadata` actually changed something (returned True). The CLI labels this **"updated"**.
+- `metadata_failed` = photos where the metadata write raised (CLI: **"failed"**).
+So `attempted` is a match count, not a DB-mutation count; `applied + (no-op) + failed == attempted`.
 
 - [ ] **Step 5: Add the metadata step in the per-photo loop**
 
@@ -1031,7 +1114,7 @@ now live inside the `if decision is not None:` block (move them there if Step 5'
 - [ ] **Step 7: Run the new orchestration tests to verify they pass**
 
 Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py -q -k orch`
-Expected: PASS (6 tests).
+Expected: PASS (7 tests).
 
 - [ ] **Step 8: Run the full #166 apply suite to confirm no regression**
 
@@ -1172,7 +1255,10 @@ EOF
 **1. Spec coverage:**
 - Keywords + labels via `propose_tags` → Task 1 (payload), `test_payload_applies_label_blocklist_and_remap`. ✓
 - Confident = single-asset tags; ambiguous = intersection → Task 1 tests. ✓
-- Title/description confident-only, fill-if-empty, whitespace=empty → Task 1 (None for ambiguous), Task 3 (`does_not_clobber`, `whitespace_existing`). ✓
+- Title/description confident-only, fill-if-empty, whitespace=empty → Task 1 (None for ambiguous; `whitespace_only_scalars_become_none`), Task 3 (`does_not_clobber`, `whitespace_existing`, `whitespace_incoming_scalar_is_not_staged`, `stores_stripped_scalar`). DB layer strips incoming scalars defensively (stdlib only, no analyzer coupling). ✓
+- Tag normalization is the caller's contract (analyzer.tagger.propose_tags); db.py does not re-normalize/import analyzer — documented in `apply_legacy_metadata` docstring; the set-union de-dupes and drops empties. ✓
+- End-to-end ambiguous intersection merged with existing tags + idempotent → Task 4 (`ambiguous_intersection_merges_with_existing_tags_idempotent`). ✓
+- Count semantics (`metadata_attempted` = matched count, CLI "matched"; not DB-mutation count) documented in Task 4 and kept aligned with CLI/README wording. ✓
 - `proposed_title` via schema.sql + inline guard → Task 2. ✓
 - DB-layer merge, no analyzer import, JSON decode/coerce, malformed repair + `tags_repaired` → Task 3 (`_decode_proposed_tags`, repair tests). Non-string list members are dropped (not str()-coerced) and flagged as a repair → `test_apply_metadata_list_with_non_string_members_is_repaired`; clean string lists are not flagged → `test_apply_metadata_clean_string_list_only_no_repair_flag`. ✓
 - Aggregate audit row, `fields` schema order, `tags_added` as new-members-introduced (set difference, not length delta) → Task 3 tests. ✓
