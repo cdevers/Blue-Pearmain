@@ -795,6 +795,9 @@ def cmd_index_legacy(args: argparse.Namespace) -> None:
     sys.path.insert(0, str(ROOT / "poller"))
     from db.db import Database
     from legacy_indexer import index_library
+    from poller.bp_logging import configure
+
+    configure("legacy-indexer", args.verbose)
 
     with open(args.config) as f:
         config = yaml.safe_load(f)
