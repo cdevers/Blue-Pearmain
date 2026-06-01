@@ -979,6 +979,9 @@ def cmd_match_legacy(args: argparse.Namespace) -> None:
             print(f"    auto_private : {counts['auto_private']}")
             print(f"  unchanged    : {counts['unchanged']}")
             print(f"  failed       : {counts['failed']} (rolled back and skipped)")
+            print(f"  metadata     : {counts['metadata_matched']} matched, "
+                  f"{counts['metadata_applied']} updated, "
+                  f"{counts['metadata_failed']} failed")
     finally:
         db.close()
 
