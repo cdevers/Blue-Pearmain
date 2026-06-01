@@ -422,6 +422,10 @@ class Database:
         if "bp_rating" not in existing:
             self.conn.execute("ALTER TABLE photos ADD COLUMN bp_rating INTEGER NOT NULL DEFAULT 0")
             self.conn.commit()
+        existing = {r[1] for r in self.conn.execute("PRAGMA table_info(photos)").fetchall()}
+        if "proposed_title" not in existing:
+            self.conn.execute("ALTER TABLE photos ADD COLUMN proposed_title TEXT")
+            self.conn.commit()
         pa_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(photo_albums)").fetchall()}
         if "removed_at" not in pa_cols:
             self.conn.execute("ALTER TABLE photo_albums ADD COLUMN removed_at TEXT")
