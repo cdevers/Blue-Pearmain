@@ -7629,6 +7629,7 @@ class TestCmdAll(unittest.TestCase):
             port=5173,
             debug=False,
             oneliner=False,
+            include_legacy=False,
         )
         base.update(kwargs)
         return argparse.Namespace(**base)
@@ -7749,6 +7750,75 @@ class TestCmdAll(unittest.TestCase):
         self.assertFalse(captured["scan"]["backfill"])
         self.assertTrue(captured["reconcile"]["fix"])
         self.assertFalse(captured["reconcile"]["apply_proposals"])
+
+    def test_include_legacy_flag_registered(self):
+        """--include-legacy appears in bp all --help."""
+        import subprocess
+
+        bp_path = str(Path(__file__).parent.parent / "bp")
+        r = subprocess.run(
+            [sys.executable, bp_path, "all", "--help"],
+            capture_output=True,
+            text=True,
+            cwd=str(Path(__file__).parent.parent),
+        )
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("--include-legacy", r.stdout)
+
+    def test_include_legacy_absent_legacy_steps_not_called(self):
+        """Without --include-legacy, cmd_index_legacy and cmd_match_legacy are never invoked."""
+        bp = self._import_bp()
+        legacy_called = []
+        orig_index, orig_match = bp.cmd_index_legacy, bp.cmd_match_legacy
+        bp.cmd_index_legacy = lambda a: legacy_called.append("index")
+        bp.cmd_match_legacy = lambda a: legacy_called.append("match")
+        originals = self._patch_steps(bp)
+        try:
+            bp.cmd_all(self._args())  # include_legacy defaults to False
+        finally:
+            self._restore(bp, originals)
+            bp.cmd_index_legacy, bp.cmd_match_legacy = orig_index, orig_match
+        self.assertEqual(legacy_called, [])
+
+    def test_include_legacy_steps_ordered_after_pipeline_before_reconcile(self):
+        """With --include-legacy, index-legacy runs after pipeline, match-legacy runs
+        after index-legacy, and both run before reconcile."""
+        bp = self._import_bp()
+        called = []
+
+        def rec(label):
+            return lambda a: called.append(label)
+
+        orig_index, orig_match = bp.cmd_index_legacy, bp.cmd_match_legacy
+        bp.cmd_index_legacy = rec("index_legacy")
+        bp.cmd_match_legacy = rec("match_legacy")
+        originals = self._patch_steps(
+            bp,
+            {
+                "cmd_scan": rec("scan"),
+                "cmd_poll": rec("poll"),
+                "cmd_thumbs": rec("thumbs"),
+                "cmd_sync_names_from_flickr": rec("sync_names"),
+                "cmd_pipeline": rec("pipeline"),
+                "cmd_reconcile": rec("reconcile"),
+                "cmd_sync_albums": rec("sync_albums"),
+                "cmd_sync_album_collections": rec("sync_album_collections"),
+                "cmd_checkpoint": rec("checkpoint"),
+            },
+        )
+        try:
+            bp.cmd_all(self._args(include_legacy=True))
+        finally:
+            self._restore(bp, originals)
+            bp.cmd_index_legacy, bp.cmd_match_legacy = orig_index, orig_match
+
+        pipeline_pos = called.index("pipeline")
+        index_pos = called.index("index_legacy")
+        match_pos = called.index("match_legacy")
+        reconcile_pos = called.index("reconcile")
+        self.assertGreater(index_pos, pipeline_pos, "index-legacy must follow pipeline")
+        self.assertGreater(match_pos, index_pos, "match-legacy must follow index-legacy")
+        self.assertLess(match_pos, reconcile_pos, "match-legacy must precede reconcile")
 
 
 class TestCheckpoint(unittest.TestCase):
