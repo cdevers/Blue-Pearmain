@@ -19,7 +19,9 @@
 - `db/db.py` — **modify.** Add module-level `_decode_proposed_tags(raw) -> (list, bool)`; add guarded `proposed_title` ALTER in `_ensure_schema`; add method `apply_legacy_metadata(...)` next to `reclassify_legacy_match`.
 - `poller/legacy_apply.py` — **modify.** Import the new helpers; add the metadata step + `metadata_matched`/`metadata_applied`/`metadata_failed` counts in `apply_legacy_matches`.
 - `bp` — **modify.** Print the three new count lines in `cmd_match_legacy`'s `--apply` branch.
-- `tests/test_legacy_tag_propagation.py` — **create.** All new tests.
+- `tests/test_legacy_match_metadata.py` — **create.** Task 1 tests (payload + trigger; pure layer).
+- `tests/test_db_apply_legacy_metadata.py` — **create.** Tasks 2–3 tests (column + decode helper + merge/persist).
+- `tests/test_match_legacy_metadata_apply.py` — **create.** Task 4 tests (orchestration).
 - `README.md` — **modify.** Note the new propagation behaviour.
 
 ---
@@ -28,11 +30,11 @@
 
 **Files:**
 - Modify: `poller/legacy_match.py` (import at line 27; new functions after `format_legacy_trigger`, ~line 199)
-- Test: `tests/test_legacy_tag_propagation.py` (create)
+- Test: `tests/test_legacy_match_metadata.py` (create)
 
 - [ ] **Step 1: Create the test file with the standard header and the payload tests**
 
-Create `tests/test_legacy_tag_propagation.py`:
+Create `tests/test_legacy_match_metadata.py`:
 
 ```python
 # tests/test_legacy_tag_propagation.py
@@ -107,11 +109,21 @@ def test_payload_whitespace_only_scalars_become_none():
     )
     assert out["title"] is None                   # whitespace-only stripped to None
     assert out["description"] is None
+
+
+def test_payload_confident_multi_asset_raises():
+    """CONFIDENT is contracted to exactly one matched asset; assert fires if violated."""
+    import pytest
+    from legacy_match import CONFIDENT, legacy_metadata_payload
+
+    a = {"keywords": "[]", "labels": "[]", "title": "", "description": None}
+    with pytest.raises(AssertionError, match="CONFIDENT must return exactly one"):
+        legacy_metadata_payload(CONFIDENT, [a, a])
 ```
 
 - [ ] **Step 2: Run the payload tests to verify they fail**
 
-Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py -q`
+Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_match_metadata.py -q`
 Expected: FAIL with `ImportError: cannot import name 'legacy_metadata_payload'`.
 
 - [ ] **Step 3: Add the `propose_tags` import**
@@ -159,11 +171,13 @@ def legacy_metadata_payload(tier: str, matched_assets: list[dict]) -> dict:
     if not tag_sets:
         tags: set = set()
     elif tier == CONFIDENT:
-        # Contract (classify_match): CONFIDENT => exactly one matched asset, so
-        # tag_sets[0] is the whole match. If a future classifier ever returns
-        # CONFIDENT with >1 asset, we INTENTIONALLY use only the first here
-        # rather than silently switching to intersection — do not "fix" this to
-        # iterate; revisit the classifier contract instead.
+        # Contract enforcement: classify_match guarantees exactly one matched
+        # asset under CONFIDENT. Assert it so a future classifier regression
+        # is loud immediately rather than silently using only the first of N.
+        assert len(matched_assets) == 1, (
+            f"classify_match contract violation: CONFIDENT must return exactly "
+            f"one matched asset, got {len(matched_assets)}"
+        )
         tags = tag_sets[0]
     else:
         tags = set.intersection(*tag_sets)
@@ -180,12 +194,12 @@ def legacy_metadata_payload(tier: str, matched_assets: list[dict]) -> dict:
 
 - [ ] **Step 5: Run the payload tests to verify they pass**
 
-Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py -q`
-Expected: PASS (6 tests).
+Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_match_metadata.py -q`
+Expected: PASS (7 tests — 6 payload + 1 assertion-enforcement).
 
 - [ ] **Step 6: Add the trigger tests**
 
-Append to `tests/test_legacy_tag_propagation.py`:
+Append to `tests/test_legacy_match_metadata.py`:
 
 ```python
 def test_metadata_trigger_confident_names_asset():
@@ -209,7 +223,7 @@ def test_metadata_trigger_ambiguous_records_count_not_uuid():
 
 - [ ] **Step 7: Run the trigger tests to verify they fail**
 
-Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py -q`
+Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_match_metadata.py -q`
 Expected: FAIL with `ImportError: cannot import name 'format_legacy_metadata_trigger'`.
 
 - [ ] **Step 8: Implement `format_legacy_metadata_trigger`**
@@ -231,21 +245,22 @@ def format_legacy_metadata_trigger(
 
 - [ ] **Step 9: Run all Task 1 tests to verify they pass**
 
-Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py -q`
-Expected: PASS (8 tests).
+Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_match_metadata.py -q`
+Expected: PASS (9 tests — 7 payload + 2 trigger).
 
 - [ ] **Step 10: Lint and commit**
 
 ```bash
 cd "/Users/cdevers/Documents/GitHub/Blue Pearmain"
 make lint
-git add poller/legacy_match.py tests/test_legacy_tag_propagation.py
+git add poller/legacy_match.py tests/test_legacy_match_metadata.py
 git commit -m "$(cat <<'EOF'
 feat(#168): derive legacy metadata payload + audit trigger
 
 Pure legacy_metadata_payload (confident=single asset tags, ambiguous=tag
 intersection, scalars confident-only) and format_legacy_metadata_trigger
-(asset uuid for confident, candidate count for ambiguous).
+(asset uuid for confident, candidate count for ambiguous). Adds
+AssertionError on CONFIDENT with >1 asset (contract enforcement).
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 EOF
@@ -259,7 +274,7 @@ EOF
 **Files:**
 - Modify: `db/schema.sql:91` (next to `proposed_description`)
 - Modify: `db/db.py` `_ensure_schema` (additive block ~line 410, after the `bp_rating` guard ~line 424)
-- Test: `tests/test_legacy_tag_propagation.py`
+- Test: `tests/test_db_apply_legacy_metadata.py` (create)
 
 > **Note — column order differs by DB age:** on a *fresh* DB, `schema.sql` puts
 > `proposed_title` adjacent to `proposed_description`; on a *migrated* DB the
@@ -268,11 +283,32 @@ EOF
 > assume positional column order or rely on `SELECT *` ordering. This matches
 > every other additive column in `_ensure_schema`.
 
+> **Note — PRAGMA re-fetch pattern:** the existing `_ensure_schema` already
+> issues `PRAGMA table_info(photos)` independently for each column guard (lines
+> 411, 417, 421 today). There is no shared cache variable to reuse; the per-guard
+> re-fetch is the established codebase idiom. The proposed `proposed_title` guard
+> follows it. A future cleanup could collapse all `photos`-column guards into one
+> fetch, but that is out of scope for this PR.
+
 - [ ] **Step 1: Write the failing test**
 
-Append to `tests/test_legacy_tag_propagation.py`:
+Create `tests/test_db_apply_legacy_metadata.py`:
 
 ```python
+# tests/test_db_apply_legacy_metadata.py
+from __future__ import annotations
+
+import json
+import sqlite3
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "poller"))
+
+
 def test_photos_table_has_proposed_title_column():
     from db.db import Database
 
@@ -286,7 +322,7 @@ def test_photos_table_has_proposed_title_column():
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py::test_photos_table_has_proposed_title_column -q`
+Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_db_apply_legacy_metadata.py::test_photos_table_has_proposed_title_column -q`
 Expected: FAIL — `assert 'proposed_title' in cols` (column absent).
 
 - [ ] **Step 3: Add the column to schema.sql**
@@ -313,7 +349,7 @@ In `db/db.py`, in `_ensure_schema`, after the `bp_rating` guard (the block endin
 
 - [ ] **Step 5: Run the test to verify it passes**
 
-Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py::test_photos_table_has_proposed_title_column -q`
+Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_db_apply_legacy_metadata.py::test_photos_table_has_proposed_title_column -q`
 Expected: PASS.
 
 - [ ] **Step 6: Lint and commit**
@@ -321,7 +357,7 @@ Expected: PASS.
 ```bash
 cd "/Users/cdevers/Documents/GitHub/Blue Pearmain"
 make lint
-git add db/schema.sql db/db.py tests/test_legacy_tag_propagation.py
+git add db/schema.sql db/db.py tests/test_db_apply_legacy_metadata.py
 git commit -m "$(cat <<'EOF'
 feat(#168): add proposed_title staging column
 
@@ -338,12 +374,12 @@ EOF
 ## Task 3: `db.apply_legacy_metadata` + decode helper
 
 **Files:**
-- Modify: `db/db.py` — module-level `_decode_proposed_tags` (near `_json_loads_safe` ~line 44); method `apply_legacy_metadata` after `reclassify_legacy_match` (~line 618)
-- Test: `tests/test_legacy_tag_propagation.py`
+- Modify: `db/db.py` — module-level `_canonical_tag_list` + `_decode_proposed_tags` (near `_json_loads_safe` ~line 44); method `apply_legacy_metadata` after `reclassify_legacy_match` (~line 618)
+- Test: `tests/test_db_apply_legacy_metadata.py`
 
 - [ ] **Step 1: Write the failing tests (merge, scalars, idempotency, malformed, audit, atomicity)**
 
-Append to `tests/test_legacy_tag_propagation.py`:
+Append to `tests/test_db_apply_legacy_metadata.py`:
 
 ```python
 def _meta_db():
@@ -606,33 +642,53 @@ def test_apply_metadata_rolls_back_when_audit_insert_fails():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py -q -k apply_metadata`
+Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_db_apply_legacy_metadata.py -q -k apply_metadata`
 Expected: FAIL — `AttributeError: 'Database' object has no attribute 'apply_legacy_metadata'`.
 
-- [ ] **Step 3: Add the `_decode_proposed_tags` module helper**
+- [ ] **Step 3: Add the `_canonical_tag_list` module helper**
 
 In `db/db.py`, directly after `_json_loads_safe` (ends ~line 43), add:
+
+```python
+def _canonical_tag_list(tags: "Iterable[object]") -> list[str]:
+    """Return the canonical stored form of a tag collection: sorted, de-duped
+    list of stripped, non-blank strings. Non-strings are dropped (not
+    str()-coerced). This is the single authoritative definition of canonical
+    used by both _decode_proposed_tags (reader) and apply_legacy_metadata
+    (writer), so both paths stay in sync.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in tags:
+        if isinstance(item, str):
+            s = item.strip()
+            if s and s not in seen:
+                seen.add(s)
+                result.append(s)
+    return sorted(result)
+```
+
+- [ ] **Step 4: Add the `_decode_proposed_tags` module helper**
+
+In `db/db.py`, directly after `_canonical_tag_list`, add:
 
 ```python
 def _decode_proposed_tags(raw: str | None) -> tuple[list[str], bool]:
     """Decode a stored proposed_tags JSON string to (tags, was_malformed).
 
-    Canonical stored form is a SORTED, de-duplicated list of stripped, non-blank
-    strings — the exact shape apply_legacy_metadata writes (it always stores
-    sorted(set(...))). Returns that canonical list plus was_malformed=True iff
-    the raw decoded value was not already canonical, so any non-canonical row is
-    rewritten ("repaired") on the next write:
+    Canonical stored form is defined by _canonical_tag_list (sorted,
+    de-duplicated, stripped, non-blank strings). Returns that canonical list
+    plus was_malformed=True iff the raw decoded value was not already
+    canonical, so any non-canonical row is rewritten ("repaired") on the
+    next write:
       - NULL/blank     -> ([], False)
       - decode error   -> ([], True)
       - non-list JSON  -> ([], True)   (bare string, dict, number)
-      - list with junk -> drop non-strings, strip strings, drop blanks, de-dupe,
-                          sort; flag True if anything was dropped/trimmed/
-                          de-duped/re-ordered.
-    We do NOT str()-coerce non-strings (that would turn None into the tag
-    "none"). Non-string, whitespace, blank, duplicate, AND order deviations all
-    count as repair, so tags_repaired is one honest signal that means exactly
-    "the stored value did not match the canonical sorted form". Helper and
-    writer therefore share one definition of canonical (sorted).
+      - list with junk -> canonicalize via _canonical_tag_list; flag True if
+                          anything was dropped/trimmed/de-duped/re-ordered.
+    Non-string, whitespace, blank, duplicate, AND order deviations all count
+    as repair, so tags_repaired is one honest signal: "stored value did not
+    match the canonical sorted form".
     """
     if not raw:
         return [], False
@@ -642,17 +698,11 @@ def _decode_proposed_tags(raw: str | None) -> tuple[list[str], bool]:
         return [], True
     if not isinstance(val, list):
         return [], True
-    cleaned: list[str] = []
-    for item in val:
-        if isinstance(item, str):
-            s = item.strip()
-            if s and s not in cleaned:
-                cleaned.append(s)
-    cleaned.sort()
+    cleaned = _canonical_tag_list(val)
     return cleaned, cleaned != val
 ```
 
-- [ ] **Step 4: Implement `apply_legacy_metadata`**
+- [ ] **Step 5: Implement `apply_legacy_metadata`**
 
 In `db/db.py`, directly after the `reclassify_legacy_match` method (ends ~line 617, before the `# Star ratings` comment ~line 619), add:
 
@@ -671,8 +721,9 @@ In `db/db.py`, directly after the `reclassify_legacy_match` method (ends ~line 6
         Contract: add_tags must already be normalised (lowercased, de-duped,
         blocklist/remap applied) by the caller via analyzer.tagger.propose_tags.
         db.py deliberately does NOT import analyzer (frozen ownership boundary:
-        analyzer normalises, db merges/persists). The set-union below de-dupes
-        and drops empty strings, but does not re-normalise.
+        analyzer normalises, db merges/persists). The merge uses
+        _canonical_tag_list (shared with _decode_proposed_tags) so writer and
+        reader agree on one definition of canonical form.
 
         proposed_tags: set-union of add_tags into the photo's existing tags
         (decoded via _decode_proposed_tags; non-list/malformed values are
@@ -696,7 +747,7 @@ In `db/db.py`, directly after the `reclassify_legacy_match` method (ends ~line 6
             (photo_id,),
         ).fetchone()
         current, malformed = _decode_proposed_tags(row["proposed_tags"])
-        merged = sorted(set(current) | {t for t in add_tags if t})
+        merged = _canonical_tag_list(list(current) + list(add_tags))
         tags_changed = merged != current or malformed
 
         # Scalar hygiene at the persistence boundary: treat whitespace-only
@@ -765,23 +816,25 @@ In `db/db.py`, directly after the `reclassify_legacy_match` method (ends ~line 6
         return True
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py -q -k apply_metadata`
+Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_db_apply_legacy_metadata.py -q -k apply_metadata`
 Expected: PASS (16 tests).
 
-- [ ] **Step 6: Lint and commit**
+- [ ] **Step 7: Lint and commit**
 
 ```bash
 cd "/Users/cdevers/Documents/GitHub/Blue Pearmain"
 make lint
-git add db/db.py tests/test_legacy_tag_propagation.py
+git add db/db.py tests/test_db_apply_legacy_metadata.py
 git commit -m "$(cat <<'EOF'
 feat(#168): db.apply_legacy_metadata — merge tags, fill scalars, audit
 
+_canonical_tag_list defines one shared canonical form (sorted, de-duped,
+stripped) used by both _decode_proposed_tags and apply_legacy_metadata.
 Set-union proposed_tags (repair-in-place for malformed rows, tags_repaired
 audit flag), fill empty proposed_title/proposed_description, one aggregate
-operation_log row per write in a single txn. Adds _decode_proposed_tags.
+operation_log row per write in a single txn.
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 EOF
@@ -794,7 +847,7 @@ EOF
 
 **Files:**
 - Modify: `poller/legacy_apply.py` (imports ~line 16; counts dict ~line 59; per-photo loop ~line 67)
-- Test: `tests/test_legacy_tag_propagation.py`
+- Test: `tests/test_match_legacy_metadata_apply.py` (create)
 
 > **Design note — intentional non-atomicity (do not "fix"):** privacy demotion
 > (`reclassify_legacy_match`, txn 1) and metadata propagation
@@ -810,9 +863,30 @@ EOF
 
 - [ ] **Step 1: Write the failing orchestration tests**
 
-Append to `tests/test_legacy_tag_propagation.py`:
+Create `tests/test_match_legacy_metadata_apply.py`:
 
 ```python
+# tests/test_match_legacy_metadata_apply.py
+from __future__ import annotations
+
+import json
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "poller"))
+
+
+def _logs(db, pid=1):
+    return db.conn.execute(
+        "SELECT operation, target, old_value, new_value, trigger, actor "
+        "FROM operation_log WHERE photo_id = ? ORDER BY id",
+        (pid,),
+    ).fetchall()
+
+
 def _orch_db_168():
     """Database with operation_log + legacy_index migrations and a legacy library."""
     from db.db import Database
@@ -1027,7 +1101,7 @@ def test_orch_demotion_failure_does_not_block_metadata(monkeypatch):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py -q -k orch`
+Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_match_legacy_metadata_apply.py -q -k orch`
 Expected: FAIL with `KeyError: 'metadata_matched'`.
 
 - [ ] **Step 3: Add the new imports**
@@ -1132,6 +1206,10 @@ The demotion path uses `continue` on success-counting. The metadata step must ru
         # `decision is None` covers BOTH no-match and matched-but-not-demoted, so
         # it can't tell us whether to propagate. classify_match is pure and cheap,
         # and recomputing keeps #166's resolve_apply_decision untouched.
+        # Consistency is guaranteed because both classify_match and
+        # resolve_apply_decision are pure functions over the same (photo,
+        # candidates) inputs — the recomputation always produces the same tier
+        # and matched list as the earlier call inside resolve_apply_decision.
         tier, matched = classify_match(photo, candidates)
         if matched:
             counts["metadata_matched"] += 1
@@ -1218,7 +1296,7 @@ now live inside the `if decision is not None:` block (move them there if Step 5'
 
 - [ ] **Step 7: Run the new orchestration tests to verify they pass**
 
-Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_tag_propagation.py -q -k orch`
+Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_match_legacy_metadata_apply.py -q -k orch`
 Expected: PASS (8 tests).
 
 - [ ] **Step 8: Run the full #166 apply suite to confirm no regression**
@@ -1231,7 +1309,7 @@ Expected: PASS (all existing tests — the new counts keys are additive; existin
 ```bash
 cd "/Users/cdevers/Documents/GitHub/Blue Pearmain"
 make lint
-git add poller/legacy_apply.py tests/test_legacy_tag_propagation.py
+git add poller/legacy_apply.py tests/test_match_legacy_metadata_apply.py
 git commit -m "$(cat <<'EOF'
 feat(#168): propagate legacy metadata in apply_legacy_matches
 
@@ -1306,10 +1384,17 @@ In `README.md`, find the `match-legacy` / `--apply` description (~lines 196-198)
   review-staging fields only; nothing is pushed to Flickr.
 ```
 
+> **Naming note (item 6):** The canonical count names are defined once in the Task 4 semantics
+> section (`metadata_matched`, `metadata_applied`, `metadata_failed`) with their CLI labels
+> ("matched", "updated", "failed"). Do not introduce variant spellings or aliases in README
+> prose — use the CLI labels as written and do not restate the key names.
+
 - [ ] **Step 2: Run the full test suite**
 
 Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/ -q`
-Expected: PASS — the entire suite green (previous baseline was 1697; this adds the new `test_legacy_tag_propagation.py` cases).
+Expected: PASS — the entire suite green (previous baseline was 1697; this adds the new
+`test_legacy_match_metadata.py`, `test_db_apply_legacy_metadata.py`, and
+`test_match_legacy_metadata_apply.py` cases).
 
 - [ ] **Step 3: Final lint**
 
@@ -1342,7 +1427,7 @@ gh pr create --title "feat(#168): propagate legacy keywords/tags into matched ph
 - No Flickr writes. Closes #168.
 
 ## Test plan
-- [ ] `python -m pytest tests/ -q` green
+- [ ] `python -m pytest tests/ -q` green (adds `test_legacy_match_metadata.py`, `test_db_apply_legacy_metadata.py`, `test_match_legacy_metadata_apply.py`)
 - [ ] `make lint` clean
 - [ ] `bp match-legacy --apply` summary shows the metadata line
 EOF
@@ -1361,16 +1446,16 @@ EOF
 - Keywords + labels via `propose_tags` → Task 1 (payload), `test_payload_applies_label_blocklist_and_remap`. ✓
 - Confident = single-asset tags; ambiguous = intersection → Task 1 tests. ✓
 - Title/description confident-only, fill-if-empty, whitespace=empty → Task 1 (None for ambiguous; `whitespace_only_scalars_become_none`), Task 3 (`does_not_clobber`, `whitespace_existing`, `whitespace_incoming_scalar_is_not_staged`, `stores_stripped_scalar`). DB layer strips incoming scalars defensively (stdlib only, no analyzer coupling). ✓
-- Tag normalization is the caller's contract (analyzer.tagger.propose_tags); db.py does not re-normalize/import analyzer — documented in `apply_legacy_metadata` docstring; the set-union de-dupes and drops empties. ✓
+- Tag normalization is the caller's contract (analyzer.tagger.propose_tags); db.py does not re-normalize/import analyzer — documented in `apply_legacy_metadata` docstring; `_canonical_tag_list` is the single shared definition of canonical form used by both `_decode_proposed_tags` and `apply_legacy_metadata`. ✓
 - End-to-end ambiguous intersection merged with existing tags + idempotent → Task 4 (`ambiguous_intersection_merges_with_existing_tags_idempotent`); ambiguous with zero shared tags is a no-op (matched but not applied, no audit row, no scalar) → `ambiguous_zero_shared_tags_is_noop`. ✓
 - Count semantics (`metadata_matched` = matched count, CLI "matched"; not DB-mutation count; key renamed to match the CLI label) documented in Task 4 and kept aligned with CLI/README wording. ✓
 - Intentional non-atomicity between privacy demotion (txn 1) and metadata propagation (txn 2) documented in prose at the head of Task 4 (not only in tests). ✓
 - Column-order divergence between fresh `schema.sql` and migrated (appended) `proposed_title` noted in Task 2; code/tests reference columns by name only. ✓
 - `proposed_title` via schema.sql + inline guard → Task 2. ✓
-- DB-layer merge, no analyzer import, JSON decode/coerce, malformed repair + `tags_repaired` → Task 3 (`_decode_proposed_tags`, repair tests). Canonical stored form = **sorted**, de-duped list of stripped non-blank strings — the same shape the writer emits, so helper and writer agree on one definition; non-strings dropped (not str()-coerced), whitespace trimmed, blanks dropped, duplicates collapsed, order normalised — all flagged as repair via one honest `tags_repaired` signal → `..._list_with_non_string_members_is_repaired`, `..._dedupes_duplicate_historical_tags`, `..._strips_whitespace_in_stored_tags`; clean sorted lists not flagged → `..._clean_string_list_only_no_repair_flag`. ✓
+- DB-layer merge, no analyzer import, JSON decode/coerce, malformed repair + `tags_repaired` → Task 3 (`_canonical_tag_list` + `_decode_proposed_tags`, repair tests). Canonical stored form = **sorted**, de-duped list of stripped non-blank strings defined once in `_canonical_tag_list` and used by both the reader and writer; non-strings dropped (not str()-coerced), whitespace trimmed, blanks dropped, duplicates collapsed, order normalised — all flagged as repair via one honest `tags_repaired` signal → `..._list_with_non_string_members_is_repaired`, `..._dedupes_duplicate_historical_tags`, `..._strips_whitespace_in_stored_tags`; clean sorted lists not flagged → `..._clean_string_list_only_no_repair_flag`. ✓
 - Aggregate audit row, `fields` schema order, `tags_added` as new-members-introduced (set difference, not length delta), absent keys omitted (no JSON null) → Task 3 tests (`..._audit_new_value_omits_absent_keys`). ✓
 - read→compute→write isolation documented as safe under BP's single-writer CLI model (write itself atomic) → `apply_legacy_metadata` docstring. ✓
-- CONFIDENT tag selection (`tag_sets[0]`) documents that extra confident candidates are intentionally ignored, guarding against a future "fix" → Task 1 inline comment. ✓
+- CONFIDENT contract assertion (`assert len(matched_assets) == 1`) enforces the classify_match contract at the function boundary; the assertion fires loudly rather than silently using only the first of N → Task 1 Step 4 + `test_payload_confident_multi_asset_raises`. ✓
 - Two independent writes; `reclassify_legacy_match` untouched; demotion failure does not block metadata → Task 4 (`demoted_..._reclassified_and_tagged`, `demotion_failure_does_not_block_metadata`, separate try/except blocks). ✓
 - `legacy_metadata_payload` branches on tier explicitly (CONFIDENT → single asset, AMBIGUOUS → intersection) — not reliant on confident-implies-cardinality-1 → Task 1. ✓
 - All matched photos (demoted or not) → Task 4 (`matched_not_demoted` test; restructured loop drops the `continue`). ✓
@@ -1381,6 +1466,20 @@ EOF
 
 **2. Placeholder scan:** No TBD/TODO; every code step has complete code; every test has assertions. ✓
 
-**3. Type consistency:** `legacy_metadata_payload(tier, matched_assets) -> {add_tags, title, description}` consistent across Tasks 1 & 4. `format_legacy_metadata_trigger(tier, matched_assets, classifier_version)` consistent. `apply_legacy_metadata(photo_id, *, add_tags, title, description, trigger) -> bool` consistent across Tasks 3 & 4. `_decode_proposed_tags(raw) -> (list, bool)` consistent. ✓
+**3. Type consistency:** `legacy_metadata_payload(tier, matched_assets) -> {add_tags, title, description}` consistent across Tasks 1 & 4. `format_legacy_metadata_trigger(tier, matched_assets, classifier_version)` consistent. `apply_legacy_metadata(photo_id, *, add_tags, title, description, trigger) -> bool` consistent across Tasks 3 & 4. `_canonical_tag_list(tags) -> list[str]` consistent. `_decode_proposed_tags(raw) -> (list, bool)` consistent. ✓
+
+**4. Test file layout:** Three per-layer files matching the repo convention:
+- `test_legacy_match_metadata.py` → pure layer (Task 1: payload + trigger)
+- `test_db_apply_legacy_metadata.py` → DB layer (Tasks 2–3: column + decode + merge)
+- `test_match_legacy_metadata_apply.py` → orchestration (Task 4)
+
+**5. Review items disposition:**
+- Item 1 (classify_match recomputation): kept as recompute (avoids modifying #166's API); purity/consistency comment added to Task 4 Step 5. ✓
+- Item 2 (tag canonicalization): `_canonical_tag_list` added as shared helper in Task 3. ✓
+- Item 3 (CONFIDENT assertion): `assert len(matched_assets) == 1` added to `legacy_metadata_payload`; assertion test added in Task 1. ✓
+- Item 4 (PRAGMA re-fetch): no existing cache in `_ensure_schema`; pattern is the established codebase idiom; noted in Task 2 Note. ✓
+- Item 5 (old_value=None): verified — no consumer parses `old_value` as JSON; field is TEXT nullable; None is already used by multiple operations. Safe. ✓
+- Item 6 (naming stability): naming note added to Task 6 Step 1. ✓
+- Item 7 (test file split): three files per reviewer's suggestion; matches repo's per-layer convention. ✓
 
 **Note for the implementer (Task 4):** the restructure of `apply_legacy_matches` is the one delicate step — the original code used `continue` after the `decision is None` and after the demotion write, which would skip the new metadata step. The plan removes both `continue`s and gates the demotion under `if decision is not None:`. Run the existing `tests/test_match_legacy_apply.py` (Task 4 Step 8) to confirm the #166 behaviour is preserved.
