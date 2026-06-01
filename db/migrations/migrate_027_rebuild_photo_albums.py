@@ -64,7 +64,12 @@ def run_on_conn(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_photo_albums_photo ON photo_albums(photo_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_photo_albums_album ON photo_albums(album_id)")
 
-    conn.execute("INSERT INTO schema_migrations (name) VALUES (?)", (MIGRATION_NAME,))
+    from datetime import datetime, timezone
+
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (name, applied_at) VALUES (?, ?)",
+        (MIGRATION_NAME, datetime.now(timezone.utc).isoformat()),
+    )
     conn.execute("COMMIT")
 
 
