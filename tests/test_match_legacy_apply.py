@@ -528,6 +528,9 @@ def test_apply_counts_contract_invariants():
         "auto_private",
         "unchanged",
         "failed",
+        "metadata_matched",
+        "metadata_applied",
+        "metadata_failed",
     }
     assert counts["eligible"] == 2
     assert counts["reclassified"] + counts["unchanged"] + counts["failed"] == counts["eligible"]
