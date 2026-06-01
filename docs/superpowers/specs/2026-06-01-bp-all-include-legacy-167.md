@@ -85,6 +85,8 @@ all: match-legacy --apply SKIPPED (no dry-run support) -- continuing
 
 **No config/path validation in dry-run:** the `_dry_run_skip` wrapper returns before the underlying function is called, so config reading, path resolution, and NAS availability are never checked. Dry-run describes intent without requiring the NAS to be mounted or `legacy_library.path` to be configured.
 
+**Step-result accounting for skipped steps:** SKIPPED steps are **not** added to `errors[]`, do not affect the error count, and do not appear in the final error summary line. They are emitted only as log lines. A run with only SKIPPED legacy steps exits 0 (same as a run where `--include-legacy` was absent). This means dashboards and automation that check the exit code or error summary will not interpret dry-run skips as failures. The log output is the only place a dry-run run is distinguishable from a non-legacy run.
+
 **Implementation:** introduce a `_dry_run_skip(name)` wrapper in `cmd_all` that logs the skip and returns without invoking the underlying function. Steps that have no read-only mode (index-legacy, match-legacy) use this wrapper; steps that have an existing dry-run mechanism (all current steps, which already receive `dry_run=True` via `_step_args`) continue as before.
 
 ---
@@ -97,6 +99,7 @@ all: match-legacy --apply SKIPPED (no dry-run support) -- continuing
 - A failed mid-run `index-legacy` provides a **no-destructive-partial-failure guarantee**: rows are upserted incrementally during iteration, so an interruption may leave a partially-refreshed index (some assets updated, none yet deleted), but the authoritative reconciliation/deletion pass in `index_library` only executes after a successful full iteration (see `legacy_indexer.py:205–206`). No existing `legacy_assets` rows are lost on failure.
 - `match-legacy --apply` is read-only with respect to `legacy_assets`; it only writes to `photos` and `operation_log`.
 - **Freshness caveat:** match results may reflect the most recently successfully indexed state, not necessarily current NAS contents. If the library has changed since the last successful index, the match step operates on stale data until the next successful `index-legacy` run.
+- **Operator signal for stale runs:** when `index-legacy` is in `errors[]` at the point `match-legacy --apply` is about to run, `cmd_all` emits an explicit warning **before** dispatching the match step: `all: WARNING index-legacy failed — match-legacy --apply will use the last successfully indexed state`. This prevents a successful match step from being mistaken for a fully fresh legacy refresh. Implementation: after building the steps list, `cmd_all` checks `"index-legacy" in errors` inside the loop, just before calling `cmd_match_legacy`. This is the only place in the sequence where a step inspects prior step outcomes.
 
 If `legacy_library.path` is absent from `config.yml`, both steps fail: `index-legacy` exits code 2 (caught), then `match-legacy --apply` exits because no indexed library exists (caught). Both appear in the errors summary; other steps continue.
 
@@ -136,7 +139,8 @@ File: `tests/test_cli_all.py` (new or existing — check for the file)
 1. **Ordering — `--include-legacy` absent**: legacy steps not in the sequence; existing step order unchanged.
 2. **Ordering — `--include-legacy` present**: `index-legacy` and `match-legacy --apply` appear after `pipeline` and before `reconcile`.
 3. **Dry-run with `--include-legacy`**: both legacy steps are in the sequence but are skipped (no step function called; log contains "SKIPPED").
-4. **Failure sequencing**: `cmd_index_legacy` raises `SystemExit(1)` (monkeypatched) → error recorded in `errors[]` → `cmd_match_legacy` is still called → subsequent steps (`reconcile`, etc.) still run. This is the primary behavioral contract of the feature.
+4. **Failure sequencing**: `cmd_index_legacy` raises `SystemExit(1)` (monkeypatched) → error recorded in `errors[]` → stale-index warning logged → `cmd_match_legacy` is still called → subsequent steps (`reconcile`, etc.) still run. This is the primary behavioral contract of the feature.
+5. **Interruption + convergence (integration test)**: seed a DB with a handful of legacy assets and candidate_public photos; run `index_library` but raise an exception partway through (simulating a partial index); then run `bp all --include-legacy` end-to-end against the partially-indexed DB; assert the final DB state matches what a full uninterrupted run would have produced (same reclassified photos, same proposed_tags). This proves the no-destructive-partial-failure guarantee and the idempotent convergence in combination. Lives in the same test file as the other `bp all` tests; uses monkeypatching to inject the mid-index exception.
 
 ---
 
