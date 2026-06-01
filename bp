@@ -1026,32 +1026,61 @@ def cmd_all(args):
 
     include_legacy = getattr(args, "include_legacy", False)
     if include_legacy:
-        # Locate "pipeline" in the already-built steps list; insert legacy
-        # steps immediately after it (before reconcile).
+        # _dry_run_skip_fn: returns a no-op that logs SKIPPED and returns
+        # immediately, without calling the real step or touching config/NAS.
+        def _dry_run_skip_fn(step_name: str):
+            def _skipped(step_args):
+                log.info(
+                    "all: %s SKIPPED (no dry-run support) -- continuing",
+                    step_name,
+                )
+            return _skipped
+
         # "pipeline" is always present in the base steps list — StopIteration here is a programmer mistake
         pipeline_idx = next(
             i for i, (n, _, _) in enumerate(steps) if n == "pipeline"
         )
-        legacy_steps = [
-            (
-                "index-legacy",
-                cmd_index_legacy,
-                _step_args(args,
-                           library=None, no_thumbnails=False, limit=None,
-                           no_cache=False, refresh_cache=False),
-            ),
-            (
-                "match-legacy --apply",
-                cmd_match_legacy,
-                _step_args(args, apply=True, library_uuid=None, csv=None),
-            ),
-        ]
+        if dry_run:
+            legacy_steps = [
+                (
+                    "index-legacy",
+                    _dry_run_skip_fn("index-legacy"),
+                    _step_args(args,
+                               library=None, no_thumbnails=False, limit=None,
+                               no_cache=False, refresh_cache=False),
+                ),
+                (
+                    "match-legacy --apply",
+                    _dry_run_skip_fn("match-legacy --apply"),
+                    _step_args(args, apply=True, library_uuid=None, csv=None),
+                ),
+            ]
+        else:
+            legacy_steps = [
+                (
+                    "index-legacy",
+                    cmd_index_legacy,
+                    _step_args(args,
+                               library=None, no_thumbnails=False, limit=None,
+                               no_cache=False, refresh_cache=False),
+                ),
+                (
+                    "match-legacy --apply",
+                    cmd_match_legacy,
+                    _step_args(args, apply=True, library_uuid=None, csv=None),
+                ),
+            ]
         for offset, step in enumerate(legacy_steps):
             steps.insert(pipeline_idx + 1 + offset, step)
 
     errors = []
 
     for name, fn, step_args in steps:
+        if name == "match-legacy --apply" and "index-legacy" in errors:
+            log.warning(
+                "all: WARNING index-legacy failed — "
+                "match-legacy --apply will use the last successfully indexed state"
+            )
         log.info("all: -> %s", name)
         try:
             fn(step_args)
