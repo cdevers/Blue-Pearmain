@@ -171,9 +171,11 @@ def legacy_metadata_payload(tier: str, matched_assets: list[dict]) -> dict:
     if not tag_sets:
         tags: set = set()
     elif tier == CONFIDENT:
-        # Contract enforcement: classify_match guarantees exactly one matched
-        # asset under CONFIDENT. Assert it so a future classifier regression
-        # is loud immediately rather than silently using only the first of N.
+        # Internal invariant (not user-input validation): classify_match
+        # guarantees exactly one matched asset under CONFIDENT. Assert it so
+        # a future classifier regression is loud immediately. BP does not run
+        # with python -O, and `assert` is the established idiom for internal
+        # invariants throughout the codebase (legacy_match, db.py, app.py).
         assert len(matched_assets) == 1, (
             f"classify_match contract violation: CONFIDENT must return exactly "
             f"one matched asset, got {len(matched_assets)}"
@@ -195,7 +197,7 @@ def legacy_metadata_payload(tier: str, matched_assets: list[dict]) -> dict:
 - [ ] **Step 5: Run the payload tests to verify they pass**
 
 Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_match_metadata.py -q`
-Expected: PASS (7 tests — 6 payload + 1 assertion-enforcement).
+Expected: PASS.
 
 - [ ] **Step 6: Add the trigger tests**
 
@@ -246,7 +248,7 @@ def format_legacy_metadata_trigger(
 - [ ] **Step 9: Run all Task 1 tests to verify they pass**
 
 Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_legacy_match_metadata.py -q`
-Expected: PASS (9 tests — 7 payload + 2 trigger).
+Expected: PASS.
 
 - [ ] **Step 10: Lint and commit**
 
@@ -651,11 +653,17 @@ In `db/db.py`, directly after `_json_loads_safe` (ends ~line 43), add:
 
 ```python
 def _canonical_tag_list(tags: "Iterable[object]") -> list[str]:
-    """Return the canonical stored form of a tag collection: sorted, de-duped
-    list of stripped, non-blank strings. Non-strings are dropped (not
-    str()-coerced). This is the single authoritative definition of canonical
-    used by both _decode_proposed_tags (reader) and apply_legacy_metadata
-    (writer), so both paths stay in sync.
+    """Return the canonical *storage shape* for a tag collection: sorted,
+    de-duped list of stripped, non-blank strings. Non-strings are dropped
+    (not str()-coerced).
+
+    Ownership boundary: this function handles storage shape ONLY (trim,
+    sort, dedupe, drop invalid types/blanks). It does NOT perform semantic
+    normalization (lowercase, remap "automobile"→"car", blocklist). Semantic
+    normalization is the caller's responsibility (analyzer.tagger.propose_tags
+    on the way in; db.py never imports analyzer). This is the single
+    authoritative definition shared by _decode_proposed_tags (reader) and
+    apply_legacy_metadata (writer) so both paths agree on canonical form.
     """
     seen: set[str] = set()
     result: list[str] = []
@@ -718,12 +726,13 @@ In `db/db.py`, directly after the `reclassify_legacy_match` method (ends ~line 6
     ) -> bool:
         """Stage propagated legacy metadata for one photo (one txn).
 
-        Contract: add_tags must already be normalised (lowercased, de-duped,
-        blocklist/remap applied) by the caller via analyzer.tagger.propose_tags.
-        db.py deliberately does NOT import analyzer (frozen ownership boundary:
-        analyzer normalises, db merges/persists). The merge uses
-        _canonical_tag_list (shared with _decode_proposed_tags) so writer and
-        reader agree on one definition of canonical form.
+        Two-level normalization boundary:
+          Semantic (caller's contract): add_tags must already be lowercased,
+            remapped, and blocklist-filtered via analyzer.tagger.propose_tags.
+            db.py does NOT import analyzer — that boundary is frozen.
+          Storage shape (db's job): _canonical_tag_list handles trim/sort/
+            dedupe/drop-invalid. Both the reader (_decode_proposed_tags) and
+            this writer use it, so they always agree on canonical form.
 
         proposed_tags: set-union of add_tags into the photo's existing tags
         (decoded via _decode_proposed_tags; non-list/malformed values are
@@ -819,7 +828,7 @@ In `db/db.py`, directly after the `reclassify_legacy_match` method (ends ~line 6
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_db_apply_legacy_metadata.py -q -k apply_metadata`
-Expected: PASS (16 tests).
+Expected: PASS.
 
 - [ ] **Step 7: Lint and commit**
 
@@ -1154,11 +1163,13 @@ Replace with:
     }
 ```
 
-**Count semantics (keep aligned with the CLI/README wording in Tasks 5–6):**
+**Count semantics:**
 - `metadata_matched` = photos with a legacy match (CLI label: **"matched"**). A confident/ambiguous match always increments it, even if the resulting payload is empty (e.g. ambiguous with no shared tags) and the DB write ends up a no-op. The internal key name deliberately matches the CLI label to avoid the "attempted vs matched" cognitive gap.
 - `metadata_applied` = photos where `apply_legacy_metadata` actually changed something (returned True). The CLI labels this **"updated"**.
 - `metadata_failed` = photos where the metadata write raised (CLI: **"failed"**).
 So `metadata_matched` is a match count, not a DB-mutation count; `applied + (no-op) + failed == matched`.
+
+The CLI labels ("matched", "updated", "failed") are **presentation details** chosen for user readability. The internal dict keys (`metadata_matched`, `metadata_applied`, `metadata_failed`) are **implementation details**. They happen to be aligned intentionally to reduce cognitive load, but they are separate concerns — a future rename of one does not require renaming the other.
 
 - [ ] **Step 5: Add the metadata step in the per-photo loop**
 
@@ -1297,7 +1308,7 @@ now live inside the `if decision is not None:` block (move them there if Step 5'
 - [ ] **Step 7: Run the new orchestration tests to verify they pass**
 
 Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/test_match_legacy_metadata_apply.py -q -k orch`
-Expected: PASS (8 tests).
+Expected: PASS.
 
 - [ ] **Step 8: Run the full #166 apply suite to confirm no regression**
 
@@ -1392,9 +1403,7 @@ In `README.md`, find the `match-legacy` / `--apply` description (~lines 196-198)
 - [ ] **Step 2: Run the full test suite**
 
 Run: `cd "/Users/cdevers/Documents/GitHub/Blue Pearmain" && python -m pytest tests/ -q`
-Expected: PASS — the entire suite green (previous baseline was 1697; this adds the new
-`test_legacy_match_metadata.py`, `test_db_apply_legacy_metadata.py`, and
-`test_match_legacy_metadata_apply.py` cases).
+Expected: entire suite green.
 
 - [ ] **Step 3: Final lint**
 
@@ -1473,13 +1482,8 @@ EOF
 - `test_db_apply_legacy_metadata.py` → DB layer (Tasks 2–3: column + decode + merge)
 - `test_match_legacy_metadata_apply.py` → orchestration (Task 4)
 
-**5. Review items disposition:**
-- Item 1 (classify_match recomputation): kept as recompute (avoids modifying #166's API); purity/consistency comment added to Task 4 Step 5. ✓
-- Item 2 (tag canonicalization): `_canonical_tag_list` added as shared helper in Task 3. ✓
-- Item 3 (CONFIDENT assertion): `assert len(matched_assets) == 1` added to `legacy_metadata_payload`; assertion test added in Task 1. ✓
-- Item 4 (PRAGMA re-fetch): no existing cache in `_ensure_schema`; pattern is the established codebase idiom; noted in Task 2 Note. ✓
-- Item 5 (old_value=None): verified — no consumer parses `old_value` as JSON; field is TEXT nullable; None is already used by multiple operations. Safe. ✓
-- Item 6 (naming stability): naming note added to Task 6 Step 1. ✓
-- Item 7 (test file split): three files per reviewer's suggestion; matches repo's per-layer convention. ✓
+**5. Verified non-obvious decisions (for future maintainers):**
+- PRAGMA re-fetch in `_ensure_schema`: not a bug. There is no existing cache variable to reuse; each additive-column guard issues its own `PRAGMA table_info(photos)` — this is the established codebase idiom throughout `_ensure_schema`. Future cleanup could collapse all `photos`-column guards into one fetch, but that is a separate refactor.
+- `old_value=None` in `apply_legacy_metadata` operation_log row: verified safe. Every existing `operation_log` consumer (`app.py`, `tag_writeback.py`, `proposal_applier.py`, `reconcile.py`) treats `old_value` as TEXT nullable — plain string or None. No consumer parses it as JSON. The new operation type introduces `None` consistently with the existing pattern.
 
 **Note for the implementer (Task 4):** the restructure of `apply_legacy_matches` is the one delicate step — the original code used `continue` after the `decision is None` and after the demotion write, which would skip the new metadata step. The plan removes both `continue`s and gates the demotion under `if decision is not None:`. Run the existing `tests/test_match_legacy_apply.py` (Task 4 Step 8) to confirm the #166 behaviour is preserved.
