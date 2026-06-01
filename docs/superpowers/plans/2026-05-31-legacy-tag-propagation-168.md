@@ -173,9 +173,9 @@ def legacy_metadata_payload(tier: str, matched_assets: list[dict]) -> dict:
     elif tier == CONFIDENT:
         # Internal invariant (not user-input validation): classify_match
         # guarantees exactly one matched asset under CONFIDENT. Assert it so
-        # a future classifier regression is loud immediately. BP does not run
-        # with python -O, and `assert` is the established idiom for internal
-        # invariants throughout the codebase (legacy_match, db.py, app.py).
+        # a future classifier regression is loud immediately. `assert` is the
+        # established codebase idiom for internal invariants (legacy_match,
+        # db.py, app.py); the project currently does not run under python -O.
         assert len(matched_assets) == 1, (
             f"classify_match contract violation: CONFIDENT must return exactly "
             f"one matched asset, got {len(matched_assets)}"
@@ -653,17 +653,17 @@ In `db/db.py`, directly after `_json_loads_safe` (ends ~line 43), add:
 
 ```python
 def _canonical_tag_list(tags: "Iterable[object]") -> list[str]:
-    """Return the canonical *storage shape* for a tag collection: sorted,
-    de-duped list of stripped, non-blank strings. Non-strings are dropped
-    (not str()-coerced).
+    """Return the canonical stored form for a tag collection.
 
-    Ownership boundary: this function handles storage shape ONLY (trim,
-    sort, dedupe, drop invalid types/blanks). It does NOT perform semantic
-    normalization (lowercase, remap "automobile"→"car", blocklist). Semantic
-    normalization is the caller's responsibility (analyzer.tagger.propose_tags
-    on the way in; db.py never imports analyzer). This is the single
-    authoritative definition shared by _decode_proposed_tags (reader) and
-    apply_legacy_metadata (writer) so both paths agree on canonical form.
+    Output invariants: every element is a non-blank string; no duplicates;
+    sorted lexicographically; whitespace-stripped. Non-strings are dropped
+    (not coerced — None does not become "none", 1 does not become "1").
+
+    Ownership boundary: storage shape ONLY. This function does not perform
+    semantic normalization (lowercase, remap, blocklist) — that is the
+    caller's contract (analyzer.tagger.propose_tags). db.py never imports
+    analyzer. This is the single authoritative definition shared by
+    _decode_proposed_tags (reader) and apply_legacy_metadata (writer).
     """
     seen: set[str] = set()
     result: list[str] = []
@@ -1169,7 +1169,7 @@ Replace with:
 - `metadata_failed` = photos where the metadata write raised (CLI: **"failed"**).
 So `metadata_matched` is a match count, not a DB-mutation count; `applied + (no-op) + failed == matched`.
 
-The CLI labels ("matched", "updated", "failed") are **presentation details** chosen for user readability. The internal dict keys (`metadata_matched`, `metadata_applied`, `metadata_failed`) are **implementation details**. They happen to be aligned intentionally to reduce cognitive load, but they are separate concerns — a future rename of one does not require renaming the other.
+The concepts are distinct: CLI labels communicate to users; internal dict keys connect code paths. Their names are intentionally kept aligned to reduce cognitive load. That alignment is a maintained choice, not an independence guarantee — any rename touches all consumers (tests, CLI output, docs, logs).
 
 - [ ] **Step 5: Add the metadata step in the per-photo loop**
 
