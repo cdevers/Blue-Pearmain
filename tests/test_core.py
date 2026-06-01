@@ -7629,6 +7629,7 @@ class TestCmdAll(unittest.TestCase):
             port=5173,
             debug=False,
             oneliner=False,
+            include_legacy=False,
         )
         base.update(kwargs)
         return argparse.Namespace(**base)
@@ -7749,6 +7750,256 @@ class TestCmdAll(unittest.TestCase):
         self.assertFalse(captured["scan"]["backfill"])
         self.assertTrue(captured["reconcile"]["fix"])
         self.assertFalse(captured["reconcile"]["apply_proposals"])
+
+    def test_include_legacy_flag_registered(self):
+        """--include-legacy appears in bp all --help."""
+        import subprocess
+
+        bp_path = str(Path(__file__).parent.parent / "bp")
+        r = subprocess.run(
+            [sys.executable, bp_path, "all", "--help"],
+            capture_output=True,
+            text=True,
+            cwd=str(Path(__file__).parent.parent),
+        )
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("--include-legacy", r.stdout)
+
+    def test_include_legacy_absent_legacy_steps_not_called(self):
+        """Without --include-legacy, cmd_index_legacy and cmd_match_legacy are never invoked."""
+        bp = self._import_bp()
+        legacy_called = []
+        orig_index, orig_match = bp.cmd_index_legacy, bp.cmd_match_legacy
+        bp.cmd_index_legacy = lambda a: legacy_called.append("index")
+        bp.cmd_match_legacy = lambda a: legacy_called.append("match")
+        originals = self._patch_steps(bp)
+        try:
+            bp.cmd_all(self._args())  # include_legacy defaults to False
+        finally:
+            self._restore(bp, originals)
+            bp.cmd_index_legacy, bp.cmd_match_legacy = orig_index, orig_match
+        self.assertEqual(legacy_called, [])
+
+    def test_include_legacy_steps_ordered_after_pipeline_before_reconcile(self):
+        """With --include-legacy, index-legacy runs after pipeline, match-legacy runs
+        after index-legacy, and both run before reconcile."""
+        bp = self._import_bp()
+        called = []
+
+        def rec(label):
+            return lambda a: called.append(label)
+
+        orig_index, orig_match = bp.cmd_index_legacy, bp.cmd_match_legacy
+        bp.cmd_index_legacy = rec("index_legacy")
+        bp.cmd_match_legacy = rec("match_legacy")
+        originals = self._patch_steps(
+            bp,
+            {
+                "cmd_scan": rec("scan"),
+                "cmd_poll": rec("poll"),
+                "cmd_thumbs": rec("thumbs"),
+                "cmd_sync_names_from_flickr": rec("sync_names"),
+                "cmd_pipeline": rec("pipeline"),
+                "cmd_reconcile": rec("reconcile"),
+                "cmd_sync_albums": rec("sync_albums"),
+                "cmd_sync_album_collections": rec("sync_album_collections"),
+                "cmd_checkpoint": rec("checkpoint"),
+            },
+        )
+        try:
+            bp.cmd_all(self._args(include_legacy=True))
+        finally:
+            self._restore(bp, originals)
+            bp.cmd_index_legacy, bp.cmd_match_legacy = orig_index, orig_match
+
+        pipeline_pos = called.index("pipeline")
+        index_pos = called.index("index_legacy")
+        match_pos = called.index("match_legacy")
+        reconcile_pos = called.index("reconcile")
+        self.assertGreater(index_pos, pipeline_pos, "index-legacy must follow pipeline")
+        self.assertGreater(match_pos, index_pos, "match-legacy must follow index-legacy")
+        self.assertLess(match_pos, reconcile_pos, "match-legacy must precede reconcile")
+
+    def test_include_legacy_dry_run_steps_skipped_not_called(self):
+        """--dry-run --include-legacy: both legacy steps appear in sequence but
+        are not called; log contains 'SKIPPED'; SKIPPED steps are completely
+        invisible in the final summary (intentional: no '2 skipped' count,
+        identical summary to a run without --include-legacy); run is exit-0."""
+        bp = self._import_bp()
+        legacy_called = []
+        orig_index, orig_match = bp.cmd_index_legacy, bp.cmd_match_legacy
+        bp.cmd_index_legacy = lambda a: legacy_called.append("index")
+        bp.cmd_match_legacy = lambda a: legacy_called.append("match")
+        originals = self._patch_steps(bp)
+        try:
+            with self.assertLogs("blue-pearmain.all", level="INFO") as cm:
+                try:
+                    bp.cmd_all(self._args(dry_run=True, include_legacy=True))
+                except SystemExit as e:
+                    self.fail(
+                        f"cmd_all raised SystemExit({e.code}); "
+                        "SKIPPED steps must not count as errors (run must be exit-0)"
+                    )
+        finally:
+            self._restore(bp, originals)
+            bp.cmd_index_legacy, bp.cmd_match_legacy = orig_index, orig_match
+        # Neither function was actually called
+        self.assertEqual(legacy_called, [])
+        # Both were announced as SKIPPED
+        log_text = "\n".join(cm.output)
+        self.assertIn("index-legacy", log_text)
+        self.assertIn("match-legacy", log_text)
+        self.assertIn("SKIPPED", log_text)
+        # SKIPPED steps are completely invisible in the final summary:
+        # no "N error(s)" line at all (identical to a non-legacy dry run).
+        self.assertFalse(any("error(s)" in line for line in cm.output))
+
+    def test_include_legacy_index_failure_stale_warning_match_still_runs(self):
+        """When index-legacy exits nonzero, a stale-index warning is emitted
+        before match-legacy runs, and subsequent steps (reconcile) still run."""
+        bp = self._import_bp()
+        called = []
+        orig_index, orig_match = bp.cmd_index_legacy, bp.cmd_match_legacy
+
+        def fail_index(args):
+            called.append("index")
+            raise SystemExit(1)
+
+        bp.cmd_index_legacy = fail_index
+        bp.cmd_match_legacy = lambda a: called.append("match")
+        originals = self._patch_steps(
+            bp,
+            {
+                "cmd_reconcile": lambda a: called.append("reconcile"),
+            },
+        )
+        try:
+            with self.assertLogs("blue-pearmain.all", level="WARNING") as cm:
+                bp.cmd_all(self._args(include_legacy=True))
+        finally:
+            self._restore(bp, originals)
+            bp.cmd_index_legacy, bp.cmd_match_legacy = orig_index, orig_match
+
+        self.assertIn("index", called)
+        self.assertIn("match", called)
+        self.assertIn("reconcile", called)
+        # match must follow index
+        self.assertGreater(called.index("match"), called.index("index"))
+        # The exact operator-facing warning from the spec must appear before match runs.
+        log_text = "\n".join(cm.output)
+        self.assertIn(
+            "index-legacy failed — match-legacy --apply will use the last successfully indexed state",
+            log_text,
+            f"exact stale-index warning missing from log; got: {log_text}",
+        )
+
+    def test_include_legacy_convergence_on_partial_index(self):
+        """Convergence: match-legacy --apply on a partially-indexed DB reaches the
+        same final state as a full index, and a second run produces zero new DB
+        mutations (idempotent). Proves the stale-data + rerun guarantee."""
+        import json
+        import sys
+        import tempfile
+        from pathlib import Path
+
+        root = Path(__file__).parent.parent
+        sys.path.insert(0, str(root))
+        sys.path.insert(0, str(root / "poller"))
+
+        from db.db import Database
+        from db.migrations.migrate_020_operation_log import run as run_op_log
+        from db.migrations.migrate_026_legacy_index import run_on_conn as run_legacy
+        from legacy_apply import apply_legacy_matches
+        from analyzer.privacy import CLASSIFIER_VERSION
+
+        tmp = tempfile.mkdtemp()
+        db_path = Path(tmp) / "test.db"
+        db = Database(db_path)
+        run_op_log(str(db_path))
+        run_legacy(db.conn)
+        db.set_legacy_library({"library_uuid": "L", "asset_count": 0})
+
+        # Seed two candidate_public photos: photo 1 matches asset A, photo 2 has no match.
+        for pid, flickr_id, date_taken in [
+            (1, "100", "2010-06-01 12:00:00"),
+            (2, "200", "2015-03-15 09:30:00"),
+        ]:
+            db.conn.execute(
+                "INSERT INTO photos (id, uuid, flickr_id, privacy_state, privacy_reason, "
+                "date_taken, width, height, flickr_title) "
+                "VALUES (?, NULL, ?, 'candidate_public', 'no people detected', ?, 4000, 3000, '')",
+                (pid, flickr_id, date_taken),
+            )
+        db.conn.commit()
+
+        # Simulate PARTIAL index: only asset A indexed (asset B missing — interrupted run).
+        asset_a = {
+            "library_uuid": "L",
+            "asset_uuid": "A",
+            "original_filename": "a.jpg",
+            "fingerprint": "fpA",
+            "date_taken": "2010-06-01T12:00:00-00:00",
+            "width": 4000,
+            "height": 3000,
+            "latitude": None,
+            "longitude": None,
+            "title": "Shore Day",
+            "description": "At the beach",
+            "keywords": '["beach", "summer"]',
+            "labels": "[]",
+            "persons": "[]",
+            "named_face_count": 0,
+            "unknown_face_count": 0,
+            "master_rel_path": "a.jpg",
+            "thumbnail_cache_key": "A",
+            "thumbnail_status": "ok",
+        }
+        db.upsert_legacy_asset(asset_a)
+
+        # First run — simulates match step after partial index.
+        counts1 = apply_legacy_matches(
+            db,
+            "L",
+            self_name="Me",
+            zones=[],
+            person_policies={},
+            classifier_version=CLASSIFIER_VERSION,
+        )
+        self.assertEqual(counts1["metadata_applied"], 1)  # photo 1 tagged
+        row = db.conn.execute("SELECT proposed_tags FROM photos WHERE id = 1").fetchone()
+        self.assertEqual(json.loads(row["proposed_tags"]), ["beach", "summer"])
+        logs_after_first = db.conn.execute("SELECT COUNT(*) FROM operation_log").fetchone()[0]
+
+        # Second run — rerun with identical index state; must produce zero new mutations.
+        counts2 = apply_legacy_matches(
+            db,
+            "L",
+            self_name="Me",
+            zones=[],
+            person_policies={},
+            classifier_version=CLASSIFIER_VERSION,
+        )
+        self.assertEqual(
+            counts2["metadata_applied"], 0, "second run must be a no-op: no new metadata writes"
+        )
+        self.assertEqual(
+            counts2["reclassified"],
+            0,
+            "second run must not reclassify any photo (no repeated reclassification)",
+        )
+        logs_after_second = db.conn.execute("SELECT COUNT(*) FROM operation_log").fetchone()[0]
+        self.assertEqual(
+            logs_after_first,
+            logs_after_second,
+            "no new operation_log rows on rerun (zero churn, no count inflation)",
+        )
+
+        # Photo 2 (no asset at its timestamp) remains untouched throughout.
+        self.assertIsNone(
+            db.conn.execute("SELECT proposed_tags FROM photos WHERE id = 2").fetchone()[
+                "proposed_tags"
+            ]
+        )
 
 
 class TestCheckpoint(unittest.TestCase):

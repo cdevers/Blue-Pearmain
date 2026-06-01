@@ -1024,9 +1024,63 @@ def cmd_all(args):
         steps.insert(2, ("thumbs",     cmd_thumbs,     _step_args(args, icloud=False, icloud_limit=50)))
         steps.append(   ("checkpoint", cmd_checkpoint, _step_args(args, mode="truncate")))
 
+    include_legacy = getattr(args, "include_legacy", False)
+    if include_legacy:
+        # _dry_run_skip_fn: returns a no-op that logs SKIPPED and returns
+        # immediately, without calling the real step or touching config/NAS.
+        def _dry_run_skip_fn(step_name: str):
+            def _skipped(step_args):
+                log.info(
+                    "all: %s SKIPPED (no dry-run support) -- continuing",
+                    step_name,
+                )
+            return _skipped
+
+        # "pipeline" is always present in the base steps list — StopIteration here is a programmer mistake
+        pipeline_idx = next(
+            i for i, (n, _, _) in enumerate(steps) if n == "pipeline"
+        )
+        if dry_run:
+            legacy_steps = [
+                (
+                    "index-legacy",
+                    _dry_run_skip_fn("index-legacy"),
+                    _step_args(args,
+                               library=None, no_thumbnails=False, limit=None,
+                               no_cache=False, refresh_cache=False),
+                ),
+                (
+                    "match-legacy --apply",
+                    _dry_run_skip_fn("match-legacy --apply"),
+                    _step_args(args, apply=True, library_uuid=None, csv=None),
+                ),
+            ]
+        else:
+            legacy_steps = [
+                (
+                    "index-legacy",
+                    cmd_index_legacy,
+                    _step_args(args,
+                               library=None, no_thumbnails=False, limit=None,
+                               no_cache=False, refresh_cache=False),
+                ),
+                (
+                    "match-legacy --apply",
+                    cmd_match_legacy,
+                    _step_args(args, apply=True, library_uuid=None, csv=None),
+                ),
+            ]
+        for offset, step in enumerate(legacy_steps):
+            steps.insert(pipeline_idx + 1 + offset, step)
+
     errors = []
 
     for name, fn, step_args in steps:
+        if name == "match-legacy --apply" and "index-legacy" in errors:
+            log.warning(
+                "all: WARNING index-legacy failed — "
+                "match-legacy --apply will use the last successfully indexed state"
+            )
         log.info("all: -> %s", name)
         try:
             fn(step_args)
@@ -1179,6 +1233,12 @@ def main():
     p_all.add_argument("--dry-run", action="store_true",
                        help="Run all stages read-only: no external writes. "
                             "Thumbs and checkpoint are skipped; reconcile runs without --fix.")
+    p_all.add_argument(
+        "--include-legacy",
+        action="store_true",
+        help="Also run index-legacy (full authoritative NAS refresh) and "
+             "match-legacy --apply after the pipeline step.",
+    )
 
     # install-daemons
     p_install = sub.add_parser(
