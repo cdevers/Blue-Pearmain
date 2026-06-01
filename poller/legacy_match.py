@@ -217,7 +217,7 @@ def legacy_metadata_payload(tier: str, matched_assets: list[dict]) -> dict:
     existing proposed_tags (db does that). title/description only for confident
     matches; None otherwise.
     """
-    tag_sets = []
+    tag_sets: list[set[str]] = []
     for asset in matched_assets:
         shaped = {
             "keywords": _json_list(asset.get("keywords")),
@@ -226,7 +226,7 @@ def legacy_metadata_payload(tier: str, matched_assets: list[dict]) -> dict:
         tag_sets.append(set(propose_tags(shaped)))
 
     if not tag_sets:
-        tags: set = set()
+        tags: set[str] = set()
     elif tier == CONFIDENT:
         # Internal invariant (not user-input validation): classify_match
         # guarantees exactly one matched asset under CONFIDENT. Assert it so
@@ -256,10 +256,18 @@ def format_legacy_metadata_trigger(
 ) -> str:
     """operation_log.trigger for a metadata propagation write. Confident names
     the single source asset; ambiguous records only the candidate count (tags
-    are an intersection over N assets — naming one would misattribute)."""
-    if tier == CONFIDENT and matched_assets:
-        uuid = str(matched_assets[0].get("asset_uuid", ""))
+    are an intersection over N assets — naming one would misattribute).
+
+    Only called with CONFIDENT or AMBIGUOUS tier — NO_MATCH is filtered by
+    the caller. An unexpected tier is an internal contract violation; assert
+    loudly rather than silently emitting a garbled provenance string.
+    """
+    if tier == CONFIDENT:
+        uuid = str(matched_assets[0].get("asset_uuid", "")) if matched_assets else ""
         return f"legacy-meta:{uuid} tier={tier} clf={classifier_version}"
+    assert tier == AMBIGUOUS, (
+        f"format_legacy_metadata_trigger called with unexpected tier: {tier!r}"
+    )
     return f"legacy-meta:ambiguous tier={tier} n={len(matched_assets)} clf={classifier_version}"
 
 

@@ -1,4 +1,4 @@
-# tests/test_legacy_tag_propagation.py
+# tests/test_legacy_match_metadata.py
 from __future__ import annotations
 
 import sys
@@ -108,3 +108,11 @@ def test_metadata_trigger_ambiguous_records_count_not_uuid():
     assert "n=2" in t
     assert "tier=ambiguous" in t
     assert "clf=2" in t
+
+
+def test_payload_ambiguous_empty_assets_is_empty():
+    """Defensive empty-asset guard: ambiguous with no candidates yields empty payload."""
+    from legacy_match import AMBIGUOUS, legacy_metadata_payload
+
+    out = legacy_metadata_payload(AMBIGUOUS, [])
+    assert out == {"add_tags": [], "title": None, "description": None}
