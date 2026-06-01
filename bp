@@ -31,8 +31,11 @@ import argparse
 import sys
 from pathlib import Path
 
-# Ensure the repo root is on the path regardless of where bp is invoked from
-ROOT = Path(__file__).parent.resolve()
+# Ensure the repo root is on the path regardless of where bp is invoked from.
+# Use .resolve().parent (resolve symlink FIRST, then get parent) so that invoking
+# bp via a symlink (e.g. ~/bin/bp -> /repo/bp) resolves to the repo root, not the
+# symlink's parent directory.
+ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 
