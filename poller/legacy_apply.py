@@ -84,7 +84,7 @@ def apply_legacy_matches(
         )
         if decision is None:
             counts["unchanged"] += 1
-        if decision is not None:
+        else:
             trigger = format_legacy_trigger(
                 decision["asset_uuid"],
                 decision["tier"],
