@@ -17,7 +17,7 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +41,59 @@ def _json_loads_safe(value: str | None) -> list:
         return json.loads(value)
     except (json.JSONDecodeError, TypeError):
         return []
+
+
+def _canonical_tag_list(tags: Iterable[object]) -> list[str]:
+    """Return the canonical stored form for a tag collection.
+
+    Output invariants: every element is a non-blank string; no duplicates;
+    sorted lexicographically; whitespace-stripped. Non-strings are dropped
+    (not coerced — None does not become "none", 1 does not become "1").
+
+    Ownership boundary: storage shape ONLY. This function does not perform
+    semantic normalization (lowercase, remap, blocklist) — that is the
+    caller's contract (analyzer.tagger.propose_tags). db.py never imports
+    analyzer. This is the single authoritative definition shared by
+    _decode_proposed_tags (reader) and apply_legacy_metadata (writer).
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in tags:
+        if isinstance(item, str):
+            s = item.strip()
+            if s and s not in seen:
+                seen.add(s)
+                result.append(s)
+    return sorted(result)
+
+
+def _decode_proposed_tags(raw: str | None) -> tuple[list[str], bool]:
+    """Decode a stored proposed_tags JSON string to (tags, was_malformed).
+
+    Canonical stored form is defined by _canonical_tag_list (sorted,
+    de-duplicated, stripped, non-blank strings). Returns that canonical list
+    plus was_malformed=True iff the raw decoded value was not already
+    canonical, so any non-canonical row is rewritten ("repaired") on the
+    next write:
+      - NULL/blank     -> ([], False)
+      - decode error   -> ([], True)
+      - non-list JSON  -> ([], True)   (bare string, dict, number)
+      - list with junk -> canonicalize via _canonical_tag_list; flag True if
+                          anything was dropped/trimmed/de-duped/re-ordered.
+    Non-string, whitespace, blank, duplicate, AND order deviations all count
+    as repair, so tags_repaired is one honest signal: "stored value did not
+    match the canonical sorted form".
+    """
+    if not raw:
+        return [], False
+    try:
+        val = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return [], True
+    if not isinstance(val, list):
+        return [], True
+    cleaned = _canonical_tag_list(val)
+    return cleaned, cleaned != val
 
 
 def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -619,6 +672,115 @@ class Database:
                     "bp",
                 ),
             )
+
+    def apply_legacy_metadata(
+        self,
+        photo_id: int,
+        *,
+        add_tags: list[str],
+        title: str | None = None,
+        description: str | None = None,
+        trigger: str,
+    ) -> bool:
+        """Stage propagated legacy metadata for one photo (one txn).
+
+        Two-level normalization boundary:
+          Semantic (caller's contract): add_tags must already be lowercased,
+            remapped, and blocklist-filtered via analyzer.tagger.propose_tags.
+            db.py does NOT import analyzer — that boundary is frozen.
+          Storage shape (db's job): _canonical_tag_list handles trim/sort/
+            dedupe/drop-invalid. Both the reader (_decode_proposed_tags) and
+            this writer use it, so they always agree on canonical form.
+
+        proposed_tags: set-union of add_tags into the photo's existing tags
+        (decoded via _decode_proposed_tags; non-list/malformed values are
+        repaired in place). proposed_title / proposed_description: filled only
+        when currently empty (NULL or whitespace-only) and the incoming value is
+        non-empty after stripping — never clobbers a human draft, never stages a
+        whitespace-only value. Stored stripped. Writes ONE aggregate
+        operation_log row iff something changed; new_value.fields is in schema
+        order, tags_added is the delta, tags_repaired flags a repaired malformed
+        row. Returns True iff anything changed.
+
+        Concurrency: this does a read -> compute -> write that is NOT isolated
+        against another writer mutating the same row between the SELECT and the
+        UPDATE. That is safe under BP's single-writer model — `match-legacy
+        --apply` is a one-shot CLI command, not run concurrently with another
+        writer to `photos`. The write itself (UPDATE + operation_log INSERT) is
+        atomic via the single `with self.conn:` transaction.
+        """
+        row = self.conn.execute(
+            "SELECT proposed_tags, proposed_title, proposed_description FROM photos WHERE id = ?",
+            (photo_id,),
+        ).fetchone()
+        current, malformed = _decode_proposed_tags(row["proposed_tags"])
+        merged = _canonical_tag_list(list(current) + list(add_tags))
+        tags_changed = merged != current or malformed
+
+        # Scalar hygiene at the persistence boundary: treat whitespace-only
+        # incoming title/description as empty, and store the stripped form.
+        # (stdlib only — no analyzer coupling.)
+        title_in = (title or "").strip()
+        desc_in = (description or "").strip()
+
+        sets: list[str] = []
+        params: list = []
+        changed_fields: list[str] = []
+        if tags_changed:
+            changed_fields.append("proposed_tags")
+            sets.append("proposed_tags = ?")
+            params.append(json.dumps(merged))
+        if title_in and not (row["proposed_title"] or "").strip():
+            changed_fields.append("proposed_title")
+            sets.append("proposed_title = ?")
+            params.append(title_in)
+        if desc_in and not (row["proposed_description"] or "").strip():
+            changed_fields.append("proposed_description")
+            sets.append("proposed_description = ?")
+            params.append(desc_in)
+
+        if not changed_fields:
+            return False
+
+        new_value: dict = {
+            "fields": [
+                f
+                for f in ("proposed_tags", "proposed_title", "proposed_description")
+                if f in changed_fields
+            ]
+        }
+        if tags_changed:
+            # "new members introduced", not a length delta: current may contain
+            # duplicates (dirty historical rows), so len(merged)-len(current) can
+            # be wrong or negative. Count tags in merged that weren't in current.
+            added = len(set(merged) - set(current))
+            if added > 0:
+                new_value["tags_added"] = added
+            if malformed:
+                new_value["tags_repaired"] = True
+
+        now = _now_iso()
+        with self.conn:
+            self.conn.execute(
+                f"UPDATE photos SET {', '.join(sets)}, updated_at = ? WHERE id = ?",
+                (*params, now, photo_id),
+            )
+            self.conn.execute(
+                "INSERT INTO operation_log "
+                "(occurred_at, photo_id, operation, target, old_value, "
+                " new_value, trigger, actor) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    now,
+                    photo_id,
+                    "match_legacy_metadata",
+                    "legacy_metadata",
+                    None,
+                    json.dumps(new_value),
+                    trigger,
+                    "bp",
+                ),
+            )
+        return True
 
     # -----------------------------------------------------------------------
     # Star ratings
