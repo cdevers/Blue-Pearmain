@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS photos (
     -- Proposed tags (staged, not yet pushed)
     proposed_tags           TEXT,                   -- JSON array of tag strings
     pushed_tags             TEXT,                   -- JSON array; cumulative tags confirmed pushed to Flickr (write ledger)
+    proposed_title          TEXT,                   -- draft title text (e.g. propagated legacy title, edited)
     proposed_description    TEXT,                   -- draft description text (may be AI caption, edited)
 
     -- Push state

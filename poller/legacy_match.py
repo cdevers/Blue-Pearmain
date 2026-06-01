@@ -25,6 +25,7 @@ from deduplicator import _parse_dt  # noqa: E402
 from legacy_normalize import normalize_title  # noqa: E402
 
 from analyzer.privacy import PEOPLE_LABELS  # noqa: E402
+from analyzer.tagger import propose_tags  # noqa: E402
 
 
 def normalise_wall_clock(value) -> str | None:
@@ -196,6 +197,78 @@ def format_legacy_trigger(asset_uuid: str, tier: str, classifier_version: int) -
     orchestrator builds the string here and hands db the finished value, so the
     db layer carries no format literal and the two provenance strings can't drift."""
     return f"legacy:{asset_uuid} tier={tier} clf={classifier_version}"
+
+
+def legacy_metadata_payload(tier: str, matched_assets: list[dict]) -> dict:
+    """Build the legacy-derived staging payload for a matched photo.
+
+    Contract (mirrors classify_match output): confident => exactly one asset;
+    ambiguous => two or more; no-match never calls this. The empty-guard is
+    defensive only.
+
+    add_tags: propose_tags() per asset, then combined by confidence — we branch
+    on tier explicitly rather than relying on cardinality. CONFIDENT yields the
+    single asset's tags (tag_sets[0]); AMBIGUOUS (N>=2) yields the INTERSECTION
+    (tags shared by every candidate), so an uncertain match can't pull
+    event-specific tags from the wrong photo. Branching on tier (not "len==1 so
+    intersection happens to work") means a future classifier that returns
+    CONFIDENT with >1 asset won't silently switch to intersection semantics.
+    Sorted/deduped/lowercased by propose_tags. NOT merged with the photo's
+    existing proposed_tags (db does that). title/description only for confident
+    matches; None otherwise.
+    """
+    tag_sets: list[set[str]] = []
+    for asset in matched_assets:
+        shaped = {
+            "keywords": _json_list(asset.get("keywords")),
+            "labels": _json_list(asset.get("labels")),
+        }
+        tag_sets.append(set(propose_tags(shaped)))
+
+    if not tag_sets:
+        tags: set[str] = set()
+    elif tier == CONFIDENT:
+        # Internal invariant (not user-input validation): classify_match
+        # guarantees exactly one matched asset under CONFIDENT. Assert it so
+        # a future classifier regression is loud immediately. `assert` is the
+        # established codebase idiom for internal invariants (legacy_match,
+        # db.py, app.py); the project currently does not run under python -O.
+        assert len(matched_assets) == 1, (
+            f"classify_match contract violation: CONFIDENT must return exactly "
+            f"one matched asset, got {len(matched_assets)}"
+        )
+        tags = tag_sets[0]
+    else:
+        tags = set.intersection(*tag_sets)
+
+    title = None
+    description = None
+    if tier == CONFIDENT and matched_assets:
+        asset = matched_assets[0]
+        title = (asset.get("title") or "").strip() or None
+        description = (asset.get("description") or "").strip() or None
+
+    return {"add_tags": sorted(tags), "title": title, "description": description}
+
+
+def format_legacy_metadata_trigger(
+    tier: str, matched_assets: list[dict], classifier_version: int
+) -> str:
+    """operation_log.trigger for a metadata propagation write. Confident names
+    the single source asset; ambiguous records only the candidate count (tags
+    are an intersection over N assets — naming one would misattribute).
+
+    Only called with CONFIDENT or AMBIGUOUS tier — NO_MATCH is filtered by
+    the caller. An unexpected tier is an internal contract violation; assert
+    loudly rather than silently emitting a garbled provenance string.
+    """
+    if tier == CONFIDENT:
+        uuid = str(matched_assets[0].get("asset_uuid", "")) if matched_assets else ""
+        return f"legacy-meta:{uuid} tier={tier} clf={classifier_version}"
+    assert tier == AMBIGUOUS, (
+        f"format_legacy_metadata_trigger called with unexpected tier: {tier!r}"
+    )
+    return f"legacy-meta:ambiguous tier={tier} n={len(matched_assets)} clf={classifier_version}"
 
 
 def resolve_apply_decision(

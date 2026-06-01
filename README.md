@@ -196,6 +196,9 @@ bp index-legacy --refresh-cache    # Force a rebuild of the local DB cache
 bp match-legacy                    # Non-destructive report: likely matches between legacy assets and Flickr-only candidate_public photos
 bp match-legacy --csv PATH         # Also write the full tiered report to a CSV file
 bp match-legacy --apply            # Reclassify confident (and all-people ambiguous) matches out of the candidate_public review queue via the shared privacy classifier
+                                   # On match, also stages the matched legacy asset's keywords/labels into the photo's proposed tags and
+                                   # (for confident matches) fills the empty proposed title/description fields from the legacy asset —
+                                   # merged, de-duplicated, and idempotent. These are local review-staging fields only; nothing is pushed to Flickr.
 bp ui                              # Start the review UI (http://localhost:5173)
 bp ui --host 0.0.0.0               # Also bind to LAN interfaces (e.g. for iPad access)
 ```
