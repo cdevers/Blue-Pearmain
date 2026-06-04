@@ -93,10 +93,8 @@ In `poller/legacy_indexer.py`, add after `log = logging.getLogger(...)`:
 def _load_model_ids(source_db_path: str) -> dict[str, int]:
     """Map asset UUID → RKVersion.modelId. Single query; safe on missing/corrupt DB.
 
-    If RKVersion somehow contains duplicate UUIDs (not expected in Photos 4),
-    the dict comprehension keeps the last-seen modelId. This is intentional:
-    duplicates are a data anomaly and any modelId for that UUID will locate
-    the same derivatives directory.
+    Duplicate UUIDs in RKVersion are unexpected; if they occur, the dict
+    comprehension keeps the last-seen modelId (last-row-wins).
     """
     import sqlite3 as _sqlite3
 
@@ -620,13 +618,14 @@ EOF
 With the NAS mounted and `legacy_library.path` set in `config/config.yml`:
 
 ```bash
-bp index-legacy --limit 50 2>&1 | tee /tmp/index_legacy_test.log
+bp index-legacy --limit 50 --verbose 2>&1 | tee /tmp/index_legacy_test.log
 ```
 
 Two things to confirm:
 
 **a) The fallback code path actually ran.** The `log.debug` line in `_copy_thumbnail` fires
-when a fallback copy succeeds. Check for it:
+when a fallback copy succeeds. `--verbose` enables DEBUG level; without it the line is
+suppressed and the grep will always come up empty:
 
 ```bash
 grep "fallback thumbnail copy" /tmp/index_legacy_test.log | head -5
@@ -635,12 +634,12 @@ grep "fallback thumbnail copy" /tmp/index_legacy_test.log | head -5
 Expected: at least one line like:
 `DEBUG blue-pearmain.legacy-indexer fallback thumbnail copy for <uuid> from <path>`
 
-If nothing appears, the fallback isn't triggering — check that `resources/proxies/derivatives/`
-exists under the NAS mount and that the cache DB has `RKVersion` rows.
+If nothing appears but `thumb_ok > 0`, re-run with `--verbose` — a copy may have succeeded
+via the fast path (`path_derivatives` was non-empty) rather than the fallback.
 
 **b) The count is material.** Zero `thumb_ok` with a non-empty library means something is wrong.
-A handful of `thumb_ok` (< 5 out of 50) might just be fast-path hits on photos with live
-`path_derivatives`. The debug log from step (a) is the definitive proof that the new code ran.
+Check that `resources/proxies/derivatives/` exists under the NAS mount and that the cache DB
+has `RKVersion` rows.
 
 - [ ] **Step 2: Push branch and open PR**
 
@@ -708,6 +707,6 @@ EOF
 - ✓ `_load_model_ids` duplicate-UUID behavior documented (last-row-wins, intentional)
 - ✓ `stat()` failure in fallback sort fixed — per-file try/except, unreadable entries skipped
 - ✓ `stat()` failure test added (`test_copy_thumbnail_photos4_fallback_handles_stat_failure`)
-- ✓ `log.debug` emitted when fallback copy succeeds; verification now greps for it as proof of execution
+- ✓ `log.debug` emitted when fallback copy succeeds; verification runs with `--verbose` so DEBUG messages are visible (default level is INFO)
 
 **Type consistency:** `_derivatives_dir_photos4` returns `Path`; `_load_model_ids` returns `dict[str, int]`; `model_id_map.get(photo.uuid)` returns `int | None`; `_copy_thumbnail` accepts `model_id: int | None`. All consistent across tasks.
