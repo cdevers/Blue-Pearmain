@@ -358,8 +358,8 @@ def test_copy_thumbnail_photos4_fallback_uses_real_bundle(tmp_path):
     assert thumbnail_path(tmp_path / "thumbs", "LIB-UUID", key).exists()
 
 
-def test_copy_thumbnail_photos4_fallback_picks_largest_file(tmp_path):
-    """Best-effort heuristic: largest file in derivatives dir is copied (highest quality)."""
+def test_copy_thumbnail_photos4_fallback_picks_smallest_file(tmp_path):
+    """Heuristic: smallest file in derivatives dir is copied (genuine thumbnail, not preview)."""
     real_lib = tmp_path / "Real.photoslibrary"
     deriv_dir = real_lib / "resources" / "proxies" / "derivatives" / "00" / "00" / "1"
     deriv_dir.mkdir(parents=True)
@@ -376,7 +376,7 @@ def test_copy_thumbnail_photos4_fallback_picks_largest_file(tmp_path):
     )
     key = thumbnail_cache_key("LIB-UUID", "uuid-1")
     dest = thumbnail_path(tmp_path / "thumbs", "LIB-UUID", key)
-    assert dest.stat().st_size == 500  # largest file was copied
+    assert dest.stat().st_size == 10  # smallest file was copied
 
 
 def test_copy_thumbnail_photos4_fallback_missing_when_dir_absent(tmp_path):

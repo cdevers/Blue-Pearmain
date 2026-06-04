@@ -140,8 +140,8 @@ def _copy_thumbnail(
 
     Primary: photo.path_derivatives (populated when osxphotos opens the real bundle).
     Fallback: compute Photos 4 derivatives dir from model_id + real_library_path.
-    Fallback sort is largest-first: a best-effort heuristic matching osxphotos'
-    own sort order (larger files are higher-quality previews), not a Photos API guarantee.
+    Fallback sort is smallest-first: the smallest file is the genuine thumbnail;
+    larger files are full-resolution previews we don't need in the cache.
     """
     derivs = getattr(photo, "path_derivatives", None) or []
     src = next((d for d in derivs if d and Path(d).exists()), None)
@@ -151,7 +151,7 @@ def _copy_thumbnail(
         if deriv_dir.is_dir():
             # Collect (size, path) pairs, skipping any entry whose stat() fails
             # (e.g. a broken symlink or a file deleted between glob and stat).
-            # Largest-first: best-effort heuristic, not a Photos API guarantee.
+            # Smallest-first: picks the genuine thumbnail, not the full preview.
             candidates: list[tuple[int, Path]] = []
             for f in deriv_dir.glob("*"):
                 try:
@@ -159,7 +159,7 @@ def _copy_thumbnail(
                         candidates.append((f.stat().st_size, f))
                 except OSError:
                     pass
-            candidates.sort(reverse=True)
+            candidates.sort()
             src = str(candidates[0][1]) if candidates else None
             if src is not None:
                 log.debug("fallback thumbnail copy for %s from %s", photo.uuid, src)
