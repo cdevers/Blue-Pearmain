@@ -300,7 +300,9 @@ class Database:
                 list(update.values()) + [photos_rec_id],
             )
 
-        # 6. Delete the Flickr-only record (ON DELETE CASCADE handles photo_albums)
+        # 6. Delete the Flickr-only record (ON DELETE CASCADE handles photo_albums;
+        #    non-cascade refs cleared first)
+        self._clear_nonascade_fk_refs(flickr_rec_id)
         self.conn.execute("DELETE FROM photos WHERE id = ?", (flickr_rec_id,))
         self.conn.commit()
         return True
@@ -512,6 +514,22 @@ class Database:
                     ON operation_log(operation);
                 CREATE INDEX IF NOT EXISTS idx_operation_log_occurred
                     ON operation_log(occurred_at);
+            """)
+            self.conn.commit()
+        if "duplicate_groups" not in tables:
+            self.conn.executescript("""
+                CREATE TABLE IF NOT EXISTS duplicate_groups (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    match_key       TEXT NOT NULL UNIQUE,
+                    group_type      TEXT NOT NULL,
+                    photo_count     INTEGER NOT NULL DEFAULT 0,
+                    keeper_id       INTEGER REFERENCES photos(id),
+                    resolved        INTEGER NOT NULL DEFAULT 0,
+                    resolved_at     TEXT,
+                    notes           TEXT,
+                    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+                );
             """)
             self.conn.commit()
         if "bulk_batches" not in tables:
@@ -2144,8 +2162,27 @@ class Database:
         )
         self.conn.commit()
 
+    def _clear_nonascade_fk_refs(self, photo_id: int) -> None:
+        """NULL out nullable FKs that lack ON DELETE CASCADE before hard-deleting a photo.
+
+        operation_log.photo_id and duplicate_groups.keeper_id have no cascade
+        behavior (photo_id is nullable by design — audit rows survive deletion).
+        photos.merged_into_id is a self-referential soft-delete pointer.
+        All three must be NULLed before DELETE to satisfy FK enforcement.
+        """
+        self.conn.execute(
+            "UPDATE operation_log SET photo_id = NULL WHERE photo_id = ?", (photo_id,)
+        )
+        self.conn.execute(
+            "UPDATE duplicate_groups SET keeper_id = NULL WHERE keeper_id = ?", (photo_id,)
+        )
+        self.conn.execute(
+            "UPDATE photos SET merged_into_id = NULL WHERE merged_into_id = ?", (photo_id,)
+        )
+
     def delete_photo(self, photo_id: int) -> None:
         """Hard-delete a Photos-only record. ON DELETE CASCADE handles photo_albums, metadata_proposals, metadata_conflicts, tag_events."""
+        self._clear_nonascade_fk_refs(photo_id)
         self.conn.execute("DELETE FROM photos WHERE id = ?", (photo_id,))
 
     def upsert_metadata_conflict(
