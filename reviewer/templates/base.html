@@ -47,6 +47,14 @@
       font-weight: 600;
       color: var(--text);
       letter-spacing: 0.02em;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    nav .brand img {
+      height: 36px;
+      width: auto;
+      display: block;
     }
     nav a {
       color: var(--muted);
@@ -255,7 +263,7 @@
 <body>
 
 <nav>
-  <span class="brand">🍎 Blue Pearmain</span>
+  <span class="brand"><img src="{{ url_for('static', filename='bp_logo.png') }}" alt="Blue Pearmain">Blue Pearmain</span>
   <a href="{{ url_for('dashboard') }}" {% if request.endpoint == 'dashboard' %}class="active"{% endif %}><kbd class="nav-key">1</kbd>Dashboard</a>
   <a href="{{ url_for('review', state='candidate_public') }}" {% if request.endpoint == 'review' %}class="active"{% endif %}><kbd class="nav-key">2</kbd>Review</a>
   <a href="{{ url_for('faces') }}" {% if request.endpoint == 'faces' %}class="active"{% endif %}><kbd class="nav-key">3</kbd>Faces</a>
