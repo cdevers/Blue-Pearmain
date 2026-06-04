@@ -34,6 +34,12 @@ Surface high-signal failures (auth expiry, sustained API errors, unresolved reco
 
 BP's current model is reactive: classify what arrives, queue what needs review, apply what's unambiguous. Two gaps have emerged where a persistent *policy* would be more appropriate than a repeated manual action.
 
+### Legacy-match demotion policy — any confident match → needs_review
+
+Currently `match-legacy --apply` only demotes a Flickr-only `candidate_public` photo when the matched iPhoto asset carries a privacy signal: a named face, an unknown face, or a location inside a geofence zone. Photos that match confidently but carry no such signal stay `candidate_public`.
+
+In practice the Flickr-only `candidate_public` queue (~19k photos) contains many personal family photos whose iPhoto counterparts happen to be untagged (iPhoto face recognition was manual and incomplete). A policy flag — `legacy_match.demote_all_confident: true` in `config.yml` — would say "any confident legacy match is sufficient reason to move the photo to `needs_review`, regardless of content signals." This is a deliberate trade-off: more false positives in the review queue, fewer inadvertent public posts. Worth offering as opt-in.
+
 ### Per-person privacy policy ([#114](https://github.com/cdevers/Blue-Pearmain/issues/114)) `size:M` · ✓ done
 
 A way to declare "any photo containing Person X is always auto-private" — stored in the DB, checked at scan time. Currently, batch-marking all of a person's photos private is a one-shot action; new photos of that person re-enter the queue. A persistent policy is the right primitive for people who should never appear on Flickr (children, people who've asked not to be photographed publicly).
