@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import sqlite3
 from pathlib import Path
 from typing import Callable
 
@@ -24,6 +25,52 @@ from legacy_normalize import (
 )
 
 log = logging.getLogger("blue-pearmain.legacy-indexer")
+
+
+def _load_model_ids(source_db_path: str) -> dict[str, int]:
+    """Map asset UUID → model ID for derivative-path computation. Safe on missing/corrupt DB.
+
+    Tries ZGENERICASSET (Photos.sqlite / Photos 5+ format) first: osxphotos opens
+    Photos.sqlite when present, so photo.uuid is ZGENERICASSET.ZUUID and the
+    matching model ID is Z_PK. Falls back to RKVersion (photos.db / Photos 4 format)
+    for libraries without Photos.sqlite. Duplicate UUIDs are unexpected; last-row-wins.
+    """
+    try:
+        conn = sqlite3.connect(f"file:{source_db_path}?immutable=1", uri=True)
+    except sqlite3.Error:
+        return {}
+    try:
+        # Photos 5+ / Photos.sqlite: uuid is ZGENERICASSET.ZUUID, model_id is Z_PK
+        try:
+            rows = conn.execute(
+                "SELECT ZUUID, Z_PK FROM ZGENERICASSET WHERE ZUUID IS NOT NULL AND Z_PK IS NOT NULL"
+            ).fetchall()
+            if rows:
+                return {uuid: int(pk) for uuid, pk in rows}
+        except sqlite3.Error:
+            pass
+        # Photos 4 / photos.db fallback: uuid is RKVersion.uuid, model_id is modelId
+        rows = conn.execute(
+            "SELECT uuid, modelId FROM RKVersion WHERE uuid IS NOT NULL AND modelId IS NOT NULL"
+        ).fetchall()
+        return {uuid: int(model_id) for uuid, model_id in rows}
+    except sqlite3.Error:
+        return {}
+    finally:
+        conn.close()
+
+
+def _derivatives_dir_photos4(model_id: int, library_path: str | Path) -> Path:
+    """Photos 4 derivative directory for a given RKVersion.modelId.
+
+    Replicates osxphotos.utils._get_resource_loc without importing it.
+    Path = <library>/resources/proxies/derivatives/<folder_id>/<nn_id>/<file_id>
+    """
+    hex_id = hex(model_id)[2:]
+    folder_id = hex_id.zfill(4)[-4:-2]
+    nn_id = hex_id[: len(hex_id) - 4].zfill(2) if len(hex_id) > 4 else "00"
+    return Path(library_path) / "resources" / "proxies" / "derivatives" / folder_id / nn_id / hex_id
+
 
 _UNKNOWN = {"", "_UNKNOWN_", None}
 
@@ -81,10 +128,42 @@ def _rel_master(photo, library_path: str) -> str | None:
     return canonical_rel_path(rel)
 
 
-def _copy_thumbnail(photo, library_uuid: str, thumb_root: Path) -> str:
-    """Copy the first existing derivative into the cache. Returns ok/missing/error."""
+def _copy_thumbnail(
+    photo,
+    library_uuid: str,
+    thumb_root: Path,
+    *,
+    real_library_path: str | None = None,
+    model_id: int | None = None,
+) -> str:
+    """Copy the best available derivative into the cache. Returns ok/missing/error.
+
+    Primary: photo.path_derivatives (populated when osxphotos opens the real bundle).
+    Fallback: compute Photos 4 derivatives dir from model_id + real_library_path.
+    Fallback sort is largest-first: a best-effort heuristic matching osxphotos'
+    own sort order (larger files are higher-quality previews), not a Photos API guarantee.
+    """
     derivs = getattr(photo, "path_derivatives", None) or []
     src = next((d for d in derivs if d and Path(d).exists()), None)
+
+    if src is None and real_library_path is not None and model_id is not None:
+        deriv_dir = _derivatives_dir_photos4(model_id, real_library_path)
+        if deriv_dir.is_dir():
+            # Collect (size, path) pairs, skipping any entry whose stat() fails
+            # (e.g. a broken symlink or a file deleted between glob and stat).
+            # Largest-first: best-effort heuristic, not a Photos API guarantee.
+            candidates: list[tuple[int, Path]] = []
+            for f in deriv_dir.glob("*"):
+                try:
+                    if f.is_file():
+                        candidates.append((f.stat().st_size, f))
+                except OSError:
+                    pass
+            candidates.sort(reverse=True)
+            src = str(candidates[0][1]) if candidates else None
+            if src is not None:
+                log.debug("fallback thumbnail copy for %s from %s", photo.uuid, src)
+
     if src is None:
         return "missing"
     try:
@@ -180,6 +259,23 @@ def index_library(
     # Ensure the library row exists before inserting assets (FK requires it).
     db.set_legacy_library({"library_uuid": library_uuid, "source_path_last_seen": library_path})
 
+    # Batch-load uuid→model_id from the local cache DB so _copy_thumbnail can
+    # compute Photos 4 derivative paths without per-asset NAS queries.
+    # Always reads from the cache (not the NAS) for speed; falls back to an empty
+    # map if the cache DB hasn't been built yet.
+    model_id_map: dict[str, int] = {}
+    if copy_thumbnails:
+        from legacy_cache import cache_dir as _cache_dir
+
+        # Mirror osxphotos' DB selection: Photos.sqlite wins when present (Photos 5+
+        # format, ZGENERICASSET.ZUUID); fall back to photos.db for pure Photos 4.
+        cache_base = _cache_dir(curator_db_path, library_uuid)
+        for _rel in ("database/Photos.sqlite", "database/photos.db"):
+            _candidate = cache_base / _rel
+            if _candidate.exists():
+                model_id_map = _load_model_ids(str(_candidate))
+                break
+
     seen: set[str] = set()
     indexed = thumb_ok = thumb_missing = thumb_error = 0
 
@@ -188,7 +284,13 @@ def index_library(
             break
         row = _build_row(photo, library_uuid, library_path)
         if copy_thumbnails:
-            status = _copy_thumbnail(photo, library_uuid, thumb_root)
+            status = _copy_thumbnail(
+                photo,
+                library_uuid,
+                thumb_root,
+                real_library_path=library_path if model_id_map else None,
+                model_id=model_id_map.get(photo.uuid),
+            )
         else:
             status = "skipped"
         row["thumbnail_cache_key"] = thumbnail_cache_key(library_uuid, photo.uuid)

@@ -31,8 +31,8 @@ path      = <library>/resources/proxies/derivatives/<folder_id>/<nn_id>/<file_id
 
 | File | Change |
 |------|--------|
-| `poller/legacy_indexer.py` | Add `_load_model_ids`, `_derivatives_dir_photos4`; extend `_copy_thumbnail`; pass map in `index_library` |
-| `tests/test_legacy_indexer.py` | Add tests for photos4 fallback path; extend `FakePhoto` with `model_id` if needed |
+| `poller/legacy_indexer.py` | Add `_load_model_ids`, `_derivatives_dir_photos4`; extend `_copy_thumbnail`; two targeted edits inside `index_library` |
+| `tests/test_legacy_indexer.py` | New tests for helpers, fallback path, fast-path regression, and integration wiring |
 
 No schema changes. No new files.
 
@@ -46,13 +46,13 @@ No schema changes. No new files.
 
 This fetches `uuid → model_id` for every asset in a Photos 4 DB in one query.
 
-- [ ] **Step 1: Write failing test**
+- [ ] **Step 1: Write failing tests**
 
-Add to `tests/test_legacy_indexer.py` after the existing imports:
+Add to `tests/test_legacy_indexer.py` after the existing imports (also add `import sqlite3`):
 
 ```python
 import sqlite3
-import tempfile
+
 
 def _make_photos4_db(tmp_path, rows: list[tuple[str, int]]) -> str:
     """Minimal photos.db with just enough RKVersion rows for model_id lookup."""
@@ -76,7 +76,7 @@ def test_load_model_ids_returns_empty_on_bad_path():
     assert result == {}
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
 cd "/Users/cdevers/Documents/GitHub/Blue Pearmain"
@@ -91,7 +91,11 @@ In `poller/legacy_indexer.py`, add after `log = logging.getLogger(...)`:
 
 ```python
 def _load_model_ids(source_db_path: str) -> dict[str, int]:
-    """Map asset UUID → RKVersion.modelId. Single query; safe on missing/corrupt DB."""
+    """Map asset UUID → RKVersion.modelId. Single query; safe on missing/corrupt DB.
+
+    Duplicate UUIDs in RKVersion are unexpected; if they occur, the dict
+    comprehension keeps the last-seen modelId (last-row-wins).
+    """
     import sqlite3 as _sqlite3
 
     try:
@@ -110,7 +114,7 @@ def _load_model_ids(source_db_path: str) -> dict[str, int]:
         conn.close()
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
 python -m pytest tests/test_legacy_indexer.py::test_load_model_ids_returns_uuid_to_modelid tests/test_legacy_indexer.py::test_load_model_ids_returns_empty_on_bad_path -v
@@ -195,7 +199,10 @@ Expected: PASS (all three)
 - Modify: `poller/legacy_indexer.py:84-100`
 - Test: `tests/test_legacy_indexer.py`
 
-When `path_derivatives` is empty and `(real_library_path, model_id)` are provided, fall back to the computed derivatives directory.
+When `path_derivatives` is empty and `(real_library_path, model_id)` are provided, fall back
+to the computed derivatives directory and pick the largest file (best-effort heuristic: larger
+files are higher-quality previews in Photos 4; mirrors osxphotos' own sort order but is not a
+Photos API guarantee).
 
 - [ ] **Step 1: Write failing tests**
 
@@ -208,107 +215,133 @@ def test_copy_thumbnail_photos4_fallback_uses_real_bundle(tmp_path):
     real_lib = tmp_path / "Real.photoslibrary"
     deriv_dir = real_lib / "resources" / "proxies" / "derivatives" / "00" / "00" / "1"
     deriv_dir.mkdir(parents=True)
-    (deriv_dir / "preview.jpg").write_bytes(b"BIGPREVIEW" * 100)
-    (deriv_dir / "thumb.jpg").write_bytes(b"SMALL")
+    (deriv_dir / "preview.jpg").write_bytes(b"X" * 200)
 
-    db = _db(tmp_path)
-    # FakePhoto with no path_derivatives
-    photos = [FakePhoto("asset-uuid-1", derivatives=[])]
-    stats = legacy_indexer.index_library(
-        str(real_lib),
-        db,
-        curator_db_path=str(tmp_path / "curator.db"),
-        thumb_root=tmp_path / "thumbs",
-        copy_thumbnails=True,
-        use_cache=False,
-        photosdb_factory=_factory(photos),
-        model_id_override={"asset-uuid-1": 1},
+    photo = FakePhoto("uuid-1", derivatives=[])
+    status = legacy_indexer._copy_thumbnail(
+        photo, "LIB-UUID", tmp_path / "thumbs",
+        real_library_path=str(real_lib),
+        model_id=1,
     )
-    assert stats["thumb_ok"] == 1
-    assert stats["thumb_missing"] == 0
+    assert status == "ok"
+    key = thumbnail_cache_key("LIB-UUID", "uuid-1")
+    assert thumbnail_path(tmp_path / "thumbs", "LIB-UUID", key).exists()
 
 
 def test_copy_thumbnail_photos4_fallback_picks_largest_file(tmp_path):
-    """When multiple files exist in the derivatives dir, picks largest (best quality)."""
+    """Best-effort heuristic: largest file in derivatives dir is copied (highest quality)."""
     real_lib = tmp_path / "Real.photoslibrary"
     deriv_dir = real_lib / "resources" / "proxies" / "derivatives" / "00" / "00" / "1"
     deriv_dir.mkdir(parents=True)
-    small = deriv_dir / "thumb.jpg"
-    small.write_bytes(b"X" * 10)
-    big = deriv_dir / "preview.jpg"
-    big.write_bytes(b"X" * 500)
+    (deriv_dir / "thumb.jpg").write_bytes(b"X" * 10)
+    (deriv_dir / "preview.jpg").write_bytes(b"X" * 500)
 
-    db = _db(tmp_path)
-    photos = [FakePhoto("uuid-1", derivatives=[])]
-    legacy_indexer.index_library(
-        str(real_lib),
-        db,
-        curator_db_path=str(tmp_path / "curator.db"),
-        thumb_root=tmp_path / "thumbs",
-        copy_thumbnails=True,
-        use_cache=False,
-        photosdb_factory=_factory(photos),
-        model_id_override={"uuid-1": 1},
+    photo = FakePhoto("uuid-1", derivatives=[])
+    legacy_indexer._copy_thumbnail(
+        photo, "LIB-UUID", tmp_path / "thumbs",
+        real_library_path=str(real_lib),
+        model_id=1,
     )
-    from legacy_normalize import thumbnail_cache_key, thumbnail_path
     key = thumbnail_cache_key("LIB-UUID", "uuid-1")
     dest = thumbnail_path(tmp_path / "thumbs", "LIB-UUID", key)
     assert dest.stat().st_size == 500  # largest file was copied
 
 
 def test_copy_thumbnail_photos4_fallback_missing_when_dir_absent(tmp_path):
-    """Returns 'missing' when real bundle derivatives dir does not exist."""
-    real_lib = tmp_path / "NotMounted.photoslibrary"
-    # No derivatives dir created → NAS not available
-
-    db = _db(tmp_path)
-    photos = [FakePhoto("uuid-1", derivatives=[])]
-    stats = legacy_indexer.index_library(
-        str(real_lib),
-        db,
-        curator_db_path=str(tmp_path / "curator.db"),
-        thumb_root=tmp_path / "thumbs",
-        copy_thumbnails=True,
-        use_cache=False,
-        photosdb_factory=_factory(photos),
-        model_id_override={"uuid-1": 1},
+    """Returns 'missing' when real bundle derivatives dir does not exist (NAS unmounted)."""
+    photo = FakePhoto("uuid-1", derivatives=[])
+    status = legacy_indexer._copy_thumbnail(
+        photo, "LIB-UUID", tmp_path / "thumbs",
+        real_library_path=str(tmp_path / "NotMounted.photoslibrary"),
+        model_id=1,
     )
-    assert stats["thumb_missing"] == 1
+    assert status == "missing"
 
 
 def test_copy_thumbnail_photos4_fallback_missing_when_no_model_id(tmp_path):
-    """Returns 'missing' when model_id not available (UUID not in lookup)."""
+    """Returns 'missing' when model_id is None (UUID not in lookup map)."""
     real_lib = tmp_path / "Real.photoslibrary"
     deriv_dir = real_lib / "resources" / "proxies" / "derivatives" / "00" / "00" / "1"
     deriv_dir.mkdir(parents=True)
     (deriv_dir / "preview.jpg").write_bytes(b"DATA")
 
-    db = _db(tmp_path)
-    photos = [FakePhoto("uuid-1", derivatives=[])]
-    stats = legacy_indexer.index_library(
-        str(real_lib),
-        db,
-        curator_db_path=str(tmp_path / "curator.db"),
-        thumb_root=tmp_path / "thumbs",
-        copy_thumbnails=True,
-        use_cache=False,
-        photosdb_factory=_factory(photos),
-        # No model_id_override → uuid-1 won't be in model_id_map
+    photo = FakePhoto("uuid-1", derivatives=[])
+    status = legacy_indexer._copy_thumbnail(
+        photo, "LIB-UUID", tmp_path / "thumbs",
+        real_library_path=str(real_lib),
+        model_id=None,  # UUID not found in map
     )
-    assert stats["thumb_missing"] == 1
-```
+    assert status == "missing"
 
-Note: `model_id_override` is a new test-only parameter added to `index_library` for injecting the map without a real DB. Implement it in the next step.
+
+def test_copy_thumbnail_fast_path_wins_when_derivatives_present(tmp_path):
+    """Regression: when path_derivatives is already populated, it is used without fallback."""
+    # Derivative provided by osxphotos (real-bundle open or --no-cache)
+    deriv = tmp_path / "existing_deriv.jpg"
+    deriv.write_bytes(b"FAST_PATH")
+
+    # Fallback dir also exists, but should NOT be touched
+    real_lib = tmp_path / "Real.photoslibrary"
+    fallback_dir = real_lib / "resources" / "proxies" / "derivatives" / "00" / "00" / "1"
+    fallback_dir.mkdir(parents=True)
+    (fallback_dir / "fallback.jpg").write_bytes(b"FALLBACK_SHOULD_NOT_BE_USED" * 10)
+
+    photo = FakePhoto("uuid-1", derivatives=[str(deriv)])
+    legacy_indexer._copy_thumbnail(
+        photo, "LIB-UUID", tmp_path / "thumbs",
+        real_library_path=str(real_lib),
+        model_id=1,
+    )
+    key = thumbnail_cache_key("LIB-UUID", "uuid-1")
+    dest = thumbnail_path(tmp_path / "thumbs", "LIB-UUID", key)
+    assert dest.read_bytes() == b"FAST_PATH"  # fast path, not fallback
+
+
+def test_copy_thumbnail_photos4_fallback_handles_stat_failure(tmp_path):
+    """stat() failure on one file in the derivatives dir is skipped; others still work."""
+    from unittest.mock import patch
+
+    real_lib = tmp_path / "Real.photoslibrary"
+    deriv_dir = real_lib / "resources" / "proxies" / "derivatives" / "00" / "00" / "1"
+    deriv_dir.mkdir(parents=True)
+    good = deriv_dir / "good.jpg"
+    good.write_bytes(b"GOOD" * 100)
+    bad = deriv_dir / "bad.jpg"
+    bad.write_bytes(b"BAD")
+
+    original_stat = Path.stat
+
+    def stat_raises_for_bad(self, **kwargs):
+        if self.name == "bad.jpg":
+            raise OSError("simulated stat failure")
+        return original_stat(self, **kwargs)
+
+    photo = FakePhoto("uuid-1", derivatives=[])
+    with patch.object(Path, "stat", stat_raises_for_bad):
+        status = legacy_indexer._copy_thumbnail(
+            photo, "LIB-UUID", tmp_path / "thumbs",
+            real_library_path=str(real_lib),
+            model_id=1,
+        )
+    assert status == "ok"  # bad.jpg skipped; good.jpg copied
+```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-python -m pytest tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_uses_real_bundle tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_picks_largest_file tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_missing_when_dir_absent tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_missing_when_no_model_id -v
+python -m pytest \
+  tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_uses_real_bundle \
+  tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_picks_largest_file \
+  tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_missing_when_dir_absent \
+  tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_missing_when_no_model_id \
+  tests/test_legacy_indexer.py::test_copy_thumbnail_fast_path_wins_when_derivatives_present \
+  tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_handles_stat_failure \
+  -v
 ```
 
-Expected: all fail — `model_id_override` parameter not accepted, fallback logic absent.
+Expected: `TypeError: _copy_thumbnail() got an unexpected keyword argument 'real_library_path'`
 
-- [ ] **Step 3: Implement the fallback in `_copy_thumbnail` and wire it in `index_library`**
+- [ ] **Step 3: Implement the fallback in `_copy_thumbnail`**
 
 Replace `_copy_thumbnail` in `poller/legacy_indexer.py` with:
 
@@ -325,6 +358,8 @@ def _copy_thumbnail(
 
     Primary: photo.path_derivatives (populated when osxphotos opens the real bundle).
     Fallback: compute Photos 4 derivatives dir from model_id + real_library_path.
+    Fallback sort is largest-first: a best-effort heuristic matching osxphotos'
+    own sort order (larger files are higher-quality previews), not a Photos API guarantee.
     """
     derivs = getattr(photo, "path_derivatives", None) or []
     src = next((d for d in derivs if d and Path(d).exists()), None)
@@ -332,12 +367,20 @@ def _copy_thumbnail(
     if src is None and real_library_path is not None and model_id is not None:
         deriv_dir = _derivatives_dir_photos4(model_id, real_library_path)
         if deriv_dir.is_dir():
-            files = sorted(
-                (f for f in deriv_dir.glob("*") if f.is_file()),
-                key=lambda f: f.stat().st_size,
-                reverse=True,
-            )
-            src = str(files[0]) if files else None
+            # Collect (size, path) pairs, skipping any entry whose stat() fails
+            # (e.g. a broken symlink or a file deleted between glob and stat).
+            # Largest-first: best-effort heuristic, not a Photos API guarantee.
+            candidates: list[tuple[int, Path]] = []
+            for f in deriv_dir.glob("*"):
+                try:
+                    if f.is_file():
+                        candidates.append((f.stat().st_size, f))
+                except OSError:
+                    pass
+            candidates.sort(reverse=True)
+            src = str(candidates[0][1]) if candidates else None
+            if src is not None:
+                log.debug("fallback thumbnail copy for %s from %s", photo.uuid, src)
 
     if src is None:
         return "missing"
@@ -354,78 +397,164 @@ def _copy_thumbnail(
         return "error"
 ```
 
-- [ ] **Step 4: Run tests to verify they pass (or that the only failure is the missing `model_id_override` wiring)**
+- [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-python -m pytest tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_uses_real_bundle tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_picks_largest_file tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_missing_when_dir_absent tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_missing_when_no_model_id -v
+python -m pytest \
+  tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_uses_real_bundle \
+  tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_picks_largest_file \
+  tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_missing_when_dir_absent \
+  tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_missing_when_no_model_id \
+  tests/test_legacy_indexer.py::test_copy_thumbnail_fast_path_wins_when_derivatives_present \
+  tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_handles_stat_failure \
+  -v
 ```
 
-These will still fail if `index_library` doesn't pass `model_id` and `real_library_path` through. Proceed to Task 4 to wire it up, then run the full suite.
+Expected: PASS (all six)
 
 ---
 
-### Task 4: Wire model_id map into `index_library`
+### Task 4: Wire model_id map into `index_library` — minimal edits
 
 **Files:**
-- Modify: `poller/legacy_indexer.py:154-249` (the `index_library` function)
+- Modify: `poller/legacy_indexer.py:154-249` (two targeted additions)
+- Test: `tests/test_legacy_indexer.py`
 
-Build the `uuid → model_id` map from the local cache DB and pass it through to `_copy_thumbnail`.
+Two changes only — nothing else in `index_library` moves:
 
-- [ ] **Step 1: Modify `index_library` signature and body**
-
-The signature gains one test-only parameter (`model_id_override`). The body builds a model_id map from the cache DB, then passes `real_library_path` and per-photo `model_id` to `_copy_thumbnail`.
-
-Replace `index_library` in `poller/legacy_indexer.py` with:
+**Change A** — add after `db.set_legacy_library(...)` (around line 181), before `seen: set[str] = set()`:
 
 ```python
-def index_library(
-    library_path: str,
-    db,
-    *,
-    curator_db_path: str,
-    thumb_root: Path | str,
-    copy_thumbnails: bool = True,
-    limit: int | None = None,
-    use_cache: bool = True,
-    refresh_cache: bool = False,
-    photosdb_factory: Callable | None = None,
-    model_id_override: dict[str, int] | None = None,
-) -> dict:
-    """Index the legacy library into curator.db. Returns a stats dict."""
-    thumb_root = Path(thumb_root)
-    photosdb = _open_photosdb(
-        library_path,
-        db,
-        None,
-        curator_db_path,
-        use_cache,
-        refresh_cache,
-        photosdb_factory,
-    )
-    library_uuid = _resolve_library_uuid(photosdb, library_path)
-    schema_version = getattr(photosdb, "db_version", None)
+    # Batch-load uuid→model_id from the local cache DB so _copy_thumbnail can
+    # compute Photos 4 derivative paths without per-asset NAS queries.
+    # Always reads from the cache (not the NAS) for speed; falls back to an empty
+    # map if the cache DB hasn't been built yet.
+    model_id_map: dict[str, int] = {}
+    if copy_thumbnails:
+        from legacy_cache import cache_dir as _cache_dir
+        cached_db = locate_source_db(str(_cache_dir(curator_db_path, library_uuid)))
+        if cached_db:
+            model_id_map = _load_model_ids(cached_db)
+```
 
-    # Ensure the library row exists before inserting assets (FK requires it).
+**Change B** — inside the `for photo in photosdb.photos()` loop, replace the existing `_copy_thumbnail` call:
+
+```python
+        # Before:
+        status = _copy_thumbnail(photo, library_uuid, thumb_root)
+
+        # After:
+        status = _copy_thumbnail(
+            photo,
+            library_uuid,
+            thumb_root,
+            real_library_path=library_path if model_id_map else None,
+            model_id=model_id_map.get(photo.uuid),
+        )
+```
+
+No other lines in `index_library` change.
+
+- [ ] **Step 1: Write failing integration test**
+
+This test creates a minimal fake cache DB (the `photos.db` file `_load_model_ids` reads from)
+at the path `index_library` will compute from `curator_db_path` and `library_uuid`.
+No monkeypatching needed — it exercises the real code path end-to-end.
+
+**Note:** This test intentionally encodes the current cache-path contract
+(`cache_dir(curator_db_path, library_uuid) / "database" / "photos.db"`). If the
+cache layout changes, update this test along with the cache module.
+
+Add to `tests/test_legacy_indexer.py`:
+
+```python
+def test_index_library_loads_model_id_map_from_cache_db(tmp_path):
+    """index_library wires model_id_map → _copy_thumbnail when the cache DB exists.
+
+    Exercises the current cache-path contract. Update if cache layout changes.
+    """
+    # FakePhotosDB uses library_uuid = "LIB-UUID" (from _uuid attribute).
+    library_uuid = "LIB-UUID"
+    curator_db = str(tmp_path / "curator.db")
+
+    # Create minimal cache DB at the path index_library will look up.
+    from legacy_cache import cache_dir as _cache_dir
+    cache_db_dir = _cache_dir(curator_db, library_uuid) / "database"
+    cache_db_dir.mkdir(parents=True)
+    cache_conn = sqlite3.connect(str(cache_db_dir / "photos.db"))
+    cache_conn.execute("CREATE TABLE RKVersion (modelId INTEGER PRIMARY KEY, uuid VARCHAR)")
+    cache_conn.execute("INSERT INTO RKVersion VALUES (1, 'uuid-A')")
+    cache_conn.commit()
+    cache_conn.close()
+
+    # Create derivative file at the path _derivatives_dir_photos4(1, real_lib) resolves to.
+    real_lib = tmp_path / "Real.photoslibrary"
+    deriv_dir = real_lib / "resources" / "proxies" / "derivatives" / "00" / "00" / "1"
+    deriv_dir.mkdir(parents=True)
+    (deriv_dir / "preview.jpg").write_bytes(b"PREVIEW_DATA")
+
+    db = _db(tmp_path)
+    photos = [FakePhoto("uuid-A", derivatives=[])]
+    stats = legacy_indexer.index_library(
+        str(real_lib),
+        db,
+        curator_db_path=curator_db,
+        thumb_root=tmp_path / "thumbs",
+        copy_thumbnails=True,
+        use_cache=False,
+        photosdb_factory=_factory(photos),
+    )
+    assert stats["thumb_ok"] == 1
+    assert stats["thumb_missing"] == 0
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+```bash
+python -m pytest tests/test_legacy_indexer.py::test_index_library_loads_model_id_map_from_cache_db -v
+```
+
+Expected: FAIL — `_copy_thumbnail` doesn't receive `model_id` yet, so derivative dir isn't checked.
+
+- [ ] **Step 3: Apply the two targeted edits to `index_library`**
+
+Open `poller/legacy_indexer.py`. Find the block that starts with:
+
+```python
     db.set_legacy_library({"library_uuid": library_uuid, "source_path_last_seen": library_path})
 
-    # Build uuid→model_id map from the local cache DB so _copy_thumbnail can
-    # resolve Photos 4 derivative paths without querying the NAS per asset.
-    if model_id_override is not None:
-        model_id_map: dict[str, int] = model_id_override
-    elif copy_thumbnails and use_cache:
-        from legacy_cache import cache_dir as _cache_dir, locate_source_db as _lsd
-        cached_db = _lsd(str(_cache_dir(curator_db_path, library_uuid)))
-        model_id_map = _load_model_ids(cached_db) if cached_db else {}
-    else:
-        model_id_map = {}
+    seen: set[str] = set()
+```
+
+Change it to:
+
+```python
+    db.set_legacy_library({"library_uuid": library_uuid, "source_path_last_seen": library_path})
+
+    # Batch-load uuid→model_id from the local cache DB so _copy_thumbnail can
+    # compute Photos 4 derivative paths without per-asset NAS queries.
+    # Always reads from the cache (not the NAS) for speed; falls back to an empty
+    # map if the cache DB hasn't been built yet.
+    model_id_map: dict[str, int] = {}
+    if copy_thumbnails:
+        from legacy_cache import cache_dir as _cache_dir
+        cached_db = locate_source_db(str(_cache_dir(curator_db_path, library_uuid)))
+        if cached_db:
+            model_id_map = _load_model_ids(cached_db)
 
     seen: set[str] = set()
-    indexed = thumb_ok = thumb_missing = thumb_error = 0
+```
 
-    for photo in photosdb.photos():
-        if limit is not None and indexed >= limit:
-            break
-        row = _build_row(photo, library_uuid, library_path)
+Then find the existing `_copy_thumbnail` call inside the loop:
+
+```python
+        if copy_thumbnails:
+            status = _copy_thumbnail(photo, library_uuid, thumb_root)
+```
+
+Change it to:
+
+```python
         if copy_thumbnails:
             status = _copy_thumbnail(
                 photo,
@@ -434,82 +563,16 @@ def index_library(
                 real_library_path=library_path if model_id_map else None,
                 model_id=model_id_map.get(photo.uuid),
             )
-        else:
-            status = "skipped"
-        row["thumbnail_cache_key"] = thumbnail_cache_key(library_uuid, photo.uuid)
-        row["thumbnail_status"] = status
-        db.upsert_legacy_asset(row)
-        seen.add(photo.uuid)
-        indexed += 1
-        thumb_ok += status == "ok"
-        thumb_missing += status == "missing"
-        thumb_error += status == "error"
-        if indexed % PROGRESS_INTERVAL == 0:
-            log.info("indexed %d assets so far...", indexed)
-
-    # Authoritative reconciliation — only after a successful FULL iteration.
-    # An exception above propagates and skips this block (interrupted == no delete).
-    reconciled = 0
-    if limit is None:
-        removed_keys = db.delete_legacy_assets_not_in(library_uuid, seen)
-        reconciled = len(removed_keys)
-        for key in removed_keys:
-            stale = thumbnail_path(thumb_root, library_uuid, key)
-            try:
-                stale.unlink(missing_ok=True)
-            except OSError:
-                pass
-
-    try:
-        schema_int = int(schema_version) if schema_version is not None else None
-    except (TypeError, ValueError):
-        schema_int = None
-
-    from legacy_cache import source_db_stats
-
-    lib_rec = {
-        "library_uuid": library_uuid,
-        "source_path_last_seen": library_path,
-        "schema_version": schema_int,
-        "asset_count": db.legacy_asset_count(library_uuid),
-    }
-    src = locate_source_db(library_path)
-    if src:
-        try:
-            lib_rec.update(source_db_stats(src))
-        except OSError:
-            pass
-    db.set_legacy_library(lib_rec)
-
-    stats = {
-        "library_uuid": library_uuid,
-        "indexed": indexed,
-        "reconciled": reconciled,
-        "thumb_ok": thumb_ok,
-        "thumb_missing": thumb_missing,
-        "thumb_error": thumb_error,
-        "authoritative": limit is None,
-    }
-    log.info("legacy index complete: %s", stats)
-    return stats
 ```
 
-- [ ] **Step 2: Run the new thumbnail fallback tests**
+- [ ] **Step 4: Run the full test suite**
 
 ```bash
 cd "/Users/cdevers/Documents/GitHub/Blue Pearmain"
-python -m pytest tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_uses_real_bundle tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_picks_largest_file tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_missing_when_dir_absent tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_missing_when_no_model_id -v
-```
-
-Expected: PASS (all four)
-
-- [ ] **Step 3: Run the full test suite**
-
-```bash
 python -m pytest tests/ -q
 ```
 
-Expected: all tests pass. Pay attention to existing `test_legacy_indexer.py` tests — they must continue to pass unchanged (they use `use_cache=False` and no `model_id_override`, so `model_id_map` is `{}` and behaviour is identical to before).
+Expected: all tests pass. Pay attention to existing `test_legacy_indexer.py` tests — they use `copy_thumbnails=False` or no cache DB, so `model_id_map` stays `{}` and behaviour is unchanged.
 
 ---
 
@@ -538,7 +601,8 @@ Fix: batch-load uuid→model_id from the cached photos.db once per run,
 then compute the derivatives directory via the same formula osxphotos
 uses (_get_resource_loc) and glob for files against the real library
 path. Falls back to missing if the NAS is unmounted or model_id is
-unknown.
+unknown. Largest-file-first selection matches osxphotos' sort order;
+documented as a best-effort heuristic in code and tests.
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 EOF
@@ -547,30 +611,39 @@ EOF
 
 ---
 
-### Task 6: Manual verification + docs + push
+### Task 6: Manual verification + push
 
 - [ ] **Step 1: Verify against the real library with `--limit`**
 
 With the NAS mounted and `legacy_library.path` set in `config/config.yml`:
 
 ```bash
-bp index-legacy --limit 50
+bp --verbose index-legacy --limit 50 2>&1 | tee /tmp/index_legacy_test.log
 ```
 
-Expected output includes `thumb_ok > 0` (e.g. `"thumb_ok": 42, "thumb_missing": 8`). Any missing is fine — some assets genuinely have no derivatives. Zero `thumb_ok` means the fallback isn't firing.
+Note: `--verbose` must come before the subcommand — it is a top-level `bp` flag, not an `index-legacy` flag.
 
-If `thumb_ok` is 0, investigate: check that
-`<NAS>/resources/proxies/derivatives/` exists and is readable:
+Two things to confirm:
+
+**a) The fallback code path actually ran.** The `log.debug` line in `_copy_thumbnail` fires
+when a fallback copy succeeds. `--verbose` enables DEBUG level; without it the line is
+suppressed and the grep will always come up empty:
 
 ```bash
-ls "/Volumes/homes/cdevers/Pictures/Photos Library.photoslibrary/resources/proxies/derivatives/" | head -5
+grep "fallback thumbnail copy" /tmp/index_legacy_test.log | head -5
 ```
 
-- [ ] **Step 2: Update CLAUDE.md / docs**
+Expected: at least one line like:
+`DEBUG blue-pearmain.legacy-indexer fallback thumbnail copy for <uuid> from <path>`
 
-No spec file was created for #164 (the GitHub issue itself is the spec). No docs update required.
+If nothing appears but `thumb_ok > 0`, re-run with `bp --verbose index-legacy --limit 50` — a copy may have succeeded
+via the fast path (`path_derivatives` was non-empty) rather than the fallback.
 
-- [ ] **Step 3: Push branch and open PR**
+**b) The count is material.** Zero `thumb_ok` with a non-empty library means something is wrong.
+Check that `resources/proxies/derivatives/` exists under the NAS mount and that the cache DB
+has `RKVersion` rows.
+
+- [ ] **Step 2: Push branch and open PR**
 
 ```bash
 git push -u origin fix/legacy-thumbnail-real-bundle-164
@@ -579,13 +652,15 @@ gh pr create \
   --body "$(cat <<'EOF'
 ## Summary
 
-- `index_library` now batch-loads `uuid → model_id` from the local cache DB before the iteration loop (one sqlite3 query, no NAS traffic)
-- `_copy_thumbnail` falls back to computing the Photos 4 derivatives directory path via the `_get_resource_loc` formula when `path_derivatives` is empty
-- Gracefully handles NAS-unmounted case: returns `missing` without error
-- Existing behaviour unchanged when `use_cache=False` or `copy_thumbnails=False`
+- `_load_model_ids` batch-queries `RKVersion.modelId` from the local cache DB (one sqlite3 query, no NAS traffic)
+- `_derivatives_dir_photos4` computes the Photos 4 derivatives path using the same `_get_resource_loc` formula as osxphotos
+- `_copy_thumbnail` gains a Photos 4 fallback: when `path_derivatives` is empty, globs the computed dir against the real library path; largest file first (best-effort heuristic documented in code)
+- `index_library` gains two targeted edits: build map before loop, pass `model_id` per asset to `_copy_thumbnail`
+- Fast path (path_derivatives populated) is regression-tested: it wins over the fallback
 
 ## Test plan
-- [ ] New unit tests for `_load_model_ids`, `_derivatives_dir_photos4`, and the fallback path in `_copy_thumbnail`
+- [ ] Unit tests for `_load_model_ids`, `_derivatives_dir_photos4`, `_copy_thumbnail` fallback and fast-path regression
+- [ ] Integration test: minimal fake cache DB + derivative file → `thumb_ok == 1` through `index_library`
 - [ ] Run `bp index-legacy --limit 50` with NAS mounted and confirm `thumb_ok > 0`
 - [ ] Full test suite green
 
@@ -596,17 +671,19 @@ EOF
 )"
 ```
 
-- [ ] **Step 4: Post retrospective comment on GH#164**
+- [ ] **Step 3: Post retrospective comment on GH#164**
 
 ```bash
 gh issue comment 164 --repo cdevers/Blue-Pearmain --body "$(cat <<'EOF'
-Implemented in PR #<number>. 
+Implemented in PR #<number>.
 
-Size estimate: S ✓ (3 new helpers, ~40 LOC production, ~80 LOC test)
+Size estimate: S ✓ (~40 LOC production, ~100 LOC test)
 Files changed: poller/legacy_indexer.py, tests/test_legacy_indexer.py
 Plan tasks: 6 / 6 complete
 
-The fix stays entirely within the indexer — no schema changes, no new files. The `model_id_override` test parameter avoids coupling tests to a real DB file.
+The `model_id_override` parameter from the first plan draft was dropped following
+code review; tests now use direct `_copy_thumbnail` unit calls and a minimal fake
+cache DB for integration coverage.
 EOF
 )"
 ```
@@ -616,11 +693,22 @@ EOF
 ## Self-Review Notes
 
 **Spec coverage:**
-- ✓ Resolve derivative paths against real bundle → Task 3+4
+- ✓ Resolve derivative paths against real bundle → Tasks 3+4
 - ✓ Confirm osxphotos `path_derivatives` for Photos 4 → documented in Architecture (empty from cache; confirmed by reading osxphotos source)
 - ✓ Fall back to `Thumbnails/` construction → implemented as `resources/proxies/derivatives/` (the actual Photos 4 path; "Thumbnails/" is iPhoto's older layout)
 - ✓ Re-run `--limit` pass and confirm `thumb_ok > 0` → Task 6 step 1
 
 **No placeholders present.**
 
-**Type consistency:** `_derivatives_dir_photos4` returns `Path`; tests import `Path` at top; `_load_model_ids` returns `dict[str, int]`; `model_id_map.get(photo.uuid)` returns `int | None`; `_copy_thumbnail` accepts `model_id: int | None`. All consistent.
+**Review feedback addressed (rounds 1 and 2):**
+- ✓ No `model_id_override` in production API — tests use direct `_copy_thumbnail` calls or a real fake cache DB
+- ✓ `index_library` edits are minimal (two additions) not a full replacement
+- ✓ Largest-file heuristic documented in docstring, code comment, and test name
+- ✓ Fast-path regression test added (`test_copy_thumbnail_fast_path_wins_when_derivatives_present`)
+- ✓ Integration test annotated as intentionally encoding the cache-path contract
+- ✓ `_load_model_ids` duplicate-UUID behavior documented (last-row-wins, intentional)
+- ✓ `stat()` failure in fallback sort fixed — per-file try/except, unreadable entries skipped
+- ✓ `stat()` failure test added (`test_copy_thumbnail_photos4_fallback_handles_stat_failure`)
+- ✓ `log.debug` emitted when fallback copy succeeds; verification runs with `--verbose` so DEBUG messages are visible (default level is INFO)
+
+**Type consistency:** `_derivatives_dir_photos4` returns `Path`; `_load_model_ids` returns `dict[str, int]`; `model_id_map.get(photo.uuid)` returns `int | None`; `_copy_thumbnail` accepts `model_id: int | None`. All consistent across tasks.
