@@ -91,7 +91,13 @@ In `poller/legacy_indexer.py`, add after `log = logging.getLogger(...)`:
 
 ```python
 def _load_model_ids(source_db_path: str) -> dict[str, int]:
-    """Map asset UUID → RKVersion.modelId. Single query; safe on missing/corrupt DB."""
+    """Map asset UUID → RKVersion.modelId. Single query; safe on missing/corrupt DB.
+
+    If RKVersion somehow contains duplicate UUIDs (not expected in Photos 4),
+    the dict comprehension keeps the last-seen modelId. This is intentional:
+    duplicates are a data anomaly and any modelId for that UUID will locate
+    the same derivatives directory.
+    """
     import sqlite3 as _sqlite3
 
     try:
@@ -291,6 +297,35 @@ def test_copy_thumbnail_fast_path_wins_when_derivatives_present(tmp_path):
     key = thumbnail_cache_key("LIB-UUID", "uuid-1")
     dest = thumbnail_path(tmp_path / "thumbs", "LIB-UUID", key)
     assert dest.read_bytes() == b"FAST_PATH"  # fast path, not fallback
+
+
+def test_copy_thumbnail_photos4_fallback_handles_stat_failure(tmp_path):
+    """stat() failure on one file in the derivatives dir is skipped; others still work."""
+    from unittest.mock import patch
+
+    real_lib = tmp_path / "Real.photoslibrary"
+    deriv_dir = real_lib / "resources" / "proxies" / "derivatives" / "00" / "00" / "1"
+    deriv_dir.mkdir(parents=True)
+    good = deriv_dir / "good.jpg"
+    good.write_bytes(b"GOOD" * 100)
+    bad = deriv_dir / "bad.jpg"
+    bad.write_bytes(b"BAD")
+
+    original_stat = Path.stat
+
+    def stat_raises_for_bad(self, **kwargs):
+        if self.name == "bad.jpg":
+            raise OSError("simulated stat failure")
+        return original_stat(self, **kwargs)
+
+    photo = FakePhoto("uuid-1", derivatives=[])
+    with patch.object(Path, "stat", stat_raises_for_bad):
+        status = legacy_indexer._copy_thumbnail(
+            photo, "LIB-UUID", tmp_path / "thumbs",
+            real_library_path=str(real_lib),
+            model_id=1,
+        )
+    assert status == "ok"  # bad.jpg skipped; good.jpg copied
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -302,6 +337,7 @@ python -m pytest \
   tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_missing_when_dir_absent \
   tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_missing_when_no_model_id \
   tests/test_legacy_indexer.py::test_copy_thumbnail_fast_path_wins_when_derivatives_present \
+  tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_handles_stat_failure \
   -v
 ```
 
@@ -333,13 +369,20 @@ def _copy_thumbnail(
     if src is None and real_library_path is not None and model_id is not None:
         deriv_dir = _derivatives_dir_photos4(model_id, real_library_path)
         if deriv_dir.is_dir():
+            # Collect (size, path) pairs, skipping any entry whose stat() fails
+            # (e.g. a broken symlink or a file deleted between glob and stat).
             # Largest-first: best-effort heuristic, not a Photos API guarantee.
-            files = sorted(
-                (f for f in deriv_dir.glob("*") if f.is_file()),
-                key=lambda f: f.stat().st_size,
-                reverse=True,
-            )
-            src = str(files[0]) if files else None
+            candidates: list[tuple[int, Path]] = []
+            for f in deriv_dir.glob("*"):
+                try:
+                    if f.is_file():
+                        candidates.append((f.stat().st_size, f))
+                except OSError:
+                    pass
+            candidates.sort(reverse=True)
+            src = str(candidates[0][1]) if candidates else None
+            if src is not None:
+                log.debug("fallback thumbnail copy for %s from %s", photo.uuid, src)
 
     if src is None:
         return "missing"
@@ -365,10 +408,11 @@ python -m pytest \
   tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_missing_when_dir_absent \
   tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_missing_when_no_model_id \
   tests/test_legacy_indexer.py::test_copy_thumbnail_fast_path_wins_when_derivatives_present \
+  tests/test_legacy_indexer.py::test_copy_thumbnail_photos4_fallback_handles_stat_failure \
   -v
 ```
 
-Expected: PASS (all five)
+Expected: PASS (all six)
 
 ---
 
@@ -419,11 +463,18 @@ This test creates a minimal fake cache DB (the `photos.db` file `_load_model_ids
 at the path `index_library` will compute from `curator_db_path` and `library_uuid`.
 No monkeypatching needed — it exercises the real code path end-to-end.
 
+**Note:** This test intentionally encodes the current cache-path contract
+(`cache_dir(curator_db_path, library_uuid) / "database" / "photos.db"`). If the
+cache layout changes, update this test along with the cache module.
+
 Add to `tests/test_legacy_indexer.py`:
 
 ```python
 def test_index_library_loads_model_id_map_from_cache_db(tmp_path):
-    """index_library wires model_id_map → _copy_thumbnail when the cache DB exists."""
+    """index_library wires model_id_map → _copy_thumbnail when the cache DB exists.
+
+    Exercises the current cache-path contract. Update if cache layout changes.
+    """
     # FakePhotosDB uses library_uuid = "LIB-UUID" (from _uuid attribute).
     library_uuid = "LIB-UUID"
     curator_db = str(tmp_path / "curator.db")
@@ -569,13 +620,27 @@ EOF
 With the NAS mounted and `legacy_library.path` set in `config/config.yml`:
 
 ```bash
-bp index-legacy --limit 50
+bp index-legacy --limit 50 2>&1 | tee /tmp/index_legacy_test.log
 ```
 
-Expected output includes `thumb_ok > 0` (e.g. `"thumb_ok": 42, "thumb_missing": 8`).
-Any missing is fine — some assets genuinely have no derivatives.
-Zero `thumb_ok` means the fallback isn't firing; check that
-`<NAS>/resources/proxies/derivatives/` exists and is readable.
+Two things to confirm:
+
+**a) The fallback code path actually ran.** The `log.debug` line in `_copy_thumbnail` fires
+when a fallback copy succeeds. Check for it:
+
+```bash
+grep "fallback thumbnail copy" /tmp/index_legacy_test.log | head -5
+```
+
+Expected: at least one line like:
+`DEBUG blue-pearmain.legacy-indexer fallback thumbnail copy for <uuid> from <path>`
+
+If nothing appears, the fallback isn't triggering — check that `resources/proxies/derivatives/`
+exists under the NAS mount and that the cache DB has `RKVersion` rows.
+
+**b) The count is material.** Zero `thumb_ok` with a non-empty library means something is wrong.
+A handful of `thumb_ok` (< 5 out of 50) might just be fast-path hits on photos with live
+`path_derivatives`. The debug log from step (a) is the definitive proof that the new code ran.
 
 - [ ] **Step 2: Push branch and open PR**
 
@@ -634,10 +699,15 @@ EOF
 
 **No placeholders present.**
 
-**Review feedback addressed:**
+**Review feedback addressed (rounds 1 and 2):**
 - ✓ No `model_id_override` in production API — tests use direct `_copy_thumbnail` calls or a real fake cache DB
 - ✓ `index_library` edits are minimal (two additions) not a full replacement
 - ✓ Largest-file heuristic documented in docstring, code comment, and test name
 - ✓ Fast-path regression test added (`test_copy_thumbnail_fast_path_wins_when_derivatives_present`)
+- ✓ Integration test annotated as intentionally encoding the cache-path contract
+- ✓ `_load_model_ids` duplicate-UUID behavior documented (last-row-wins, intentional)
+- ✓ `stat()` failure in fallback sort fixed — per-file try/except, unreadable entries skipped
+- ✓ `stat()` failure test added (`test_copy_thumbnail_photos4_fallback_handles_stat_failure`)
+- ✓ `log.debug` emitted when fallback copy succeeds; verification now greps for it as proof of execution
 
 **Type consistency:** `_derivatives_dir_photos4` returns `Path`; `_load_model_ids` returns `dict[str, int]`; `model_id_map.get(photo.uuid)` returns `int | None`; `_copy_thumbnail` accepts `model_id: int | None`. All consistent across tasks.
