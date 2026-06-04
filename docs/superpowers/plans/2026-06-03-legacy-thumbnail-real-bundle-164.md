@@ -618,8 +618,10 @@ EOF
 With the NAS mounted and `legacy_library.path` set in `config/config.yml`:
 
 ```bash
-bp index-legacy --limit 50 --verbose 2>&1 | tee /tmp/index_legacy_test.log
+bp --verbose index-legacy --limit 50 2>&1 | tee /tmp/index_legacy_test.log
 ```
+
+Note: `--verbose` must come before the subcommand — it is a top-level `bp` flag, not an `index-legacy` flag.
 
 Two things to confirm:
 
@@ -634,7 +636,7 @@ grep "fallback thumbnail copy" /tmp/index_legacy_test.log | head -5
 Expected: at least one line like:
 `DEBUG blue-pearmain.legacy-indexer fallback thumbnail copy for <uuid> from <path>`
 
-If nothing appears but `thumb_ok > 0`, re-run with `--verbose` — a copy may have succeeded
+If nothing appears but `thumb_ok > 0`, re-run with `bp --verbose index-legacy --limit 50` — a copy may have succeeded
 via the fast path (`path_derivatives` was non-empty) rather than the fallback.
 
 **b) The count is material.** Zero `thumb_ok` with a non-empty library means something is wrong.
