@@ -10483,6 +10483,114 @@ class TestDeletePhoto(unittest.TestCase):
         ).fetchone()
         self.assertIsNone(row)
 
+    def _make_photo(self, uuid: str) -> int:
+        return self.db.upsert_photo(
+            {
+                "uuid": uuid,
+                "flickr_id": None,
+                "privacy_state": "candidate_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+
+    def test_delete_photo_with_operation_log_entry_succeeds(self):
+        """delete_photo must not raise FK error when operation_log references the photo."""
+        photo_id = self._make_photo("GHOST-0010")
+        self.db.log_operation(photo_id, "test_op", target="test")
+
+        # Pre-condition: operation_log row exists and points to our photo
+        row = self.db.conn.execute(
+            "SELECT photo_id FROM operation_log WHERE photo_id = ?", (photo_id,)
+        ).fetchone()
+        self.assertIsNotNone(row)
+
+        # Must not raise IntegrityError
+        self.db.delete_photo(photo_id)
+
+        # Photo is gone
+        self.assertIsNone(
+            self.db.conn.execute("SELECT id FROM photos WHERE id = ?", (photo_id,)).fetchone()
+        )
+        # operation_log row persists with photo_id NULLed (audit log preserved)
+        row = self.db.conn.execute(
+            "SELECT photo_id, operation FROM operation_log WHERE operation = 'test_op'"
+        ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertIsNone(row["photo_id"])
+
+    def test_delete_photo_with_duplicate_groups_keeper_succeeds(self):
+        """delete_photo must not raise FK error when duplicate_groups references the photo as keeper."""
+        photo_id = self._make_photo("GHOST-0011")
+        self.db.conn.execute(
+            """INSERT INTO duplicate_groups
+               (match_key, group_type, photo_count, keeper_id, resolved, created_at, updated_at)
+               VALUES ('key-001', 'flickr_dims', 2, ?, 0,
+                       '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')""",
+            (photo_id,),
+        )
+        self.db.conn.commit()
+
+        # Must not raise IntegrityError
+        self.db.delete_photo(photo_id)
+
+        self.assertIsNone(
+            self.db.conn.execute("SELECT id FROM photos WHERE id = ?", (photo_id,)).fetchone()
+        )
+        # duplicate_groups row persists with keeper_id NULLed
+        row = self.db.conn.execute(
+            "SELECT keeper_id FROM duplicate_groups WHERE match_key = 'key-001'"
+        ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertIsNone(row["keeper_id"])
+
+    def test_delete_photo_with_merged_into_id_ref_succeeds(self):
+        """delete_photo must not raise FK error when another photo's merged_into_id points to it."""
+        keeper_id = self._make_photo("GHOST-0012")
+        donor_id = self._make_photo("GHOST-0013")
+        self.db.conn.execute(
+            "UPDATE photos SET merged_into_id = ? WHERE id = ?", (keeper_id, donor_id)
+        )
+        self.db.conn.commit()
+
+        # Delete the keeper (the target of the merged_into_id FK)
+        self.db.delete_photo(keeper_id)
+
+        self.assertIsNone(
+            self.db.conn.execute("SELECT id FROM photos WHERE id = ?", (keeper_id,)).fetchone()
+        )
+        # Donor row persists with merged_into_id cleared
+        row = self.db.conn.execute(
+            "SELECT merged_into_id FROM photos WHERE id = ?", (donor_id,)
+        ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertIsNone(row["merged_into_id"])
+
+    def test_merge_flickr_into_photos_with_operation_log_succeeds(self):
+        """merge_flickr_into_photos must not raise FK error when flickr record has operation_log entries."""
+        flickr_id = self.db.upsert_photo(
+            {
+                "uuid": None,
+                "flickr_id": "F-MERGE-001",
+                "privacy_state": "candidate_public",
+                "proposed_tags": [],
+                "apple_persons": [],
+                "apple_labels": [],
+            }
+        )
+        photos_id = self._make_photo("MERGE-PHOTOS-001")
+        self.db.log_operation(flickr_id, "flickr_scan", target="F-MERGE-001")
+
+        # Must not raise IntegrityError
+        result = self.db.merge_flickr_into_photos(flickr_id, photos_id)
+        self.assertTrue(result)
+
+        # Flickr record gone
+        self.assertIsNone(
+            self.db.conn.execute("SELECT id FROM photos WHERE id = ?", (flickr_id,)).fetchone()
+        )
+
 
 def _make_mock_photos(*uuids: str):
     """Return MagicMock photo objects with the given .uuid values."""
