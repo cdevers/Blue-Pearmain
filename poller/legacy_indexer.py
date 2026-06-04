@@ -28,16 +28,28 @@ log = logging.getLogger("blue-pearmain.legacy-indexer")
 
 
 def _load_model_ids(source_db_path: str) -> dict[str, int]:
-    """Map asset UUID → RKVersion.modelId. Single query; safe on missing/corrupt DB.
+    """Map asset UUID → model ID for derivative-path computation. Safe on missing/corrupt DB.
 
-    Duplicate UUIDs in RKVersion are unexpected; if they occur, the dict
-    comprehension keeps the last-seen modelId (last-row-wins).
+    Tries ZGENERICASSET (Photos.sqlite / Photos 5+ format) first: osxphotos opens
+    Photos.sqlite when present, so photo.uuid is ZGENERICASSET.ZUUID and the
+    matching model ID is Z_PK. Falls back to RKVersion (photos.db / Photos 4 format)
+    for libraries without Photos.sqlite. Duplicate UUIDs are unexpected; last-row-wins.
     """
     try:
         conn = sqlite3.connect(f"file:{source_db_path}?immutable=1", uri=True)
     except sqlite3.Error:
         return {}
     try:
+        # Photos 5+ / Photos.sqlite: uuid is ZGENERICASSET.ZUUID, model_id is Z_PK
+        try:
+            rows = conn.execute(
+                "SELECT ZUUID, Z_PK FROM ZGENERICASSET WHERE ZUUID IS NOT NULL AND Z_PK IS NOT NULL"
+            ).fetchall()
+            if rows:
+                return {uuid: int(pk) for uuid, pk in rows}
+        except sqlite3.Error:
+            pass
+        # Photos 4 / photos.db fallback: uuid is RKVersion.uuid, model_id is modelId
         rows = conn.execute(
             "SELECT uuid, modelId FROM RKVersion WHERE uuid IS NOT NULL AND modelId IS NOT NULL"
         ).fetchall()
@@ -255,9 +267,14 @@ def index_library(
     if copy_thumbnails:
         from legacy_cache import cache_dir as _cache_dir
 
-        cached_db = locate_source_db(str(_cache_dir(curator_db_path, library_uuid)))
-        if cached_db:
-            model_id_map = _load_model_ids(cached_db)
+        # Mirror osxphotos' DB selection: Photos.sqlite wins when present (Photos 5+
+        # format, ZGENERICASSET.ZUUID); fall back to photos.db for pure Photos 4.
+        cache_base = _cache_dir(curator_db_path, library_uuid)
+        for _rel in ("database/Photos.sqlite", "database/photos.db"):
+            _candidate = cache_base / _rel
+            if _candidate.exists():
+                model_id_map = _load_model_ids(str(_candidate))
+                break
 
     seen: set[str] = set()
     indexed = thumb_ok = thumb_missing = thumb_error = 0

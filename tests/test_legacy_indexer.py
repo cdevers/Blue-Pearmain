@@ -281,10 +281,28 @@ def _make_photos4_db(tmp_path, rows: list[tuple[str, int]]) -> str:
     return db_path
 
 
+def _make_photos5_db(tmp_path, rows: list[tuple[str, int]]) -> str:
+    """Minimal Photos.sqlite with ZGENERICASSET for Photos 5+ model_id lookup."""
+    db_path = str(tmp_path / "Photos.sqlite")
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE ZGENERICASSET (Z_PK INTEGER PRIMARY KEY, ZUUID VARCHAR)")
+    conn.executemany("INSERT INTO ZGENERICASSET VALUES (?, ?)", [(pk, uuid) for uuid, pk in rows])
+    conn.commit()
+    conn.close()
+    return db_path
+
+
 def test_load_model_ids_returns_uuid_to_modelid(tmp_path):
     db = _make_photos4_db(tmp_path, [("uuid-A", 10), ("uuid-B", 255)])
     result = legacy_indexer._load_model_ids(db)
     assert result == {"uuid-A": 10, "uuid-B": 255}
+
+
+def test_load_model_ids_prefers_zgenericasset_over_rkversion(tmp_path):
+    """When Photos.sqlite has ZGENERICASSET, UUID4 keys from that table are returned."""
+    db = _make_photos5_db(tmp_path, [("UUID4-A", 100), ("UUID4-B", 200)])
+    result = legacy_indexer._load_model_ids(db)
+    assert result == {"UUID4-A": 100, "UUID4-B": 200}
 
 
 def test_load_model_ids_returns_empty_on_bad_path():
@@ -457,6 +475,7 @@ def test_index_library_loads_model_id_map_from_cache_db(tmp_path):
     """index_library wires model_id_map → _copy_thumbnail when the cache DB exists.
 
     Exercises the current cache-path contract. Update if cache layout changes.
+    Uses photos.db / RKVersion (Photos 4 fallback path).
     """
     # FakePhotosDB uses library_uuid = "LIB-UUID" (from _uuid attribute).
     library_uuid = "LIB-UUID"
@@ -474,6 +493,55 @@ def test_index_library_loads_model_id_map_from_cache_db(tmp_path):
     cache_conn.close()
 
     # Create derivative file at the path _derivatives_dir_photos4(1, real_lib) resolves to.
+    real_lib = tmp_path / "Real.photoslibrary"
+    deriv_dir = real_lib / "resources" / "proxies" / "derivatives" / "00" / "00" / "1"
+    deriv_dir.mkdir(parents=True)
+    (deriv_dir / "preview.jpg").write_bytes(b"PREVIEW_DATA")
+
+    db = _db(tmp_path)
+    photos = [FakePhoto("uuid-A", derivatives=[])]
+    stats = legacy_indexer.index_library(
+        str(real_lib),
+        db,
+        curator_db_path=curator_db,
+        thumb_root=tmp_path / "thumbs",
+        copy_thumbnails=True,
+        use_cache=False,
+        photosdb_factory=_factory(photos),
+    )
+    assert stats["thumb_ok"] == 1
+    assert stats["thumb_missing"] == 0
+
+
+def test_index_library_prefers_photos_sqlite_for_model_ids(tmp_path):
+    """index_library picks Photos.sqlite (ZGENERICASSET) over photos.db when both exist.
+
+    Mirrors osxphotos' DB selection: it opens Photos.sqlite first, returning
+    ZGENERICASSET.ZUUID as photo.uuid. The model_id_map must use the same source.
+    """
+    library_uuid = "LIB-UUID"
+    curator_db = str(tmp_path / "curator.db")
+
+    from legacy_cache import cache_dir as _cache_dir
+
+    cache_db_dir = _cache_dir(curator_db, library_uuid) / "database"
+    cache_db_dir.mkdir(parents=True)
+
+    # photos.db with RKVersion — has a *different* uuid ("wrong-uuid") so that if
+    # the code incorrectly reads from it, model_id_map.get("uuid-A") returns None.
+    wrong_conn = sqlite3.connect(str(cache_db_dir / "photos.db"))
+    wrong_conn.execute("CREATE TABLE RKVersion (modelId INTEGER PRIMARY KEY, uuid VARCHAR)")
+    wrong_conn.execute("INSERT INTO RKVersion VALUES (1, 'wrong-uuid')")
+    wrong_conn.commit()
+    wrong_conn.close()
+
+    # Photos.sqlite with ZGENERICASSET — has the correct uuid ("uuid-A").
+    right_conn = sqlite3.connect(str(cache_db_dir / "Photos.sqlite"))
+    right_conn.execute("CREATE TABLE ZGENERICASSET (Z_PK INTEGER PRIMARY KEY, ZUUID VARCHAR)")
+    right_conn.execute("INSERT INTO ZGENERICASSET VALUES (1, 'uuid-A')")
+    right_conn.commit()
+    right_conn.close()
+
     real_lib = tmp_path / "Real.photoslibrary"
     deriv_dir = real_lib / "resources" / "proxies" / "derivatives" / "00" / "00" / "1"
     deriv_dir.mkdir(parents=True)
