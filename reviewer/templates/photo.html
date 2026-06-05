@@ -329,10 +329,10 @@
     <!-- Metadata -->
     <div class="meta-section">
       <h3>Details</h3>
-      {% if photo.date_taken %}
+      {% if photo.date_taken or photo.date_precision == 'unknown' %}
       <div class="meta-row">
         <span class="label">Date</span>
-        <span class="value">{{ photo.date_taken[:16] }}</span>
+        <span class="value">{{ photo.date_taken | date_display(photo.date_precision, photo.date_approximate) }}</span>
       </div>
       {% endif %}
       {% if photo.camera_model %}

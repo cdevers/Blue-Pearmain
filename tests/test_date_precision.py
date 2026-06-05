@@ -81,3 +81,28 @@ class TestFormatDatePrecision:
         # 'unknown' precision → blank display regardless of date_taken value
         assert format_date_precision("1975-01-01T00:00:00", "unknown") == ""
         assert format_date_precision(None, "unknown") == ""
+
+
+class TestDateDisplayFilter:
+    """Integration test: filter wired into Flask app."""
+
+    def test_filter_registered(self):
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from reviewer.app import _date_display_filter
+
+        result = _date_display_filter("1975-01-01T00:00:00", "year", 0)
+        assert result == "1975"
+
+    def test_filter_approximate_flag(self):
+        from reviewer.app import _date_display_filter
+
+        result = _date_display_filter("1975-01-01T00:00:00", "year", 1)
+        assert result == "c. 1975"
+
+    def test_filter_none_date(self):
+        from reviewer.app import _date_display_filter
+
+        result = _date_display_filter(None, "exact", 0)
+        assert result == ""
