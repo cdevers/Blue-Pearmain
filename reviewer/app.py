@@ -2214,6 +2214,30 @@ def api_set_photo_text(photo_id: int) -> _JsonResp:
     return jsonify(result), status
 
 
+@app.route("/api/photos/<int:photo_id>/set-date-precision", methods=["POST"])
+def api_set_date_precision(photo_id: int) -> _JsonResp:
+    """Update date_precision and date_approximate for a photo."""
+    from db.date_precision import PRECISION_VALUES
+
+    data = request.get_json(force=True, silent=True) or {}
+    precision = data.get("precision")
+    approximate = bool(data.get("approximate", False))
+
+    if precision not in PRECISION_VALUES:
+        return jsonify({"ok": False, "error": "invalid precision"}), 400
+
+    photo = db().get_photo(photo_id)
+    if not photo:
+        return jsonify({"ok": False, "error": "not found"}), 404
+
+    db().conn.execute(
+        "UPDATE photos SET date_precision = ?, date_approximate = ? WHERE id = ?",
+        (precision, int(approximate), photo_id),
+    )
+    db().conn.commit()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/geo_confirm_none", methods=["POST"])
 def api_geo_confirm_none() -> _JsonResp:
     """Set or clear geo_confirmed_none for one or more photos.

@@ -106,3 +106,86 @@ class TestDateDisplayFilter:
 
         result = _date_display_filter(None, "exact", 0)
         assert result == ""
+
+
+class TestSetDatePrecisionEndpoint:
+    """Uses the same test-client pattern as test_review_ui.py: set app_module._db directly."""
+
+    def _make_client(self, tmp_path):
+        """Return (test_client, db_instance). Caller owns db_instance lifecycle."""
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+
+        from db.db import Database
+        import reviewer.app as app_module
+
+        db_path = str(tmp_path / "curator.db")
+        d = Database(db_path)
+        d.conn.execute("""
+            INSERT INTO photos (id, privacy_state, date_taken, date_precision, date_approximate)
+            VALUES (42, 'candidate_public', '1975-01-01T00:00:00', 'exact', 0)
+        """)
+        d.conn.commit()
+
+        app_module._db = d
+        app_module.app.config["TESTING"] = True
+        app_module.app.config["SECRET_KEY"] = "test"
+        return app_module.app.test_client(), d
+
+    def test_set_precision_year(self, tmp_path):
+        client, d = self._make_client(tmp_path)
+        resp = client.post(
+            "/api/photos/42/set-date-precision",
+            json={"precision": "year", "approximate": False},
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
+
+        row = d.conn.execute(
+            "SELECT date_precision, date_approximate FROM photos WHERE id = 42"
+        ).fetchone()
+        assert row["date_precision"] == "year"
+        assert row["date_approximate"] == 0
+
+    def test_set_precision_with_approximate(self, tmp_path):
+        client, d = self._make_client(tmp_path)
+        client.post(
+            "/api/photos/42/set-date-precision",
+            json={"precision": "decade", "approximate": True},
+        )
+        row = d.conn.execute(
+            "SELECT date_precision, date_approximate FROM photos WHERE id = 42"
+        ).fetchone()
+        assert row["date_precision"] == "decade"
+        assert row["date_approximate"] == 1
+
+    def test_invalid_precision_returns_400(self, tmp_path):
+        client, _ = self._make_client(tmp_path)
+        resp = client.post(
+            "/api/photos/42/set-date-precision",
+            json={"precision": "quarterly", "approximate": False},
+        )
+        assert resp.status_code == 400
+
+    def test_unknown_photo_returns_404(self, tmp_path):
+        client, _ = self._make_client(tmp_path)
+        resp = client.post(
+            "/api/photos/999/set-date-precision",
+            json={"precision": "year", "approximate": False},
+        )
+        assert resp.status_code == 404
+
+    def test_unknown_precision_persists_and_displays_blank(self, tmp_path):
+        client, d = self._make_client(tmp_path)
+        resp = client.post(
+            "/api/photos/42/set-date-precision",
+            json={"precision": "unknown", "approximate": False},
+        )
+        assert resp.status_code == 200
+        row = d.conn.execute("SELECT date_precision FROM photos WHERE id = 42").fetchone()
+        assert row["date_precision"] == "unknown"
+        # Display of 'unknown' is blank regardless of stored date_taken
+        from db.date_precision import format_date_precision
+
+        assert format_date_precision("1975-01-01T00:00:00", "unknown") == ""
