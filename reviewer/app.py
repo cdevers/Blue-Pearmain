@@ -886,6 +886,18 @@ def _format_date_filter(s: str) -> str:
         return s
 
 
+@app.template_filter("date_display")
+def _date_display_filter(
+    date_taken: str | None,
+    precision: str | None = None,
+    approximate: int = 0,
+) -> str:
+    """Jinja filter: {{ photo.date_taken | date_display(photo.date_precision, photo.date_approximate) }}"""
+    from db.date_precision import format_date_precision
+
+    return format_date_precision(date_taken, precision, bool(approximate))
+
+
 def normalize_shared_filters() -> SharedFilters:
     """Parse and normalize the shared filter params from request.args.
 
