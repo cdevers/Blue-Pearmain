@@ -134,7 +134,7 @@ Not immediate — needs a people schema that BP doesn't have yet — but a coher
 
 Replace the integer year-range inputs with native `<input type="date">` pickers (`date_from` / `date_to`) across the shared filter bar, library, and map. Either field is optional (open-ended ranges). `normalize_shared_filters()` handles validation, the `date_from > date_to` swap, and backward compat for legacy `year_from`/`year_to` URL params. The library and map SQL use day-level `>=` / `<` boundaries; `date_to` is inclusive on the user side, translated to an exclusive next-day bound in SQL.
 
-### Approximate / fuzzy dates for historical photos ([#157](https://github.com/cdevers/Blue-Pearmain/issues/157)) `size:M`
+### Approximate / fuzzy dates for historical photos ([#157](https://github.com/cdevers/Blue-Pearmain/issues/157)) `size:M` · ✓ done
 
 Pre-digital or scanned photos often have only a year, or a decade, or "sometime in the 1970s." The DB currently treats `date_taken` as either a precise timestamp or NULL. A `date_precision` field (`exact`, `day`, `month`, `year`, `decade`, `unknown`) alongside a `date_approximate` flag would let BP represent and surface these photos without either lying about their date or discarding the approximate information entirely. Useful for iPhoto migrations and scanned film.
 

@@ -329,7 +329,7 @@ The grid view shows photos with proposed tags and action buttons. Keyboard short
 |---|---|
 | `P` | Push approved photos to Flickr |
 
-In the detail view the action buttons are pinned to the top of the sidebar, so their position stays consistent regardless of how much metadata or how many tags a photo has. Any decision automatically advances to the next photo.
+In the detail view the action buttons are pinned to the top of the sidebar, so their position stays consistent regardless of how much metadata or how many tags a photo has. Any decision automatically advances to the next photo. Photos can be marked with a date precision (year, decade, exact, etc.) in the detail view to indicate that `date_taken` is an approximation, enabling archival of pre-digital or scanned photos with only partial date information.
 
 For photos matched to Apple Photos (uuid present), a **Photos ↗** overlay appears at the bottom-left of the image and an **open ↗** link appears in the Details section. Clicking either sends a POST to `/api/open-in-photos/<id>`, which runs an AppleScript (`osascript`) to activate Photos.app and spotlight the photo by UUID. These links are only meaningful when accessing the UI from the same Mac (localhost).
 
