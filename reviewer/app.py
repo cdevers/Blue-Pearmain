@@ -886,6 +886,18 @@ def _format_date_filter(s: str) -> str:
         return s
 
 
+@app.template_filter("date_display")
+def _date_display_filter(
+    date_taken: str | None,
+    precision: str | None = None,
+    approximate: int = 0,
+) -> str:
+    """Jinja filter: {{ photo.date_taken | date_display(photo.date_precision, photo.date_approximate) }}"""
+    from db.date_precision import format_date_precision
+
+    return format_date_precision(date_taken, precision, bool(approximate))
+
+
 def normalize_shared_filters() -> SharedFilters:
     """Parse and normalize the shared filter params from request.args.
 
@@ -2200,6 +2212,30 @@ def api_set_photo_text(photo_id: int) -> _JsonResp:
         return jsonify(result)
     status = 404 if result.get("reason") == "photo not found" else 502
     return jsonify(result), status
+
+
+@app.route("/api/photos/<int:photo_id>/set-date-precision", methods=["POST"])
+def api_set_date_precision(photo_id: int) -> _JsonResp:
+    """Update date_precision and date_approximate for a photo."""
+    from db.date_precision import PRECISION_VALUES
+
+    data = request.get_json(force=True, silent=True) or {}
+    precision = data.get("precision")
+    approximate = bool(data.get("approximate", False))
+
+    if precision not in PRECISION_VALUES:
+        return jsonify({"ok": False, "error": "invalid precision"}), 400
+
+    photo = db().get_photo(photo_id)
+    if not photo:
+        return jsonify({"ok": False, "error": "not found"}), 404
+
+    db().conn.execute(
+        "UPDATE photos SET date_precision = ?, date_approximate = ? WHERE id = ?",
+        (precision, int(approximate), photo_id),
+    )
+    db().conn.commit()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/geo_confirm_none", methods=["POST"])

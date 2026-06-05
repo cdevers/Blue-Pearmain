@@ -329,12 +329,33 @@
     <!-- Metadata -->
     <div class="meta-section">
       <h3>Details</h3>
-      {% if photo.date_taken %}
+      {% if photo.date_taken or photo.date_precision == 'unknown' %}
       <div class="meta-row">
         <span class="label">Date</span>
-        <span class="value">{{ photo.date_taken[:16] }}</span>
+        <span class="value">{{ photo.date_taken | date_display(photo.date_precision, photo.date_approximate) }}</span>
       </div>
       {% endif %}
+      <!-- Date precision editor -->
+      <div class="meta-row" id="date-precision-row" style="align-items:flex-start">
+        <span class="label">Precision</span>
+        <span class="value">
+          <select id="date-precision-select" style="font-size:12px; padding:2px 4px; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:4px">
+            <option value="exact"   {% if photo.date_precision == 'exact'   or not photo.date_precision %}selected{% endif %}>exact</option>
+            <option value="day"     {% if photo.date_precision == 'day'     %}selected{% endif %}>day</option>
+            <option value="month"   {% if photo.date_precision == 'month'   %}selected{% endif %}>month</option>
+            <option value="year"    {% if photo.date_precision == 'year'    %}selected{% endif %}>year</option>
+            <option value="decade"  {% if photo.date_precision == 'decade'  %}selected{% endif %}>decade</option>
+            <option value="unknown" {% if photo.date_precision == 'unknown' %}selected{% endif %}>unknown</option>
+          </select>
+          <label style="font-size:12px; margin-left:8px; cursor:pointer">
+            <input type="checkbox" id="date-approximate-check"
+                   {% if photo.date_approximate %}checked{% endif %}
+                   style="margin-right:3px">approx
+          </label>
+          <button onclick="saveDatePrecision()" style="font-size:11px; padding:2px 8px; margin-left:8px; cursor:pointer; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:4px">Save</button>
+          <span id="date-precision-status" style="font-size:11px; color:var(--muted); margin-left:6px"></span>
+        </span>
+      </div>
       {% if photo.camera_model %}
       <div class="meta-row">
         <span class="label">Camera</span>
@@ -818,5 +839,25 @@ async function setRating(id, rating, container) {
 }
 
 document.addEventListener('DOMContentLoaded', initStarWidgets);
+</script>
+<script>
+async function saveDatePrecision() {
+  const precision = document.getElementById('date-precision-select').value;
+  const approximate = document.getElementById('date-approximate-check').checked;
+  const status = document.getElementById('date-precision-status');
+  status.textContent = 'Saving…';
+  const r = await apiFetch('/api/photos/{{ photo.id }}/set-date-precision', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({precision, approximate}),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    status.textContent = 'Saved';
+    setTimeout(() => location.reload(), 600);
+  } else {
+    status.textContent = 'Error: ' + (d.error || 'unknown');
+  }
+}
 </script>
 {% endblock %}

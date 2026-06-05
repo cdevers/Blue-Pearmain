@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS photos (
 
     -- Timestamps
     date_taken              TEXT,                   -- ISO8601, from EXIF
+    date_precision          TEXT NOT NULL DEFAULT 'exact'
+                                CHECK(date_precision IN ('exact','day','month','year','decade','unknown')),
+    date_approximate        INTEGER NOT NULL DEFAULT 0,     -- 1 = date is a best guess (c. 1975)
     date_uploaded_flickr    TEXT,                   -- ISO8601, when Flickr received it
     date_added_photos       TEXT,                   -- ISO8601, when Photos ingested it
     date_analyzed           TEXT,                   -- ISO8601, when Apple completed ML analysis
