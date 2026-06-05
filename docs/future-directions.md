@@ -34,7 +34,7 @@ Surface high-signal failures (auth expiry, sustained API errors, unresolved reco
 
 BP's current model is reactive: classify what arrives, queue what needs review, apply what's unambiguous. Two gaps have emerged where a persistent *policy* would be more appropriate than a repeated manual action.
 
-### Legacy-match demotion policy — any confident match → needs_review
+### Legacy-match demotion policy — any confident match → needs_review ([#207](https://github.com/cdevers/Blue-Pearmain/issues/207)) `size:S`
 
 Currently `match-legacy --apply` only demotes a Flickr-only `candidate_public` photo when the matched iPhoto asset carries a privacy signal: a named face, an unknown face, or a location inside a geofence zone. Photos that match confidently but carry no such signal stay `candidate_public`.
 
@@ -102,6 +102,10 @@ The map currently shows all geotagged photos as independent dots. A "Photo Trail
 
 ### Person birthdays and birthday-aware filtering ([#152](https://github.com/cdevers/Blue-Pearmain/issues/152)) `size:M` · [spec](superpowers/specs/2026-05-27-person-birthdays-152.md) · ✓ done
 
+### Import person birthdays from Apple Contacts ([#208](https://github.com/cdevers/Blue-Pearmain/issues/208)) `size:S`
+
+Many faces in Apple Photos are linked to Contacts address book records (`CNContact`), a significant fraction of which have a birthday field filled in. A one-shot importer would enumerate `apple_persons` rows, look up the linked contact, and write the birthday into the `people` table — auto-populating birthday data without manual entry and immediately improving birthday-aware filtering (#152) and age-at-time display. Open question: whether Photos reliably stores the `CNContact` identifier in its SQLite DB, or whether the `Photos` framework is needed to resolve the link.
+
 ### Map filter scoping — year range, album, person, privacy ([#154](https://github.com/cdevers/Blue-Pearmain/issues/154)) `size:M` · [spec](superpowers/specs/2026-05-28-map-filter-scoping-154.md) · ✓ done
 
 The map filter bar gains four new dimensions that AND with the existing time-pattern dropdown: year range (from/to, either optional), album, person (type-ahead against `apple_persons`), and an animation-only privacy toggle (All / Public only / Private only). All filters affect map dots, trail, and animation; privacy affects animation only. Enables workflows like "every place I've met Marcin" or "find which August trip included Spain, then animate it."
@@ -121,14 +125,6 @@ Animate the photo trail so the route draws itself: a moving point traces the jou
 Three phases: (1) in-browser Leaflet animation as proof-of-concept — an Animate button progressively draws the polyline with a moving icon, user screen-records; (2) headless Playwright + ffmpeg for automated MP4 export; (3) pure-Python raster rendering with OSM tiles + Pillow for full cinematic control.
 
 **Privacy**: the trail is just lat/lon — no faces — but thumbnail overlays must respect the privacy model. A public version filters to `approved_public`/`already_public` photos; a family version includes private photos for local/restricted sharing. Album membership is a natural scope boundary ("animate this album's photos").
-
-Storing a known birthday for named people (in a `people` table or similar) enables several useful features:
-- Display age-at-time in the photo detail view ("Chris, age 8")
-- Filter the library or map by "photos taken on a person's birthday"
-- Filter by "photos where an identified person appears" for any named person
-- Eventually: "photos taken within a week of someone's birthday" for fuzzy milestone browsing
-
-Not immediate — needs a people schema that BP doesn't have yet — but a coherent direction worth designing for.
 
 ### Unified filter widget: date range ([#159](https://github.com/cdevers/Blue-Pearmain/issues/159)) `size:S` · ✓ done
 
