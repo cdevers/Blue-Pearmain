@@ -48,16 +48,22 @@ def run_on_conn(conn: sqlite3.Connection) -> None:
     if "date_approximate" not in existing_photos:
         conn.execute("ALTER TABLE photos ADD COLUMN date_approximate INTEGER NOT NULL DEFAULT 0")
 
-    existing_legacy = {r[1] for r in conn.execute("PRAGMA table_info(legacy_assets)").fetchall()}
-    if "date_precision" not in existing_legacy:
-        conn.execute(
-            "ALTER TABLE legacy_assets ADD COLUMN date_precision TEXT NOT NULL DEFAULT 'exact' "
-            "CHECK(date_precision IN ('exact','day','month','year','decade','unknown'))"
-        )
-    if "date_approximate" not in existing_legacy:
-        conn.execute(
-            "ALTER TABLE legacy_assets ADD COLUMN date_approximate INTEGER NOT NULL DEFAULT 0"
-        )
+    tables = {
+        r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "legacy_assets" in tables:
+        existing_legacy = {
+            r[1] for r in conn.execute("PRAGMA table_info(legacy_assets)").fetchall()
+        }
+        if "date_precision" not in existing_legacy:
+            conn.execute(
+                "ALTER TABLE legacy_assets ADD COLUMN date_precision TEXT NOT NULL DEFAULT 'exact' "
+                "CHECK(date_precision IN ('exact','day','month','year','decade','unknown'))"
+            )
+        if "date_approximate" not in existing_legacy:
+            conn.execute(
+                "ALTER TABLE legacy_assets ADD COLUMN date_approximate INTEGER NOT NULL DEFAULT 0"
+            )
 
     conn.execute(
         "INSERT INTO schema_migrations (name, applied_at) "

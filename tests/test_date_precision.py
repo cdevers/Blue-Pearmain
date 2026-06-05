@@ -189,3 +189,24 @@ class TestSetDatePrecisionEndpoint:
         from db.date_precision import format_date_precision
 
         assert format_date_precision("1975-01-01T00:00:00", "unknown") == ""
+
+
+class TestEnsureSchemaPrecisionConstraint:
+    """Verify _ensure_schema adds the CHECK constraint on date_precision (#202)."""
+
+    def test_ensure_schema_check_constraint_rejects_invalid_value(self, tmp_path):
+        import sqlite3 as _sqlite3
+        import pytest as _pytest
+
+        db_path = str(tmp_path / "curator.db")
+        from db.db import Database
+
+        d = Database(db_path)
+        cols = {r[1] for r in d.conn.execute("PRAGMA table_info(photos)").fetchall()}
+        assert "date_precision" in cols
+        with _pytest.raises(_sqlite3.IntegrityError):
+            d.conn.execute(
+                "INSERT INTO photos (privacy_state, date_precision) "
+                "VALUES ('candidate_public', 'quarterly')"
+            )
+        d.conn.close()

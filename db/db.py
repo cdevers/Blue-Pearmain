@@ -557,7 +557,8 @@ class Database:
         existing = {r[1] for r in self.conn.execute("PRAGMA table_info(photos)").fetchall()}
         if "date_precision" not in existing:
             self.conn.execute(
-                "ALTER TABLE photos ADD COLUMN date_precision TEXT NOT NULL DEFAULT 'exact'"
+                "ALTER TABLE photos ADD COLUMN date_precision TEXT NOT NULL DEFAULT 'exact' "
+                "CHECK(date_precision IN ('exact','day','month','year','decade','unknown'))"
             )
             self.conn.commit()
         existing = {r[1] for r in self.conn.execute("PRAGMA table_info(photos)").fetchall()}

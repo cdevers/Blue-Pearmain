@@ -105,3 +105,25 @@ class TestMigrate029:
             "SELECT name FROM schema_migrations WHERE name = 'migrate_029_date_precision'"
         ).fetchone()
         assert row is not None
+
+    def test_succeeds_without_legacy_assets_table(self):
+        # Migration should complete cleanly when legacy_assets hasn't been created yet
+        # (i.e. migration 026 hasn't run). Only the photos columns should be added.
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript("""
+            CREATE TABLE schema_migrations (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT UNIQUE NOT NULL,
+                applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE photos (
+                id         INTEGER PRIMARY KEY,
+                date_taken TEXT
+            );
+        """)
+        _run(conn)  # must not raise
+        assert "date_precision" in _cols(conn, "photos")
+        assert "legacy_assets" not in {
+            r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
