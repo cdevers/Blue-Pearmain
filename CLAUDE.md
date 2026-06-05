@@ -10,6 +10,7 @@ These instructions apply to every session in this project. Follow them without b
 
 1. **Brainstorm** — invoke `/superpowers:brainstorming` before writing any code for a new feature or non-trivial change. Explore design options and agree on the approach with the user before touching files.
 2. **File a GitHub issue** — once the approach is agreed, create or identify the issue. Do this before making any code changes.
+3. **Compact at handoff points** — after the spec is approved and committed, prompt the user to run `/compact` before writing the plan. After the plan is approved and committed, prompt again before invoking subagent-driven development. The spec and plan files hold everything that matters; the conversation that produced them is safe to drop.
 
 ---
 
