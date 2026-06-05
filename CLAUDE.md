@@ -40,6 +40,8 @@ For each meaningful change (bug fix, feature, refactor):
 - **Test runner:** `python -m pytest tests/ -q` from the repo root.
 - **Dev server:** `python reviewer/app.py --config config/config.yml` or `bp ui`.
 - **Python path:** scripts in `poller/` add both `Path(__file__).parent.parent` (project root) and `Path(__file__).parent` (the `poller/` directory itself) to `sys.path`. Sibling modules import as `from scanner import ...`, not `from poller.scanner import ...`.
+- **Git commit email:** GitHub rejects pushes signed with `cdevers@pobox.com`. Use `1642218+cdevers@users.noreply.github.com` — verify with `git config user.email` before pushing.
+- **Branch protection:** `main` requires a passing `test` CI check and a PR — no direct pushes, enforced for admins. All work goes on a feature branch; merge via PR only.
 
 ---
 
