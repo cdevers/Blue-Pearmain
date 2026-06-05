@@ -554,6 +554,18 @@ class Database:
                 "ALTER TABLE metadata_proposals ADD COLUMN batch_id INTEGER REFERENCES bulk_batches(id)"
             )
             self.conn.commit()
+        existing = {r[1] for r in self.conn.execute("PRAGMA table_info(photos)").fetchall()}
+        if "date_precision" not in existing:
+            self.conn.execute(
+                "ALTER TABLE photos ADD COLUMN date_precision TEXT NOT NULL DEFAULT 'exact'"
+            )
+            self.conn.commit()
+        existing = {r[1] for r in self.conn.execute("PRAGMA table_info(photos)").fetchall()}
+        if "date_approximate" not in existing:
+            self.conn.execute(
+                "ALTER TABLE photos ADD COLUMN date_approximate INTEGER NOT NULL DEFAULT 0"
+            )
+            self.conn.commit()
 
     # -----------------------------------------------------------------------
     # Photo upsert — the main ingestion path
