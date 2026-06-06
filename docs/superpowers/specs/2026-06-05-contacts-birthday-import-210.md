@@ -47,6 +47,8 @@ person_birthdays table
 
 Photos stores `ZPERSONURI` (format `UUID:ABPerson`) on `ZPERSON` rows for faces linked to a contact. Stripping `:ABPerson` gives a bare UUID matching `ZUNIQUEID` in the Contacts DB. On the current library: 96 of ~63,800 named persons have a Contacts link; 57 of those have a birthday in Contacts.
 
+**Name uniqueness:** `person_birthdays` uses `person_name` as its primary key, so BP already treats person names as globally unique. If two Photos persons share a full name and both have Contacts links, the second will overwrite the first in the result dict from `read_photos_person_contacts` — the last one wins. This edge case is rare and not worth special-casing.
+
 ---
 
 ## Module: `poller/contacts_importer.py`
@@ -65,6 +67,8 @@ WHERE ZPERSONURI IS NOT NULL AND ZFULLNAME IS NOT NULL
 
 Returns `{fullname: bare_uuid}` where `bare_uuid` is `ZPERSONURI.split(":")[0]`.
 
+URI format validation: if a `ZPERSONURI` value does not contain `:`, it is skipped silently (malformed; does not crash the run). Only values matching the expected `UUID:ABPerson` pattern are included.
+
 ### `fetch_contact_birthdays(contact_uuids: set[str]) -> dict[str, str]`
 
 macOS-only. Raises `RuntimeError("Contacts access requires macOS")` on non-darwin so the module stays importable on Linux CI.
@@ -80,19 +84,30 @@ import Contacts
 
 store = Contacts.CNContactStore.alloc().init()
 
-# Check / request TCC authorization
-status = Contacts.CNContactStore.authorizationStatusForEntityType_(0)
-if status == 0:  # notDetermined — trigger system dialog
+# Check / request TCC authorization — use symbolic constants throughout
+status = Contacts.CNContactStore.authorizationStatusForEntityType_(
+    Contacts.CNEntityTypeContacts
+)
+if status == Contacts.CNAuthorizationStatusNotDetermined:
     granted_box = [False]
     event = threading.Event()
     def _handler(granted, error):
         granted_box[0] = bool(granted)
         event.set()
-    store.requestAccessForEntityType_completionHandler_(0, _handler)
-    event.wait(timeout=30)
+    store.requestAccessForEntityType_completionHandler_(
+        Contacts.CNEntityTypeContacts, _handler
+    )
+    if not event.wait(timeout=30):
+        raise TimeoutError(
+            "Timed out waiting for Contacts permission response. "
+            "Re-run the command and respond to the system dialog within 30 seconds."
+        )
     if not granted_box[0]:
         raise PermissionError("Contacts access denied by user")
-elif status in (1, 2):  # restricted or denied
+elif status in (
+    Contacts.CNAuthorizationStatusRestricted,
+    Contacts.CNAuthorizationStatusDenied,
+):
     raise PermissionError(
         "Contacts access denied. Grant access in "
         "System Settings → Privacy & Security → Contacts."
@@ -111,7 +126,7 @@ store.enumerateContactsWithFetchRequest_error_usingBlock_(
 
 Birthday formatting: `CNContact.birthday` returns `NSDateComponents`. If `dateComponents.year > 9999` (the `NSDateComponentUndefined` sentinel on 64-bit), store as `MM-DD`; otherwise store as `YYYY-MM-DD`. This matches the format `person_birthdays` accepts.
 
-Returns `{contact_uuid: birthday_str}`.
+Returns `{contact_identifier: birthday_str}` — keyed by `CNContact.identifier`, which matches the bare UUID extracted from `ZPERSONURI`.
 
 ### `run_import(db, photos_db_path, *, dry_run, overwrite, fetcher=fetch_contact_birthdays) -> ImportResult`
 
@@ -121,27 +136,29 @@ Coordinator. `fetcher` defaults to `fetch_contact_birthdays` and is injectable f
 @dataclass
 class ImportResult:
     written: int
-    skipped_same: int       # already set, same value
+    skipped_same: int       # already set, same value — not a conflict
     skipped_conflict: int   # already set, different value, --overwrite not passed
-    overwritten: int        # replaced because --overwrite
-    no_birthday: int        # linked to contact but no birthday in Contacts
-    unlinked: int           # person name not in Photos→Contacts mapping
+    overwritten: int        # replaced because --overwrite was passed
+    no_birthday: int        # linked to contact but no birthday recorded in Contacts
 ```
 
 Steps:
 1. `person_contacts = read_photos_person_contacts(photos_db_path)`
 2. `contact_birthdays = fetcher(set(person_contacts.values()))`
-3. For each `(name, uuid)` in `person_contacts`:
+3. Fetch all existing entries once: `existing_birthdays = db.get_person_birthdays()`
+4. For each `(name, uuid)` in `person_contacts`:
    - If `uuid` not in `contact_birthdays` → `no_birthday += 1`; skip
    - Else get `new_bday = contact_birthdays[uuid]`
-   - Get existing: `existing = db.get_person_birthdays().get(name)`
-   - If no existing → write; `written += 1`
-   - If existing == new_bday → `skipped_same += 1`
-   - If existing != new_bday and not overwrite → `skipped_conflict += 1`
-   - If existing != new_bday and overwrite → write; `overwritten += 1`
-4. If not `dry_run`, call `db.set_person_birthday(name, new_bday)` for all writes
+   - Get existing: `existing = existing_birthdays.get(name)`
+   - If no existing → mark for write; `written += 1`
+   - If existing == new_bday → `skipped_same += 1`; skip
+   - If existing != new_bday and not overwrite → `skipped_conflict += 1`; skip
+   - If existing != new_bday and overwrite → mark for write; `overwritten += 1`
+5. If not `dry_run`, call `db.set_person_birthday(name, new_bday)` for each marked write
 
-Persons in BP's DB that have no entry in `person_contacts` are `unlinked` — Photos didn't recognise a Contacts match for them, or they have no face entry at all.
+**Dry-run contract:** when `dry_run=True`, the coordinator executes steps 1–4 in full and returns an `ImportResult` with identical counts to a real run. The only difference is step 5 is skipped. This means `--dry-run` output is authoritative — the numbers shown are exactly what a real run would do.
+
+Persons that Photos has not linked to any Contact are simply absent from `person_contacts` and are never iterated. They are not counted.
 
 ---
 
@@ -173,9 +190,9 @@ Scanning Photos library for person → Contacts links...
 (dry run — nothing written)
 ```
 
-The "Requesting access" line prints before any CNContactStore call so the user isn't surprised by a system dialog. On subsequent runs (already authorised), the line is omitted.
+The "Requesting access" line prints only when authorization status is `CNAuthorizationStatusNotDetermined`. On subsequent runs (already authorised), the line is omitted.
 
-`cmd_import_contacts_birthdays` in `bp` loads config, opens the DB, resolves `photos_library.path`, and calls `run_import`. Exits non-zero on `PermissionError`.
+`cmd_import_contacts_birthdays` in `bp` loads config, opens the DB, resolves `photos_library.path`, derives `Photos.sqlite` path as `{photos_library_path}/database/Photos.sqlite`, and calls `run_import`. Exits non-zero on `PermissionError` or `TimeoutError`.
 
 ---
 
@@ -199,13 +216,15 @@ All tests except one run on Linux CI. The coordinator accepts an injectable `fet
 | `test_birthday_format_full_date` — `YYYY-MM-DD` when year ≤ 9999 | any |
 | `test_birthday_format_yearless` — `MM-DD` when year > 9999 (NSDateComponentUndefined sentinel) | any |
 | `test_import_writes_new_birthday` — person not in `person_birthdays` → written | any |
-| `test_import_skips_existing_same_value` — same value already stored → not counted as conflict | any |
-| `test_import_skips_existing_different_value_no_overwrite` — different value, no flag → skip, reported | any |
-| `test_import_overwrites_existing_with_flag` — `--overwrite` → entry replaced | any |
-| `test_import_dry_run_writes_nothing` — dry-run → DB unchanged, result still has counts | any |
-| `test_import_no_contact_link` — person with no Contacts URI → unlinked count, not written | any |
+| `test_import_skips_existing_same_value` — same value already stored → `skipped_same`, not conflict | any |
+| `test_import_skips_existing_different_value_no_overwrite` — different value, no flag → `skipped_conflict` | any |
+| `test_import_overwrites_existing_with_flag` — `--overwrite` → entry replaced, `overwritten` count | any |
+| `test_import_dry_run_writes_nothing` — dry-run → DB unchanged, counts identical to real run | any |
+| `test_import_malformed_uri_skipped` — URI without `:` separator → skipped, no crash | any |
 | `test_import_contact_no_birthday` — linked contact has no birthday → `no_birthday` count | any |
-| `test_authorization_denied_raises` — denied TCC status → `PermissionError`, not silent empty | macOS only (`@pytest.mark.skipif`) |
+| `test_authorization_denied_raises` — denied TCC status → `PermissionError`, not silent empty result | macOS only (`@pytest.mark.skipif`) |
+
+Note: `test_import_no_contact_link` was removed — persons without a Contacts URI are simply absent from the iteration; there is no separate count for them and nothing to assert beyond "not written".
 
 ---
 
