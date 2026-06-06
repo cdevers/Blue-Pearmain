@@ -11,10 +11,7 @@ from __future__ import annotations
 import sqlite3
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Protocol
-
-if TYPE_CHECKING:
-    pass
+from typing import Any, Callable, Protocol
 
 
 class _BirthdayDB(Protocol):
@@ -127,7 +124,7 @@ def fetch_contact_birthdays(contact_uuids: set[str]) -> dict[str, str]:
     keys = [Contacts.CNContactBirthdayKey, Contacts.CNContactIdentifierKey]
     request = Contacts.CNContactFetchRequest.alloc().initWithKeysToFetch_(keys)
 
-    contacts: list[object] = []
+    contacts: list[Any] = []
     store.enumerateContactsWithFetchRequest_error_usingBlock_(
         request,
         None,
@@ -136,16 +133,16 @@ def fetch_contact_birthdays(contact_uuids: set[str]) -> dict[str, str]:
 
     result: dict[str, str] = {}
     for contact in contacts:
-        identifier = str(contact.identifier())  # type: ignore[union-attr]
+        identifier = str(contact.identifier())
         if identifier not in contact_uuids:
             continue
-        bday = contact.birthday()  # type: ignore[union-attr]
+        bday = contact.birthday()
         if bday is None:
             continue
         result[identifier] = _format_birthday(
-            int(bday.year()),  # type: ignore[arg-type]
-            int(bday.month()),  # type: ignore[arg-type]
-            int(bday.day()),  # type: ignore[arg-type]
+            int(bday.year()),
+            int(bday.month()),
+            int(bday.day()),
         )
 
     return result
