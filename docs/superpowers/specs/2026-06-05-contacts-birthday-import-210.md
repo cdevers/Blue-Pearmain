@@ -172,6 +172,15 @@ Flags:
 
 Output:
 
+The initial implementation produces summary-only output. The per-person listing below is aspirational — it shows what a verbose mode could look like, but is not required for the first version.
+
+**Initial implementation output:**
+```
+Written: 52   Skipped (same): 1   Skipped (conflict): 1   No birthday in Contacts: 39
+(dry run — nothing written)
+```
+
+**Aspirational verbose output (future enhancement):**
 ```
 Requesting access to Contacts — you may see a system permission dialog.
 
