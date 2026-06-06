@@ -133,7 +133,7 @@ def fetch_contact_birthdays(contact_uuids: set[str]) -> dict[str, str]:
 
     result: dict[str, str] = {}
     for contact in contacts:
-        identifier = str(contact.identifier())
+        identifier = str(contact.identifier()).split(":")[0]
         if identifier not in contact_uuids:
             continue
         bday = contact.birthday()
