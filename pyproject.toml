@@ -9,6 +9,7 @@ dependencies = [
     "pyyaml>=6.0",
     "flask>=3.0",
     "photoscript>=0.5.3; sys_platform == 'darwin'",
+    "pyobjc-framework-Contacts>=10; sys_platform == 'darwin'",
     "zeroconf>=0.148.0",
 ]
 
