@@ -1007,6 +1007,14 @@ def cmd_import_contacts_birthdays(args: argparse.Namespace) -> None:
     )
     photos_db_path = str(Path(photos_library_path) / "database" / "Photos.sqlite")
 
+    if not config.get("photos_library", {}).get("path", ""):
+        print("Error: photos_library.path is not configured in config.yml.", file=sys.stderr)
+        sys.exit(1)
+    if not Path(photos_db_path).exists():
+        print(f"Error: Photos library not found at {photos_db_path}", file=sys.stderr)
+        print("Check that photos_library.path is set correctly in config.yml.", file=sys.stderr)
+        sys.exit(1)
+
     db = Database(db_path)
     try:
         result = run_import(
