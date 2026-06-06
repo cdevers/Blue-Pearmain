@@ -128,9 +128,10 @@ Birthday formatting: `CNContact.birthday` returns `NSDateComponents`. If `dateCo
 
 Returns `{contact_identifier: birthday_str}` — keyed by `CNContact.identifier`, which matches the bare UUID extracted from `ZPERSONURI`.
 
-### `run_import(db, photos_db_path, *, dry_run, overwrite, fetcher=fetch_contact_birthdays) -> ImportResult`
+### `run_import(db, photos_db_path, *, dry_run, overwrite, fetcher=fetch_contact_birthdays, reader=read_photos_person_contacts) -> ImportResult`
 
 Coordinator. `fetcher` defaults to `fetch_contact_birthdays` and is injectable for testing.
+`reader` is also injectable (defaults to `read_photos_person_contacts`) to allow coordinator tests to run without a real Photos.sqlite on CI.
 
 ```python
 @dataclass

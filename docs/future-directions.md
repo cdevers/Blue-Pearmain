@@ -102,7 +102,7 @@ The map currently shows all geotagged photos as independent dots. A "Photo Trail
 
 ### Person birthdays and birthday-aware filtering ([#152](https://github.com/cdevers/Blue-Pearmain/issues/152)) `size:M` · [spec](superpowers/specs/2026-05-27-person-birthdays-152.md) · ✓ done
 
-See also [#210](https://github.com/cdevers/Blue-Pearmain/issues/210) — import birthdays from Apple Contacts (many Photos faces are linked to Contacts records that already have a birthday field).
+See also [#210](https://github.com/cdevers/Blue-Pearmain/issues/210) · [spec](superpowers/specs/2026-06-05-contacts-birthday-import-210.md) · [plan](superpowers/plans/2026-06-05-contacts-birthday-import-210.md) — import birthdays from Apple Contacts (many Photos faces are linked to Contacts records that already have a birthday field).
 
 ### Map filter scoping — year range, album, person, privacy ([#154](https://github.com/cdevers/Blue-Pearmain/issues/154)) `size:M` · [spec](superpowers/specs/2026-05-28-map-filter-scoping-154.md) · ✓ done
 

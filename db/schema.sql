@@ -352,3 +352,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_proposals_identity
 CREATE INDEX IF NOT EXISTS idx_proposals_batch
     ON metadata_proposals(batch_id)
     WHERE batch_id IS NOT NULL;
+
+
+-- ============================================================
+-- Person birthdays: optional birthday stored per named person
+-- (birthday is 'MM-DD' for recurring annual or 'YYYY-MM-DD' for full date)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS person_birthdays (
+    person_name  TEXT PRIMARY KEY,
+    birthday     TEXT NOT NULL,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);

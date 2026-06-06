@@ -19,6 +19,7 @@ Usage:
     bp ui                           Start the review UI (http://localhost:5173)
     bp migrate [--dry-run] [--baseline]  Apply pending DB migrations (--baseline: mark applied without running DDL)
     bp doctor [--check-flickr]      Validate config, environment, and DB state
+    bp import-contacts-birthdays [--dry-run] [--overwrite]  Import birthdays from Apple Contacts
 
 Global options:
     --config PATH   Path to config.yml (default: config/config.yml)
@@ -989,6 +990,59 @@ def cmd_match_legacy(args: argparse.Namespace) -> None:
         db.close()
 
 
+def cmd_import_contacts_birthdays(args: argparse.Namespace) -> None:
+    """Import person birthdays from Apple Contacts into person_birthdays."""
+    import yaml
+
+    sys.path.insert(0, str(ROOT / "poller"))
+    from db.db import Database
+    from contacts_importer import run_import
+
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+
+    db_path = str(Path(config["database"]["path"]).expanduser())
+    photos_library_path = str(
+        Path(config.get("photos_library", {}).get("path", "")).expanduser()
+    )
+    photos_db_path = str(Path(photos_library_path) / "database" / "Photos.sqlite")
+
+    if not config.get("photos_library", {}).get("path", ""):
+        print("Error: photos_library.path is not configured in config.yml.", file=sys.stderr)
+        sys.exit(1)
+    if not Path(photos_db_path).exists():
+        print(f"Error: Photos library not found at {photos_db_path}", file=sys.stderr)
+        print("Check that photos_library.path is set correctly in config.yml.", file=sys.stderr)
+        sys.exit(1)
+
+    db = Database(db_path)
+    try:
+        result = run_import(
+            db,
+            photos_db_path,
+            dry_run=args.dry_run,
+            overwrite=args.overwrite,
+        )
+    except (PermissionError, TimeoutError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        db.close()
+        sys.exit(1)
+
+    db.close()
+
+    parts = [
+        f"Written: {result.written}",
+        f"Skipped (same): {result.skipped_same}",
+        f"Skipped (conflict): {result.skipped_conflict}",
+        f"No birthday in Contacts: {result.no_birthday}",
+    ]
+    if result.overwritten:
+        parts.append(f"Overwritten: {result.overwritten}")
+    print("  ".join(parts))
+    if args.dry_run:
+        print("(dry run — nothing written)")
+
+
 def cmd_all(args):
     """
     Run the full periodic maintenance sequence:
@@ -1359,6 +1413,22 @@ def main():
     p_mlp.add_argument("--apply", action="store_true",
                        help="Reclassify confident (and all-people ambiguous) matches out of the review queue")
 
+    # import-contacts-birthdays
+    p_icb = sub.add_parser(
+        "import-contacts-birthdays",
+        help="Import person birthdays from Apple Contacts into person_birthdays",
+    )
+    p_icb.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be written without writing anything",
+    )
+    p_icb.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace existing person_birthdays entries with Contacts data",
+    )
+
     args = parser.parse_args()
 
     # Attach config/verbose to all subcommands
@@ -1392,6 +1462,7 @@ def main():
     if not hasattr(args, "refresh_cache"):  args.refresh_cache = False
     if not hasattr(args, "library_uuid"):   args.library_uuid = None
     if not hasattr(args, "csv"):            args.csv = None
+    if not hasattr(args, "overwrite"):      args.overwrite = False
 
     dispatch = {
         "pipeline":      cmd_pipeline,
@@ -1419,6 +1490,7 @@ def main():
         "export":            cmd_export,
         "index-legacy":          cmd_index_legacy,
         "match-legacy":  cmd_match_legacy,
+        "import-contacts-birthdays": cmd_import_contacts_birthdays,
     }
     dispatch[args.command](args)
 
