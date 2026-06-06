@@ -9,10 +9,9 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-sys.path.insert(0, str(Path(__file__).parent.parent / "poller"))
 
 from db.db import Database
-from contacts_importer import (
+from poller.contacts_importer import (
     ImportResult,  # noqa: F401 — imported for type completeness; used once module exists
     _check_contacts_authorization,
     _format_birthday,
