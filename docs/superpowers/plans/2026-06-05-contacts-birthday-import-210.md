@@ -218,7 +218,7 @@ class TestAuthorizationDeniedRaises:
 - [ ] **Step 2: Run tests to confirm all 10 fail**
 
 Run: `python -m pytest tests/test_contacts_importer.py -v`
-Expected: 9 failures + 1 skip on Linux CI; 10 failures on macOS. All with `ModuleNotFoundError: No module named 'contacts_importer'`.
+Expected: all tests fail or are skipped. The exact count depends on platform and how pytest handles the top-level import failure — all tests in the file share the same `ImportError` when `contacts_importer` doesn't exist yet, so you may see 10 errors, 9 errors + 1 skip, or a collection-time failure. Any of these is correct. What matters is that no test passes.
 
 - [ ] **Step 3: Commit**
 
@@ -239,7 +239,9 @@ EOF
 **Files:**
 - Create: `poller/contacts_importer.py`
 
-`run_import` adds `reader` as a second injectable parameter (not in spec) for clean CI testing. The default is `read_photos_person_contacts`, so all real-world behaviour is identical to the spec.
+`run_import` adds `reader` as a second injectable parameter not present in the spec. It defaults to `read_photos_person_contacts`, so all real-world behaviour is identical to the spec. The spec should be updated to document this addition (see Task 5).
+
+**Person name convention:** Person names are stored verbatim as returned from `ZPERSON.ZFULLNAME`. BP has no case-normalization convention for person names (only tags are casefolded), so `run_import` follows the same convention — names are treated as-is. Matching is therefore case-sensitive, consistent with `person_policies` and the existing `person_birthdays` table.
 
 - [ ] **Step 1: Create `poller/contacts_importer.py`**
 
@@ -512,6 +514,10 @@ Global options:
 
 Add the function immediately before `def cmd_all(args):` (which is around line 992). Insert:
 
+Note on Photos path construction: BP has no shared helper for `photos_library.path` — the inline pattern below matches `cmd_scan` (line 185 of `bp`) and is the established convention.
+
+Note on CLI output: the output is **summary-only** (counts line + optional dry-run footer). The per-person table shown in the spec's sample output is aspirational; it is not implemented here. This is intentional — the summary meets the testing requirements and the per-person table can be added later as a separate enhancement.
+
 ```python
 def cmd_import_contacts_birthdays(args: argparse.Namespace) -> None:
     """Import person birthdays from Apple Contacts into person_birthdays."""
@@ -637,19 +643,15 @@ Change it to:
 See also [#210](https://github.com/cdevers/Blue-Pearmain/issues/210) · [spec](superpowers/specs/2026-06-05-contacts-birthday-import-210.md) · [plan](superpowers/plans/2026-06-05-contacts-birthday-import-210.md) — import birthdays from Apple Contacts (many Photos faces are linked to Contacts records that already have a birthday field).
 ```
 
-- [ ] **Step 2: Update the spec status line**
+- [ ] **Step 2: Note `reader` addition in the spec**
 
-In `docs/superpowers/specs/2026-06-05-contacts-birthday-import-210.md`, change:
-
-```
-_Status: draft_
-```
-
-to:
+In `docs/superpowers/specs/2026-06-05-contacts-birthday-import-210.md`, add one sentence to the `run_import` description after the `fetcher` injection note:
 
 ```
-_Status: implementation complete_
+`reader` is also injectable (defaults to `read_photos_person_contacts`) to allow coordinator tests to run without a real Photos.sqlite on CI.
 ```
+
+Do **not** change the spec status line — that is updated after the code is merged and verified, not as a planned coding task.
 
 - [ ] **Step 3: Run `make lint`**
 
@@ -666,9 +668,9 @@ Expected: All tests pass. On macOS: count includes the new 10 tests. On Linux CI
 - [ ] **Step 5: Commit and close the issue**
 
 ```bash
-git add docs/future-directions.md docs/superpowers/specs/2026-06-05-contacts-birthday-import-210.md docs/superpowers/plans/2026-06-05-contacts-birthday-import-210.md
+git add docs/future-directions.md docs/superpowers/specs/2026-06-05-contacts-birthday-import-210.md
 git commit -m "$(cat <<'EOF'
-docs(#210): update future-directions, mark spec done; add plan
+docs(#210): update future-directions and spec reader note
 
 Closes #210
 
