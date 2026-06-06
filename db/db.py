@@ -546,6 +546,16 @@ class Database:
                 );
             """)
             self.conn.commit()
+        if "person_birthdays" not in tables:
+            self.conn.executescript("""
+                CREATE TABLE IF NOT EXISTS person_birthdays (
+                    person_name  TEXT PRIMARY KEY,
+                    birthday     TEXT NOT NULL,
+                    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+                    updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                );
+            """)
+            self.conn.commit()
         prop_cols = {
             r[1] for r in self.conn.execute("PRAGMA table_info(metadata_proposals)").fetchall()
         }
