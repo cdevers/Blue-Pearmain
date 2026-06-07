@@ -11,8 +11,9 @@ Provides:
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 log = logging.getLogger("blue-pearmain.geocoder")
 
@@ -76,8 +77,90 @@ def _parse_nominatim_response(data: dict[str, Any]) -> PlaceData:
 
 
 def fetch_from_nominatim(lat: float, lon: float) -> "PlaceData | None":
-    raise NotImplementedError("fetch_from_nominatim is implemented in Task 4")
+    """Make a live HTTP GET to Nominatim and return parsed PlaceData, or None on error.
+
+    Returns None on network error or 4xx/5xx response (not cached; logged at WARNING).
+    Returns PlaceData (possibly all-None fields) on a 200 response.
+
+    Rate-limited to 1 request/second per Nominatim usage policy.
+    """
+    import requests  # deferred import — not needed if geocoder isn't used
+
+    global _last_call_time
+    elapsed = time.monotonic() - _last_call_time
+    if elapsed < 1.0:
+        time.sleep(1.0 - elapsed)
+
+    try:
+        resp = requests.get(
+            _NOMINATIM_URL,
+            params={"lat": lat, "lon": lon, "zoom": 14, "addressdetails": 1, "format": "json"},
+            headers={"User-Agent": _USER_AGENT},
+            timeout=10,
+        )
+        _last_call_time = time.monotonic()
+        if resp.status_code != 200:
+            log.warning("Nominatim returned HTTP %s for (%.6f, %.6f)", resp.status_code, lat, lon)
+            return None
+        data = resp.json()
+        return _parse_nominatim_response(data)
+    except Exception as exc:
+        _last_call_time = time.monotonic()
+        log.warning("Nominatim request failed for (%.6f, %.6f): %s", lat, lon, exc)
+        return None
 
 
-def reverse_geocode(lat: float, lon: float, db: Any, fetcher: Any = None) -> "LookupResult":
-    raise NotImplementedError("reverse_geocode is implemented in Task 4")
+def reverse_geocode(
+    lat: float,
+    lon: float,
+    db: Any,
+    fetcher: Callable[[float, float], "PlaceData | None"] = fetch_from_nominatim,
+) -> LookupResult:
+    """Cache-first reverse geocode for (lat, lon).
+
+    1. Round lat/lon to 3 decimal places.
+    2. Check nominatim_cache via db.get_nominatim_cache(lat_r, lon_r).
+    3. Cache hit  → return LookupResult(place=PlaceData(...), cache_hit=True).
+       (place may have all-None fields if coordinates are known to return nothing)
+    4. Cache miss → call fetcher(lat, lon).
+       - fetcher returns None (error) → LookupResult(place=None, cache_hit=False),
+         not cached; next scan will retry.
+       - fetcher returns PlaceData → store in cache, return
+         LookupResult(place=result, cache_hit=False).
+    """
+    lat_r = round(lat, 3)
+    lon_r = round(lon, 3)
+
+    cached = db.get_nominatim_cache(lat_r, lon_r)
+    if cached is not None:
+        # Cache hit — convert raw dict back to PlaceData
+        place = PlaceData(
+            city=cached.get("place_city"),
+            state=cached.get("place_state"),
+            country=cached.get("place_country"),
+            country_code=cached.get("place_country_code"),
+            neighborhood=cached.get("place_neighborhood"),
+            address=cached.get("place_address"),
+        )
+        return LookupResult(place=place, cache_hit=True)
+
+    # Cache miss — call the fetcher
+    result = fetcher(lat, lon)
+    if result is None:
+        # Network/HTTP error — do not cache; allow retry on next scan
+        return LookupResult(place=None, cache_hit=False)
+
+    # Store result (including all-None PlaceData, which suppresses future retries)
+    db.set_nominatim_cache(
+        lat_r,
+        lon_r,
+        {
+            "place_city": result.city,
+            "place_state": result.state,
+            "place_country": result.country,
+            "place_country_code": result.country_code,
+            "place_neighborhood": result.neighborhood,
+            "place_address": result.address,
+        },
+    )
+    return LookupResult(place=result, cache_hit=False)
