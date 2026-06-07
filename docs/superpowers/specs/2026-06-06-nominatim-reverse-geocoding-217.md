@@ -1,6 +1,6 @@
 # Spec: Nominatim reverse geocoding for place enrichment (#217)
 
-_Status: draft_
+_Status: approved_
 
 ---
 
