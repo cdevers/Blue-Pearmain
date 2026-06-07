@@ -33,16 +33,17 @@ def upload_photo(
     path: Path,
     title: str = "",
     description: str = "",
-    tags: str = "",          # space-separated
+    tags: str = "",           # space-separated
+    date_taken: str | None = None,  # ISO-like "YYYY-MM-DD HH:MM:SS"
     is_public: int = 0,
     is_friend: int = 0,
     is_family: int = 0,
-) -> str:                    # returns flickr_id
+) -> str:                     # returns flickr_id
 ```
 
 **All uploads are private** (`is_public=0, is_friend=0, is_family=0`). Privacy is determined by BP's privacy pipeline, not by the upload call.
 
-After upload, the method calls `flickr.photos.setDates` (via `_call()`) to set `date_taken` from the legacy asset. If `setDates` fails, log a warning but do not roll back — the photo exists on Flickr with correct content; `bp sync-metadata` can fix the date later.
+After uploading and receiving the `flickr_id`, if `date_taken` is provided the method calls `flickr.photos.setDates` (via `_call()`) to stamp the correct capture time. If `setDates` fails, the method logs a warning and returns the `flickr_id` anyway — the photo exists on Flickr with correct content; `bp sync-metadata` can fix the date later. The caller (`legacy_uploader.py`) is responsible for passing `date_taken` and for incrementing `date_set_failed` in the counts if the warning is surfaced.
 
 ## DB schema changes — migration 031
 
@@ -76,25 +77,26 @@ def upload_unmatched_assets(
 Returns:
 ```
 {
-    eligible, uploaded, skipped_already_uploaded, skipped_missing_file,
+    eligible, uploaded, recovered,
+    skipped_already_uploaded, skipped_missing_file,
     needs_review, auto_private, candidate_public,
     date_set_failed, db_write_failed, upload_failed,
 }
 ```
 
-**Per-asset flow:**
+**Phase 1 — Recovery (runs before the upload loop on every invocation):**
+
+Query `legacy_assets` for rows where `uploaded_flickr_id IS NOT NULL` and no `photos` row exists for that `flickr_id`. For each: run the same classify + `upsert_photo` + `log_operation` transaction that a successful new upload would have done (steps 6–7 below). Increment `recovered` in the counts. This self-heals the most common partial failure (upload succeeded, DB write failed) without requiring manual intervention, and runs even on `--dry-run` invocations so the user can see what would be recovered.
+
+**Phase 2 — Upload loop:**
 
 1. Check `legacy_assets.uploaded_flickr_id` — if set, increment `skipped_already_uploaded` and continue. This is the primary idempotency guard.
 2. Resolve `library_path / master_rel_path`. If path doesn't exist, increment `skipped_missing_file` and continue.
 3. Call `shape_legacy_for_classify()` then `classify(shaped, zones, self_name, person_policies)` → `(privacy_state, privacy_reason)`.
 4. If `dry_run`, record the would-be classification and continue without uploading.
-5. Upload via `flickr_client.upload_photo(path, title, description, tags)` → `flickr_id`.
-6. **Immediately** update `legacy_assets SET uploaded_flickr_id = flickr_id, uploaded_at = now` and commit. If this write fails, log a warning with the `flickr_id` (see orphan handling below) and increment `db_write_failed`.
-7. In a single DB transaction: `db.upsert_photo(...)` + `db.log_operation("upload_legacy_asset", ...)`. If this transaction fails, the `uploaded_flickr_id` is already set in `legacy_assets`, so a re-run will skip the upload and retry only the `photos` row creation.
-
-**Recovery path for partial failures:**
-
-On re-run, before the main loop, `legacy_uploader` queries for assets where `uploaded_flickr_id IS NOT NULL` but no `photos` row exists for that `flickr_id`. For each, it retries only step 7 (the DB write). This self-heals the most common failure mode without requiring manual intervention.
+5. Upload via `flickr_client.upload_photo(path, title, description, tags, date_taken)` → `flickr_id`.
+6. **Immediately** update `legacy_assets SET uploaded_flickr_id = flickr_id, uploaded_at = now` and commit. If this write fails, log a warning with the `flickr_id` prominently to stdout (see orphan handling below) and increment `db_write_failed`.
+7. In a **single DB transaction**: `db.upsert_photo(...)` + `db.log_operation("upload_legacy_asset", ...)`. Both succeed or both roll back — the operation log entry is part of the atomic write, not a separate step. If this transaction fails, the `uploaded_flickr_id` is already set in `legacy_assets`, so Phase 1 on the next re-run will retry only this step.
 
 **Orphan risk (acknowledged):**
 
@@ -191,7 +193,7 @@ Privacy states applied:
 
 **`FlickrClient.upload_photo()`** — mock `self._session.post()`. Verify: correct endpoint URL, multipart form fields, XML success path returns flickr_id, XML error path raises `FlickrApiError`, `setDates` is called with correct date_taken.
 
-**`legacy_uploader.py`** — real SQLite DB, stub Flickr client that records calls and returns fake flickr_ids. Tests: successful upload creates photos row + sets `uploaded_flickr_id`; dry-run makes no writes; asset with `uploaded_flickr_id` already set is skipped; missing file is skipped and counted; upload failure is isolated (other assets continue); recovery path creates photos row for asset with `uploaded_flickr_id` but no photos row; classify result (`auto_private`, `needs_review`, `candidate_public`) is correctly stored.
+**`legacy_uploader.py`** — real SQLite DB, stub Flickr client that records calls and returns fake flickr_ids. Tests: successful upload creates photos row + sets `uploaded_flickr_id`; dry-run makes no writes; asset with `uploaded_flickr_id` already set is skipped; missing file is skipped and counted; upload failure is isolated (other assets continue); Phase 1 recovery creates photos row for asset with `uploaded_flickr_id` but no photos row; Phase 1 recovery runs even in dry-run; classify result (`auto_private`, `needs_review`, `candidate_public`) is correctly stored; `upsert_photo` and `log_operation` roll back together if the transaction fails.
 
 ## What this does not do
 
