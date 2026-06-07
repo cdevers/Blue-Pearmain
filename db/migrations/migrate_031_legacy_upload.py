@@ -43,6 +43,8 @@ def run_on_conn(conn: sqlite3.Connection) -> None:
             r[0]
             for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
+        # legacy_assets absent if migration 026 was never applied; still record
+        # this migration so it isn't re-attempted on installs without the table.
         if "legacy_assets" in tables:
             existing = {r[1] for r in conn.execute("PRAGMA table_info(legacy_assets)").fetchall()}
             if "uploaded_flickr_id" not in existing:
