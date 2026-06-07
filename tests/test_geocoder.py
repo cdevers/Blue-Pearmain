@@ -8,6 +8,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "poller"))
 
@@ -563,6 +565,40 @@ class TestBpGeocode:
         run_geocode(db, dry_run=False, overwrite=False, limit=2, fetcher=fake_fetcher)
         assert len(fetcher_calls) == 2  # limited even with errors
 
+    def test_bp_geocode_stops_early_on_consecutive_errors(self, tmp_path: Path):
+        # After 3 consecutive API errors, run_geocode aborts and sets stopped_early.
+        from run_geocode import run_geocode
+
+        db = _db(tmp_path)
+        for i in range(5):
+            db.upsert_photo(
+                {
+                    "uuid": f"uuid-err-{i}",
+                    "flickr_id": None,
+                    "latitude": float(40 + i),
+                    "longitude": -71.0,
+                    "place_city": None,
+                    "place_state": None,
+                    "place_country": None,
+                    "place_neighborhood": None,
+                    "privacy_state": "candidate_public",
+                    "privacy_reason": "",
+                    "proposed_tags": [],
+                }
+            )
+
+        fetcher_calls = []
+
+        def fake_fetcher(lat: float, lon: float) -> PlaceData | None:
+            fetcher_calls.append((lat, lon))
+            return None  # all calls fail
+
+        counts = run_geocode(db, dry_run=False, overwrite=False, limit=None, fetcher=fake_fetcher)
+        # Should stop after 3 consecutive errors, not process all 5 photos
+        assert len(fetcher_calls) == 3
+        assert counts["errors"] == 3
+        assert counts["stopped_early"] == 1
+
 
 # ---------------------------------------------------------------------------
 # fetch_from_nominatim — 429 backoff (#219)
@@ -650,3 +686,142 @@ class TestFetchFromNominatim:
         # incremental back-off: 5s then 15s
         mock_sleep.assert_any_call(5)
         mock_sleep.assert_any_call(15)
+
+
+# ---------------------------------------------------------------------------
+# make_fetcher — URL-bound fetcher factory (#225)
+# ---------------------------------------------------------------------------
+
+
+class TestMakeFetcher:
+    def _mock_resp_200(self):
+        from unittest.mock import MagicMock
+
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"display_name": "X", "address": {}}
+        return resp
+
+    def test_make_fetcher_default_url_uses_public_endpoint(self):
+        """make_fetcher() with no URL argument hits the public Nominatim endpoint."""
+        from unittest.mock import patch
+
+        from geocoder import _PUBLIC_NOMINATIM_URL, make_fetcher
+
+        fetcher = make_fetcher()
+        with patch("requests.get", return_value=self._mock_resp_200()) as mock_get:
+            fetcher(42.361, -71.057)
+
+        assert mock_get.call_args[0][0] == _PUBLIC_NOMINATIM_URL
+
+    def test_make_fetcher_public_url_delay_is_1s(self):
+        """Subsequent calls are rate-limited to 1 request/second.
+
+        Uses realistic uptime-scale mock values to mirror production behaviour:
+          - last_call_time starts at 0.0 (closure init)
+          - first call:  elapsed = 1000.0 - 0.0 = 1000.0 → no sleep; LCT = 1000.1
+          - second call: elapsed = 1000.2 - 1000.1 = 0.1 < 1.0 → sleep(0.9); LCT = 1001.2
+        """
+        from unittest.mock import patch
+
+        from geocoder import _PUBLIC_NOMINATIM_URL, make_fetcher
+
+        fetcher = make_fetcher(_PUBLIC_NOMINATIM_URL)
+
+        with (
+            patch("requests.get", return_value=self._mock_resp_200()),
+            patch("time.monotonic", side_effect=[1000.0, 1000.1, 1000.2, 1001.2]),
+            patch("time.sleep") as mock_sleep,
+        ):
+            fetcher(42.0, -71.0)  # first call: goes through without sleeping
+            fetcher(42.0, -71.0)  # second call: rate-limited
+
+        mock_sleep.assert_called_once_with(pytest.approx(0.9))
+
+    def test_make_fetcher_local_url_delay_is_0(self):
+        """Auto-detected delay is 0.0s for any URL other than the public endpoint."""
+        from unittest.mock import patch
+
+        from geocoder import make_fetcher
+
+        fetcher = make_fetcher("http://localhost:8080/reverse")
+
+        with (
+            patch("requests.get", return_value=self._mock_resp_200()),
+            patch("time.monotonic", side_effect=[1000.0, 1000.1, 1000.1, 1000.2]),
+            patch("time.sleep") as mock_sleep,
+        ):
+            fetcher(42.0, -71.0)
+            fetcher(42.0, -71.0)  # elapsed = 0.0, but min_delay=0.0 → no sleep
+
+        mock_sleep.assert_not_called()
+
+    def test_make_fetcher_explicit_min_delay_overrides_auto(self):
+        """Explicit min_delay=0.0 suppresses the delay even for the public URL."""
+        from unittest.mock import patch
+
+        from geocoder import _PUBLIC_NOMINATIM_URL, make_fetcher
+
+        fetcher = make_fetcher(_PUBLIC_NOMINATIM_URL, min_delay=0.0)
+
+        with (
+            patch("requests.get", return_value=self._mock_resp_200()),
+            patch("time.monotonic", side_effect=[1000.0, 1000.1, 1000.1, 1000.2]),
+            patch("time.sleep") as mock_sleep,
+        ):
+            fetcher(42.0, -71.0)
+            fetcher(42.0, -71.0)  # min_delay=0.0 overrides auto-detect → no sleep
+
+        mock_sleep.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# check_nominatim_status — readiness check (#225)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckNominatimStatus:
+    def test_check_status_ok(self):
+        """HTTP 200 from /status.php → (True, 'Nominatim OK — <base_url>')."""
+        from unittest.mock import MagicMock, patch
+
+        from geocoder import check_nominatim_status
+
+        resp = MagicMock()
+        resp.status_code = 200
+
+        with patch("requests.get", return_value=resp):
+            ok, msg = check_nominatim_status("http://localhost:8080/reverse")
+
+        assert ok is True
+        assert "Nominatim OK" in msg
+        assert "http://localhost:8080" in msg
+
+    def test_check_status_http_error(self):
+        """Non-200 response → (False, 'Nominatim unreachable — ...')."""
+        from unittest.mock import MagicMock, patch
+
+        from geocoder import check_nominatim_status
+
+        resp = MagicMock()
+        resp.status_code = 503
+
+        with patch("requests.get", return_value=resp):
+            ok, msg = check_nominatim_status("http://localhost:8080/reverse")
+
+        assert ok is False
+        assert "unreachable" in msg
+        assert "http://localhost:8080" in msg
+
+    def test_check_status_connection_error(self):
+        """Network error → (False, 'Nominatim unreachable — ...')."""
+        import requests as _requests
+        from unittest.mock import patch
+
+        from geocoder import check_nominatim_status
+
+        with patch("requests.get", side_effect=_requests.ConnectionError("refused")):
+            ok, msg = check_nominatim_status("http://localhost:1/reverse")
+
+        assert ok is False
+        assert "unreachable" in msg

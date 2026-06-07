@@ -42,3 +42,6 @@ tag_protection:
   # any source=photos proposal that would delete a listed tag is silently suppressed.
   protected_namespaces: []    # e.g. ["family/", "archive/"]
   protected_tags: []          # e.g. ["scanned-film", "original-negative"]
+
+# geocoding:
+#   nominatim_url: "http://localhost:8080/reverse"  # local Docker instance; omit for public API

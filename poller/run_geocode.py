@@ -64,14 +64,19 @@ def run_geocode(
 
     rows = db.conn.execute(query).fetchall()
 
+    # Abort early when this many consecutive API calls all fail — signals an IP-level block.
+    _CONSECUTIVE_ERROR_ABORT = 3
+
     counts: dict[str, int] = {
         "geocoded": 0,
         "cached": 0,
         "no_result": 0,
         "skipped": skip_count,
         "errors": 0,
+        "stopped_early": 0,
     }
     api_calls = 0
+    consecutive_errors = 0
 
     for row in rows:
         photo_id = row["id"]
@@ -107,6 +112,10 @@ def run_geocode(
             api_calls += 1
             if result.place is None:
                 counts["errors"] += 1
+                consecutive_errors += 1
+                if consecutive_errors >= _CONSECUTIVE_ERROR_ABORT:
+                    counts["stopped_early"] = 1
+                    break
             elif any(getattr(result.place, f.replace("place_", ""), None) for f in _PLACE_FIELDS):
                 if not dry_run:
                     db.update_place_data(
@@ -121,8 +130,10 @@ def run_geocode(
                         },
                         overwrite=overwrite,
                     )
+                consecutive_errors = 0
                 counts["geocoded"] += 1
             else:
+                consecutive_errors = 0
                 counts["no_result"] += 1
 
     return counts
