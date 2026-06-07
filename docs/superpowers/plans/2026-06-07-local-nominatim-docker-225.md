@@ -92,7 +92,11 @@ def _fetch_nominatim(url: str, lat: float, lon: float) -> "PlaceData | None":
         for delay in _RETRY_DELAYS:
             if resp.status_code != 429:
                 break
-            wait = max(int(resp.headers.get("Retry-After", delay)), delay)
+            try:
+                retry_after = int(resp.headers.get("Retry-After", delay))
+            except ValueError:
+                retry_after = delay  # HTTP-date format or unexpected value — fall back to floor
+            wait = max(retry_after, delay)
             log.warning(
                 "Nominatim rate-limited (429) for (%.6f, %.6f); backing off %ds",
                 lat,
@@ -275,8 +279,9 @@ def make_fetcher(
     """
     effective_url = url or _PUBLIC_NOMINATIM_URL
     if min_delay is None:
-        netloc = urlparse(effective_url).netloc
-        min_delay = 1.0 if netloc == "nominatim.openstreetmap.org" else 0.0
+        # Compare hostname (not netloc) so explicit port variants like :443 still match.
+        hostname = urlparse(effective_url).hostname
+        min_delay = 1.0 if hostname == "nominatim.openstreetmap.org" else 0.0
 
     # 0.0 guarantees the first call is never rate-limited: time.monotonic() returns
     # the system uptime in seconds, so elapsed >> min_delay on any first real call.
@@ -315,10 +320,11 @@ construction, 429 retry, parsing, logging). Both fetch_from_nominatim and
 the make_fetcher closure delegate to it, each wrapping only their own
 rate-limiter bookkeeping — no duplicate logic.
 
-make_fetcher(url, *, min_delay=None) auto-detects delay: 1.0s for the
-public endpoint, 0.0s for any other host. Renames _NOMINATIM_URL →
-_PUBLIC_NOMINATIM_URL. Delay tests use mocked time.monotonic() for
-deterministic assertions.
+make_fetcher(url, *, min_delay=None) auto-detects delay using hostname
+(not netloc) so port variants like :443 are handled correctly. Defensive
+Retry-After parsing catches HTTP-date values that would raise ValueError.
+Renames _NOMINATIM_URL → _PUBLIC_NOMINATIM_URL. Delay tests use mocked
+time.monotonic() with uptime-scale values for deterministic assertions.
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 EOF
@@ -421,6 +427,11 @@ def check_nominatim_status(url: str) -> tuple[bool, str]:
     Derives the base URL from url by stripping the path. Returns (True, message)
     on HTTP 200; (False, message) on any non-200 or network error. The response
     body is not parsed — deployment variants differ in JSON structure.
+
+    The /status.php path is a deliberate simplification: it covers mediagis/nominatim
+    and most standard deployments. Containers behind a path-prefixed reverse proxy, or
+    those exposing /status instead of /status.php, will report unreachable even when
+    the reverse endpoint is functional. Acceptable tradeoff for a Docker workflow check.
     """
     import requests  # deferred import — not needed if geocoder isn't used
 
@@ -493,6 +504,7 @@ def test_geocode_check_nominatim_flag_accepted() -> None:
         ],
         capture_output=True,
         cwd=ROOT,
+        timeout=30,
     )
     stderr = result.stderr.decode()
     assert result.returncode == 1  # connection refused → unreachable → exit 1
