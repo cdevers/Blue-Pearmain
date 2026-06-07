@@ -600,6 +600,17 @@ function clearSelection() {
   document.getElementById('map-clear-btn').style.display = 'none';
 }
 
+// ── Keyboard shortcuts (#158) ─────────────────────────────────────────────
+document.addEventListener('keydown', function(e) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+  if (e.key === 'f' || e.key === 'F') {
+    toggleMapPanel();
+  } else if (e.key === 'Escape') {
+    const panel = document.getElementById('map-filter-panel');
+    if (panel && panel.classList.contains('is-open')) panel.classList.remove('is-open');
+  }
+});
+
 function openInLibrary() {
   const bounds = _drawnBounds || map.getBounds();
   const params = new URLSearchParams({
