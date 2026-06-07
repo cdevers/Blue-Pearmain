@@ -1143,6 +1143,12 @@ def cmd_geocode(args: argparse.Namespace) -> None:
     print("   ".join(parts))
     if args.dry_run:
         print("(dry run — nothing written)")
+    if counts.get("stopped_early"):
+        print(
+            "\nStopped early: 3 consecutive Nominatim errors — the service is likely "
+            "rate-limiting this IP.\nWait a few hours before retrying. "
+            "For large libraries, a local Nominatim instance (Docker) is more reliable."
+        )
 
 
 def cmd_import_contacts_birthdays(args: argparse.Namespace) -> None:

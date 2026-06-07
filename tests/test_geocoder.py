@@ -563,6 +563,40 @@ class TestBpGeocode:
         run_geocode(db, dry_run=False, overwrite=False, limit=2, fetcher=fake_fetcher)
         assert len(fetcher_calls) == 2  # limited even with errors
 
+    def test_bp_geocode_stops_early_on_consecutive_errors(self, tmp_path: Path):
+        # After 3 consecutive API errors, run_geocode aborts and sets stopped_early.
+        from run_geocode import run_geocode
+
+        db = _db(tmp_path)
+        for i in range(5):
+            db.upsert_photo(
+                {
+                    "uuid": f"uuid-err-{i}",
+                    "flickr_id": None,
+                    "latitude": float(40 + i),
+                    "longitude": -71.0,
+                    "place_city": None,
+                    "place_state": None,
+                    "place_country": None,
+                    "place_neighborhood": None,
+                    "privacy_state": "candidate_public",
+                    "privacy_reason": "",
+                    "proposed_tags": [],
+                }
+            )
+
+        fetcher_calls = []
+
+        def fake_fetcher(lat: float, lon: float) -> PlaceData | None:
+            fetcher_calls.append((lat, lon))
+            return None  # all calls fail
+
+        counts = run_geocode(db, dry_run=False, overwrite=False, limit=None, fetcher=fake_fetcher)
+        # Should stop after 3 consecutive errors, not process all 5 photos
+        assert len(fetcher_calls) == 3
+        assert counts["errors"] == 3
+        assert counts["stopped_early"] == 1
+
 
 # ---------------------------------------------------------------------------
 # fetch_from_nominatim — 429 backoff (#219)
