@@ -365,3 +365,24 @@ CREATE TABLE IF NOT EXISTS person_birthdays (
     created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
     updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
+
+
+-- ============================================================
+-- Nominatim reverse geocoding cache
+-- Keyed by coordinates rounded to 3 decimal places (~111 m).
+-- All place fields nullable — an all-null row records that
+-- Nominatim returned nothing, preventing repeated retries.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS nominatim_cache (
+    lat_rounded        REAL NOT NULL,
+    lon_rounded        REAL NOT NULL,
+    place_city         TEXT,
+    place_state        TEXT,
+    place_country      TEXT,
+    place_country_code TEXT,
+    place_neighborhood TEXT,
+    place_address      TEXT,
+    fetched_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    PRIMARY KEY (lat_rounded, lon_rounded)
+);
