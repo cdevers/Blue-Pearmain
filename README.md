@@ -199,6 +199,10 @@ bp match-legacy --apply            # Reclassify confident (and all-people ambigu
                                    # On match, also stages the matched legacy asset's keywords/labels into the photo's proposed tags and
                                    # (for confident matches) fills the empty proposed title/description fields from the legacy asset —
                                    # merged, de-duplicated, and idempotent. These are local review-staging fields only; nothing is pushed to Flickr.
+bp geocode                         # Backfill place data (city/state/country/neighborhood) from Nominatim for photos with GPS coordinates
+bp geocode --dry-run               # Report counts without writing anything
+bp geocode --overwrite             # Replace existing place data with Nominatim results (default: fill gaps only)
+bp geocode --limit N               # Stop after N API call attempts (cache hits do not count; errors do count)
 bp ui                              # Start the review UI (http://localhost:5173)
 bp ui --host 0.0.0.0               # Also bind to LAN interfaces (e.g. for iPad access)
 ```
