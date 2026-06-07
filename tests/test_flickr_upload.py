@@ -117,3 +117,14 @@ class TestUploadPhoto:
         c._session.post.return_value = _err_response("quota exceeded")
         with pytest.raises(FlickrError):
             c.upload_photo(photo)
+
+    def test_raises_on_missing_photoid_element(self, tmp_path):
+        photo = tmp_path / "img.jpg"
+        photo.write_bytes(b"JPEG")
+        c = _client()
+        m = MagicMock()
+        m.text = '<?xml version="1.0" ?><rsp stat="ok"></rsp>'  # no <photoid>
+        m.raise_for_status = MagicMock()
+        c._session.post.return_value = m
+        with pytest.raises(FlickrError):
+            c.upload_photo(photo)

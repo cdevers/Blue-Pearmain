@@ -689,7 +689,7 @@ class FlickrClient:
                     },
                     http_method="POST",
                 )
-            except Exception:
+            except FlickrError:
                 log.warning(
                     f"upload_photo: setDates failed for {flickr_id} — "
                     "date can be repaired by bp sync-metadata"
