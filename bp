@@ -1167,6 +1167,97 @@ def cmd_legacy_report(args: argparse.Namespace) -> None:
         print(f"\nCSV written  : {args.csv} ({r['unmatched']:,} rows)")
 
 
+def cmd_upload_legacy_unmatched(args: argparse.Namespace) -> None:
+    """Upload legacy-only assets to Flickr, bypassing Apple Photos (#230)."""
+    import yaml
+
+    sys.path.insert(0, str(ROOT / "poller"))
+    from db.db import Database
+    from legacy_uploader import upload_unmatched_assets
+    from analyzer.privacy import CLASSIFIER_VERSION
+
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+
+    db_path = str(Path(config["database"]["path"]).expanduser())
+    library_path = Path(_resolve_legacy_library_path(args, config)).expanduser()
+
+    if not library_path.exists():
+        print(f"Error: library not found / not mounted: {library_path}", file=sys.stderr)
+        sys.exit(1)
+
+    db = Database(db_path)
+    try:
+        libs = db.conn.execute(
+            "SELECT library_uuid FROM legacy_libraries ORDER BY indexed_at DESC"
+        ).fetchall()
+        if not libs:
+            print(
+                "No indexed legacy library found. Run 'bp index-legacy' first.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if len(libs) > 1 and not getattr(args, "library_uuid", None):
+            print(
+                "Multiple legacy libraries indexed; pass --library-uuid <uuid>.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        library_uuid = getattr(args, "library_uuid", None) or libs[0]["library_uuid"]
+
+        if args.dry_run:
+            flickr_client = None
+        else:
+            from flickr.flickr_client import FlickrClient
+            flickr_client = FlickrClient.from_config(config)
+
+        self_name = config.get("photos_library", {}).get("self_name", "")
+        zones = db.active_zones()
+        person_policies = db.get_person_policies()
+
+        counts = upload_unmatched_assets(
+            db,
+            library_uuid,
+            library_path,
+            flickr_client,
+            self_name=self_name,
+            zones=zones,
+            person_policies=person_policies,
+            classifier_version=CLASSIFIER_VERSION,
+            limit=getattr(args, "limit", None),
+            dry_run=args.dry_run,
+        )
+    finally:
+        db.close()
+
+    prefix = "Legacy upload dry run" if args.dry_run else "Legacy upload"
+    print(prefix)
+    print(f"  library_uuid       : {library_uuid}")
+    if counts["recovered"]:
+        print(f"  recovered          : {counts['recovered']}")
+    if args.dry_run:
+        print(f"  eligible           : {counts['eligible']}")
+        print(
+            f"  would upload       : "
+            f"{counts['eligible'] - counts['skipped_missing_file']}"
+        )
+        print(f"  skipped (no file)  : {counts['skipped_missing_file']}")
+        print("\nWould-be privacy states:")
+    else:
+        print(f"  eligible           : {counts['eligible']}")
+        print(f"  uploaded           : {counts['uploaded']}")
+        print(f"  already uploaded   : {counts['skipped_already_uploaded']}")
+        print(f"  skipped (no file)  : {counts['skipped_missing_file']}")
+        print(f"  upload failed      : {counts['upload_failed']}")
+        print(f"  db write failed    : {counts['db_write_failed']}")
+        if counts["date_set_failed"]:
+            print(f"  date set failed    : {counts['date_set_failed']}  (bp sync-metadata will fix)")
+        print("\nPrivacy states applied:")
+    print(f"  auto_private       : {counts['auto_private']}")
+    print(f"  needs_review       : {counts['needs_review']}")
+    print(f"  candidate_public   : {counts['candidate_public']}")
+
+
 def cmd_geocode(args: argparse.Namespace) -> None:
     """Backfill place data from Nominatim for photos with GPS coordinates."""
     import yaml
@@ -1777,6 +1868,45 @@ def main():
     )
     p_lrep.set_defaults(func=cmd_legacy_report)
 
+    # upload-legacy-unmatched
+    p_ulm = sub.add_parser(
+        "upload-legacy-unmatched",
+        help="Upload legacy-only assets (not yet on Flickr) directly to Flickr (#230)",
+    )
+    p_ulm.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Classify and report without uploading or writing to the DB",
+    )
+    p_ulm.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Upload at most N assets (for incremental rollout)",
+    )
+    p_ulm.add_argument(
+        "--library-uuid",
+        default=None,
+        help=(
+            "Which indexed library to draw from (default: the most recently indexed). "
+            "Required when more than one legacy library has been indexed — run "
+            "'bp legacy-report' to see library UUIDs, or query "
+            "'SELECT library_uuid, display_name FROM legacy_libraries' directly."
+        ),
+    )
+    p_ulm.add_argument(
+        "--library",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Path to the .photoslibrary bundle (overrides config legacy_library.path). "
+            "The config key legacy_library.path was introduced by bp index-legacy; "
+            "see config.example.yml."
+        ),
+    )
+    p_ulm.set_defaults(func=cmd_upload_legacy_unmatched)
+
     # geocode
     p_geo = sub.add_parser(
         "geocode",
@@ -1927,6 +2057,7 @@ def main():
         "index-legacy": cmd_index_legacy,
         "match-legacy": cmd_match_legacy,
         "legacy-report": cmd_legacy_report,
+        "upload-legacy-unmatched": cmd_upload_legacy_unmatched,
         "geocode": cmd_geocode,
         "import-contacts-birthdays": cmd_import_contacts_birthdays,
     }
