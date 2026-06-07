@@ -76,6 +76,12 @@
 {% block content %}
 <div class="container">
 
+  <a href="https://cdevers.github.io/2026/05/12/Filing-Vivian-Maier.html" target="_blank" rel="noopener">
+    <img src="{{ url_for('static', filename='bp_logo_dashboard.png') }}"
+         alt="Blue Pearmain watercolor"
+         style="float:right; margin: 0 0 16px 24px; height:200px; width:auto; opacity:0.9">
+  </a>
+
   <div class="stat-grid">
     <div class="stat-card">
       <a href="{{ url_for('review', state='candidate_public') }}">
@@ -141,6 +147,8 @@
     {% endfor %}
   </div>
   {% endif %}
+
+  <div style="clear:both"></div>
 
   {# Cache freshness row #}
   {% set fa = stats.flickr_cache_age_hours %}

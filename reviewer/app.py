@@ -526,6 +526,8 @@ def duplicates() -> str:
                 p.width,
                 p.height,
                 p.date_taken,
+                p.date_precision,
+                p.date_approximate,
                 p.duplicate_role,
                 p.thumbnail_path,
                 p.flickr_secret,
@@ -595,6 +597,8 @@ def duplicates() -> str:
                 "width": r["width"],
                 "height": r["height"],
                 "date_taken": r["date_taken"],
+                "date_precision": r["date_precision"],
+                "date_approximate": r["date_approximate"],
                 "duplicate_role": r["duplicate_role"],
                 "thumbnail_path": r["thumbnail_path"],
                 "flickr_secret": r["flickr_secret"],
@@ -884,6 +888,18 @@ def _format_date_filter(s: str) -> str:
         return _date.fromisoformat(s).strftime("%b %-d, %Y")
     except (ValueError, AttributeError):
         return s
+
+
+@app.template_filter("date_display")
+def _date_display_filter(
+    date_taken: str | None,
+    precision: str | None = None,
+    approximate: int = 0,
+) -> str:
+    """Jinja filter: {{ photo.date_taken | date_display(photo.date_precision, photo.date_approximate) }}"""
+    from db.date_precision import format_date_precision
+
+    return format_date_precision(date_taken, precision, bool(approximate))
 
 
 def normalize_shared_filters() -> SharedFilters:
@@ -2200,6 +2216,30 @@ def api_set_photo_text(photo_id: int) -> _JsonResp:
         return jsonify(result)
     status = 404 if result.get("reason") == "photo not found" else 502
     return jsonify(result), status
+
+
+@app.route("/api/photos/<int:photo_id>/set-date-precision", methods=["POST"])
+def api_set_date_precision(photo_id: int) -> _JsonResp:
+    """Update date_precision and date_approximate for a photo."""
+    from db.date_precision import PRECISION_VALUES
+
+    data = request.get_json(force=True, silent=True) or {}
+    precision = data.get("precision")
+    approximate = bool(data.get("approximate", False))
+
+    if precision not in PRECISION_VALUES:
+        return jsonify({"ok": False, "error": "invalid precision"}), 400
+
+    photo = db().get_photo(photo_id)
+    if not photo:
+        return jsonify({"ok": False, "error": "not found"}), 404
+
+    db().conn.execute(
+        "UPDATE photos SET date_precision = ?, date_approximate = ? WHERE id = ?",
+        (precision, int(approximate), photo_id),
+    )
+    db().conn.commit()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/geo_confirm_none", methods=["POST"])

@@ -34,6 +34,12 @@ Surface high-signal failures (auth expiry, sustained API errors, unresolved reco
 
 BP's current model is reactive: classify what arrives, queue what needs review, apply what's unambiguous. Two gaps have emerged where a persistent *policy* would be more appropriate than a repeated manual action.
 
+### Legacy-match demotion policy — any confident match → needs_review ([#209](https://github.com/cdevers/Blue-Pearmain/issues/209)) `size:S`
+
+Currently `match-legacy --apply` only demotes a Flickr-only `candidate_public` photo when the matched iPhoto asset carries a privacy signal: a named face, an unknown face, or a location inside a geofence zone. Photos that match confidently but carry no such signal stay `candidate_public`.
+
+In practice the Flickr-only `candidate_public` queue (~19k photos) contains many personal family photos whose iPhoto counterparts happen to be untagged (iPhoto face recognition was manual and incomplete). A policy flag — `legacy_match.demote_all_confident: true` in `config.yml` — would say "any confident legacy match is sufficient reason to move the photo to `needs_review`, regardless of content signals." This is a deliberate trade-off: more false positives in the review queue, fewer inadvertent public posts. Worth offering as opt-in.
+
 ### Per-person privacy policy ([#114](https://github.com/cdevers/Blue-Pearmain/issues/114)) `size:M` · ✓ done
 
 A way to declare "any photo containing Person X is always auto-private" — stored in the DB, checked at scan time. Currently, batch-marking all of a person's photos private is a one-shot action; new photos of that person re-enter the queue. A persistent policy is the right primitive for people who should never appear on Flickr (children, people who've asked not to be photographed publicly).
@@ -96,6 +102,8 @@ The map currently shows all geotagged photos as independent dots. A "Photo Trail
 
 ### Person birthdays and birthday-aware filtering ([#152](https://github.com/cdevers/Blue-Pearmain/issues/152)) `size:M` · [spec](superpowers/specs/2026-05-27-person-birthdays-152.md) · ✓ done
 
+See also [#210](https://github.com/cdevers/Blue-Pearmain/issues/210) · [spec](superpowers/specs/2026-06-05-contacts-birthday-import-210.md) · [plan](superpowers/plans/2026-06-05-contacts-birthday-import-210.md) — import birthdays from Apple Contacts (many Photos faces are linked to Contacts records that already have a birthday field).
+
 ### Map filter scoping — year range, album, person, privacy ([#154](https://github.com/cdevers/Blue-Pearmain/issues/154)) `size:M` · [spec](superpowers/specs/2026-05-28-map-filter-scoping-154.md) · ✓ done
 
 The map filter bar gains four new dimensions that AND with the existing time-pattern dropdown: year range (from/to, either optional), album, person (type-ahead against `apple_persons`), and an animation-only privacy toggle (All / Public only / Private only). All filters affect map dots, trail, and animation; privacy affects animation only. Enables workflows like "every place I've met Marcin" or "find which August trip included Spain, then animate it."
@@ -116,25 +124,21 @@ Three phases: (1) in-browser Leaflet animation as proof-of-concept — an Animat
 
 **Privacy**: the trail is just lat/lon — no faces — but thumbnail overlays must respect the privacy model. A public version filters to `approved_public`/`already_public` photos; a family version includes private photos for local/restricted sharing. Album membership is a natural scope boundary ("animate this album's photos").
 
-Storing a known birthday for named people (in a `people` table or similar) enables several useful features:
-- Display age-at-time in the photo detail view ("Chris, age 8")
-- Filter the library or map by "photos taken on a person's birthday"
-- Filter by "photos where an identified person appears" for any named person
-- Eventually: "photos taken within a week of someone's birthday" for fuzzy milestone browsing
-
-Not immediate — needs a people schema that BP doesn't have yet — but a coherent direction worth designing for.
-
 ### Unified filter widget: date range ([#159](https://github.com/cdevers/Blue-Pearmain/issues/159)) `size:S` · ✓ done
 
 Replace the integer year-range inputs with native `<input type="date">` pickers (`date_from` / `date_to`) across the shared filter bar, library, and map. Either field is optional (open-ended ranges). `normalize_shared_filters()` handles validation, the `date_from > date_to` swap, and backward compat for legacy `year_from`/`year_to` URL params. The library and map SQL use day-level `>=` / `<` boundaries; `date_to` is inclusive on the user side, translated to an exclusive next-day bound in SQL.
 
-### Approximate / fuzzy dates for historical photos ([#157](https://github.com/cdevers/Blue-Pearmain/issues/157)) `size:M`
+### Approximate / fuzzy dates for historical photos ([#157](https://github.com/cdevers/Blue-Pearmain/issues/157)) `size:M` · ✓ done
 
 Pre-digital or scanned photos often have only a year, or a decade, or "sometime in the 1970s." The DB currently treats `date_taken` as either a precise timestamp or NULL. A `date_precision` field (`exact`, `day`, `month`, `year`, `decade`, `unknown`) alongside a `date_approximate` flag would let BP represent and surface these photos without either lying about their date or discarding the approximate information entirely. Useful for iPhoto migrations and scanned film.
 
 ### Command palette (⌘K) for the reviewer UI ([#158](https://github.com/cdevers/Blue-Pearmain/issues/158)) `size:M`
 
 A keyboard-driven command palette — jump to photo, filter by person, open map, navigate to date — would meaningfully speed up the review workflow. BP's web UI is currently mouse-heavy; this would let power users drive it without reaching for the mouse. Relatively self-contained as a JS feature.
+
+### Geofence zone auto-naming via Nominatim
+
+Once [#217](https://github.com/cdevers/Blue-Pearmain/issues/217) (Nominatim reverse geocoding) is in place, the same `reverse_geocode()` function could suggest a name when the user creates or repositions a geofence zone — querying the zone's centre coordinates and pre-filling the name field with the neighbourhood or city Nominatim returns. Low priority: there are only a handful of zones, filling in names by hand is not a burden, and most zone names are personal labels ("A's house", "B's school") that Nominatim wouldn't know anyway. Noted here as a natural follow-on once the geocoder module exists.
 
 ### Native macOS / iOS client
 

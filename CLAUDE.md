@@ -10,6 +10,7 @@ These instructions apply to every session in this project. Follow them without b
 
 1. **Brainstorm** — invoke `/superpowers:brainstorming` before writing any code for a new feature or non-trivial change. Explore design options and agree on the approach with the user before touching files.
 2. **File a GitHub issue** — once the approach is agreed, create or identify the issue. Do this before making any code changes.
+3. **Compact at handoff points** — after the spec is approved and committed, prompt the user to run `/compact` before writing the plan. After the plan is approved and committed, prompt again before invoking subagent-driven development. The spec and plan files hold everything that matters; the conversation that produced them is safe to drop.
 
 ---
 
@@ -40,6 +41,8 @@ For each meaningful change (bug fix, feature, refactor):
 - **Test runner:** `python -m pytest tests/ -q` from the repo root.
 - **Dev server:** `python reviewer/app.py --config config/config.yml` or `bp ui`.
 - **Python path:** scripts in `poller/` add both `Path(__file__).parent.parent` (project root) and `Path(__file__).parent` (the `poller/` directory itself) to `sys.path`. Sibling modules import as `from scanner import ...`, not `from poller.scanner import ...`.
+- **Git commit email:** GitHub rejects pushes signed with `cdevers@pobox.com`. Use `1642218+cdevers@users.noreply.github.com` — verify with `git config user.email` before pushing.
+- **Branch protection:** `main` requires a passing `test` CI check and a PR — no direct pushes, enforced for admins. All work goes on a feature branch; merge via PR only.
 
 ---
 

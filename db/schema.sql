@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS photos (
 
     -- Timestamps
     date_taken              TEXT,                   -- ISO8601, from EXIF
+    date_precision          TEXT NOT NULL DEFAULT 'exact'
+                                CHECK(date_precision IN ('exact','day','month','year','decade','unknown')),
+    date_approximate        INTEGER NOT NULL DEFAULT 0,     -- 1 = date is a best guess (c. 1975)
     date_uploaded_flickr    TEXT,                   -- ISO8601, when Flickr received it
     date_added_photos       TEXT,                   -- ISO8601, when Photos ingested it
     date_analyzed           TEXT,                   -- ISO8601, when Apple completed ML analysis
@@ -349,3 +352,37 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_proposals_identity
 CREATE INDEX IF NOT EXISTS idx_proposals_batch
     ON metadata_proposals(batch_id)
     WHERE batch_id IS NOT NULL;
+
+
+-- ============================================================
+-- Person birthdays: optional birthday stored per named person
+-- (birthday is 'MM-DD' for recurring annual or 'YYYY-MM-DD' for full date)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS person_birthdays (
+    person_name  TEXT PRIMARY KEY,
+    birthday     TEXT NOT NULL,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+
+-- ============================================================
+-- Nominatim reverse geocoding cache
+-- Keyed by coordinates rounded to 3 decimal places (~111 m).
+-- All place fields nullable — an all-null row records that
+-- Nominatim returned nothing, preventing repeated retries.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS nominatim_cache (
+    lat_rounded        REAL NOT NULL,
+    lon_rounded        REAL NOT NULL,
+    place_city         TEXT,
+    place_state        TEXT,
+    place_country      TEXT,
+    place_country_code TEXT,
+    place_neighborhood TEXT,
+    place_address      TEXT,
+    fetched_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    PRIMARY KEY (lat_rounded, lon_rounded)
+);

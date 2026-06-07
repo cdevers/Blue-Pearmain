@@ -275,7 +275,7 @@
             {% else %}
             <div class="dup-meta-dims" style="color:var(--muted)">dimensions unknown</div>
             {% endif %}
-            <div class="dup-meta-date">{{ photo.date_taken[:19] if photo.date_taken else '—' }}</div>
+            <div class="dup-meta-date">{{ photo.date_taken | date_display(photo.date_precision, photo.date_approximate) if photo.date_taken or photo.date_precision == 'unknown' else '—' }}</div>
             {% if photo.flickr_id %}
             <div class="dup-meta-link">
               <a href="https://www.flickr.com/photos/{{ flickr_username }}/{{ photo.flickr_id }}"
