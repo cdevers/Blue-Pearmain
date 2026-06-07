@@ -136,6 +136,10 @@ Pre-digital or scanned photos often have only a year, or a decade, or "sometime 
 
 A keyboard-driven command palette — jump to photo, filter by person, open map, navigate to date — would meaningfully speed up the review workflow. BP's web UI is currently mouse-heavy; this would let power users drive it without reaching for the mouse. Relatively self-contained as a JS feature.
 
+### Geofence zone auto-naming via Nominatim
+
+Once [#217](https://github.com/cdevers/Blue-Pearmain/issues/217) (Nominatim reverse geocoding) is in place, the same `reverse_geocode()` function could suggest a name when the user creates or repositions a geofence zone — querying the zone's centre coordinates and pre-filling the name field with the neighbourhood or city Nominatim returns. Low priority: there are only a handful of zones, filling in names by hand is not a burden, and most zone names are personal labels ("A's house", "B's school") that Nominatim wouldn't know anyway. Noted here as a natural follow-on once the geocoder module exists.
+
 ### Native macOS / iOS client
 
 Iris ships native apps across Mac, iPhone, iPad, and Apple TV. BP's reviewer is a local web UI served over Flask, which works well enough for Mac and passably on iPad over LAN. A native client would give better platform integration (keyboard shortcuts, share sheets, Continuity Camera, widgets) but represents a much larger engineering surface. Not a current line of thinking — the web UI meets immediate needs — but worth noting as the project matures.
