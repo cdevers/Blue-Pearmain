@@ -205,7 +205,8 @@ bp legacy-report                   # Report legacy assets with no Flickr counter
 bp legacy-report --library-uuid UUID  # Report on a specific indexed library (use when more than one legacy library is indexed)
 bp legacy-report --csv PATH        # Write unmatched assets to a CSV file
 bp upload-legacy-unmatched --dry-run  # Classify unmatched assets and report what would happen without uploading
-bp upload-legacy-unmatched         # Upload unmatched legacy assets directly to Flickr (always private; BP pipeline handles promotion)
+bp upload-legacy-unmatched         # Upload unmatched legacy assets directly to Flickr (lands Flickr-private; BP pipeline manages promotion)
+bp upload-legacy-unmatched --library-uuid UUID  # Specify which indexed library to upload from (when multiple are indexed)
 bp upload-legacy-unmatched --limit N  # Upload at most N assets (for incremental rollout)
 bp geocode                         # Backfill place data (city/state/country/neighborhood) from Nominatim for photos with GPS coordinates
 bp geocode --dry-run               # Report counts without writing anything
