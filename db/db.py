@@ -2886,3 +2886,94 @@ class Database:
             )
         self.conn.commit()
         return removed_keys
+
+    def mark_legacy_uploaded(self, library_uuid: str, asset_uuid: str, flickr_id: str) -> None:
+        """Record that a legacy asset has been uploaded to Flickr.
+
+        Sets uploaded_flickr_id and uploaded_at immediately after upload,
+        before the photos row is created. This is the idempotency guard for
+        bp upload-legacy-unmatched (#230) — on re-run, assets with this set
+        are skipped in the upload loop and repaired in the recovery phase.
+
+        Uniqueness invariant: the schema does not enforce UNIQUE on
+        uploaded_flickr_id. Uniqueness is maintained by the upload loop's
+        atomicity — one successful upload produces exactly one call to this
+        method with the returned flickr_id.
+        """
+        self.conn.execute(
+            "UPDATE legacy_assets SET uploaded_flickr_id = ?, uploaded_at = ? "
+            "WHERE library_uuid = ? AND asset_uuid = ?",
+            (flickr_id, _now_iso(), library_uuid, asset_uuid),
+        )
+        self.conn.commit()
+
+    def iter_unrecovered_legacy_uploads(self, library_uuid: str) -> list[dict]:
+        """Return legacy assets uploaded to Flickr but missing a photos row.
+
+        These are partial failures from bp upload-legacy-unmatched: the Flickr
+        upload succeeded and uploaded_flickr_id was set, but the photos row
+        write failed. Phase 1 of the next run repairs them.
+        """
+        rows = self.conn.execute(
+            "SELECT la.* FROM legacy_assets la "
+            "WHERE la.library_uuid = ? AND la.uploaded_flickr_id IS NOT NULL "
+            "AND NOT EXISTS "
+            "(SELECT 1 FROM photos p WHERE p.flickr_id = la.uploaded_flickr_id)",
+            (library_uuid,),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+
+    def record_legacy_upload(
+        self,
+        flickr_id: str,
+        privacy_state: str,
+        privacy_reason: str,
+        *,
+        date_taken: str | None,
+        width: int | None,
+        height: int | None,
+        flickr_title: str,
+        flickr_tags: str,
+        flickr_description: str,
+        trigger: str,
+    ) -> int:
+        """Atomically insert a photos row + operation_log entry for a legacy upload.
+
+        Unlike log_operation (fire-and-forget), both writes are in one transaction:
+        an operation_log failure rolls the photos INSERT back too. Never a DB record
+        without its audit trail.
+        """
+        now = _now_iso()
+        with self.conn:
+            cursor = self.conn.execute(
+                "INSERT INTO photos "
+                "(flickr_id, uuid, privacy_state, privacy_reason, date_taken, "
+                " width, height, flickr_title, flickr_tags, flickr_description, "
+                " date_synced, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    flickr_id,
+                    None,
+                    privacy_state,
+                    privacy_reason,
+                    date_taken,
+                    width,
+                    height,
+                    flickr_title,
+                    flickr_tags,
+                    flickr_description,
+                    now,
+                    now,
+                ),
+            )
+            photo_id = cursor.lastrowid
+            if photo_id is None:
+                raise RuntimeError("INSERT INTO photos returned no lastrowid")
+            self.conn.execute(
+                "INSERT INTO operation_log "
+                "(occurred_at, photo_id, operation, target, "
+                " old_value, new_value, trigger, actor) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (now, photo_id, "upload_legacy_asset", "flickr_id", None, flickr_id, trigger, "bp"),
+            )
+        return photo_id
