@@ -114,3 +114,28 @@ def test_subcommand_dry_run_accepted(subcommand: str) -> None:
     assert f"invalid choice: '{subcommand}'" not in stderr, (
         f"`bp {subcommand} --dry-run` reported subcommand as invalid choice\nstderr: {stderr}"
     )
+
+
+def test_geocode_check_nominatim_flag_accepted() -> None:
+    """--check-nominatim exits before opening config; argparse must not reject the flag.
+
+    http://localhost:1/reverse will refuse the connection → exit 1.
+    No --config is passed because --check-nominatim must run before config is opened.
+    The test guards against 'unrecognized arguments' in stderr (argparse parse failure).
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            BP,
+            "geocode",
+            "--check-nominatim",
+            "--nominatim-url",
+            "http://localhost:1/reverse",
+        ],
+        capture_output=True,
+        cwd=ROOT,
+        timeout=30,
+    )
+    stderr = result.stderr.decode()
+    assert result.returncode != 2  # exit 2 = argparse rejected the flag; 0/1 both mean accepted
+    assert "unrecognized arguments" not in stderr

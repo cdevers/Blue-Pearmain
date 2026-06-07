@@ -1113,7 +1113,15 @@ def cmd_geocode(args: argparse.Namespace) -> None:
     sys.path.insert(0, str(ROOT / "poller"))
     from bp_logging import configure
     from db.db import Database
+    from geocoder import _PUBLIC_NOMINATIM_URL, check_nominatim_status, fetch_from_nominatim, make_fetcher
     from run_geocode import run_geocode
+
+    # --check-nominatim exits before the config file is opened (no DB path needed).
+    if args.check_nominatim:
+        url = args.nominatim_url or _PUBLIC_NOMINATIM_URL
+        ok, msg = check_nominatim_status(url)
+        print(msg)
+        sys.exit(0 if ok else 1)
 
     configure("geocode", verbose=args.verbose)
 
@@ -1122,12 +1130,17 @@ def cmd_geocode(args: argparse.Namespace) -> None:
 
     db_path = str(Path(config["database"]["path"]).expanduser())
     db = Database(db_path)
+
+    nominatim_url = args.nominatim_url or config.get("geocoding", {}).get("nominatim_url")
+    fetcher = make_fetcher(nominatim_url) if nominatim_url else fetch_from_nominatim
+
     try:
         counts = run_geocode(
             db,
             dry_run=args.dry_run,
             overwrite=args.overwrite,
             limit=args.limit,
+            fetcher=fetcher,
         )
     finally:
         db.close()
@@ -1706,6 +1719,24 @@ def main():
         default=None,
         metavar="N",
         help="Stop after N API call attempts (cache hits do not count; errors do count)",
+    )
+    p_geo.add_argument(
+        "--nominatim-url",
+        default=None,
+        metavar="URL",
+        help=(
+            "Nominatim reverse geocoding endpoint "
+            "(default: https://nominatim.openstreetmap.org/reverse). "
+            "Override to use a local Docker instance, e.g. http://localhost:8080/reverse"
+        ),
+    )
+    p_geo.add_argument(
+        "--check-nominatim",
+        action="store_true",
+        help=(
+            "Check whether the Nominatim endpoint is reachable and exit. "
+            "Exits 0 if reachable, 1 if not. No --config required."
+        ),
     )
 
     # import-contacts-birthdays
