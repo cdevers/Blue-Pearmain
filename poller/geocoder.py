@@ -170,6 +170,33 @@ def make_fetcher(
     return fetcher
 
 
+def check_nominatim_status(url: str) -> tuple[bool, str]:
+    """Check if a Nominatim instance is reachable by hitting its /status.php endpoint.
+
+    Derives the base URL from url by stripping the path. Returns (True, message)
+    on HTTP 200; (False, message) on any non-200 or network error. The response
+    body is not parsed — deployment variants differ in JSON structure.
+
+    The /status.php path is a deliberate simplification: it covers mediagis/nominatim
+    and most standard deployments. Containers behind a path-prefixed reverse proxy, or
+    those exposing /status instead of /status.php, will report unreachable even when
+    the reverse endpoint is functional. Acceptable tradeoff for a Docker workflow check.
+    """
+    import requests  # deferred import — not needed if geocoder isn't used
+
+    parsed = urlparse(url)
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
+    status_url = f"{base_url}/status.php"
+
+    try:
+        resp = requests.get(status_url, headers={"User-Agent": _USER_AGENT}, timeout=10)
+        if resp.status_code == 200:
+            return (True, f"Nominatim OK — {base_url}")
+        return (False, f"Nominatim unreachable — {base_url} (HTTP {resp.status_code})")
+    except Exception as exc:
+        return (False, f"Nominatim unreachable — {base_url} ({exc})")
+
+
 def reverse_geocode(
     lat: float,
     lon: float,

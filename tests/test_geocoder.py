@@ -773,3 +773,55 @@ class TestMakeFetcher:
             fetcher(42.0, -71.0)  # min_delay=0.0 overrides auto-detect → no sleep
 
         mock_sleep.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# check_nominatim_status — readiness check (#225)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckNominatimStatus:
+    def test_check_status_ok(self):
+        """HTTP 200 from /status.php → (True, 'Nominatim OK — <base_url>')."""
+        from unittest.mock import MagicMock, patch
+
+        from geocoder import check_nominatim_status
+
+        resp = MagicMock()
+        resp.status_code = 200
+
+        with patch("requests.get", return_value=resp):
+            ok, msg = check_nominatim_status("http://localhost:8080/reverse")
+
+        assert ok is True
+        assert "Nominatim OK" in msg
+        assert "http://localhost:8080" in msg
+
+    def test_check_status_http_error(self):
+        """Non-200 response → (False, 'Nominatim unreachable — ...')."""
+        from unittest.mock import MagicMock, patch
+
+        from geocoder import check_nominatim_status
+
+        resp = MagicMock()
+        resp.status_code = 503
+
+        with patch("requests.get", return_value=resp):
+            ok, msg = check_nominatim_status("http://localhost:8080/reverse")
+
+        assert ok is False
+        assert "unreachable" in msg
+        assert "http://localhost:8080" in msg
+
+    def test_check_status_connection_error(self):
+        """Network error → (False, 'Nominatim unreachable — ...')."""
+        import requests as _requests
+        from unittest.mock import patch
+
+        from geocoder import check_nominatim_status
+
+        with patch("requests.get", side_effect=_requests.ConnectionError("refused")):
+            ok, msg = check_nominatim_status("http://localhost:1/reverse")
+
+        assert ok is False
+        assert "unreachable" in msg
