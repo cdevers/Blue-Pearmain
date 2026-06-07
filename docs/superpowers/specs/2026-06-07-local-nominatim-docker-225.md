@@ -28,9 +28,10 @@ If neither is set, the default public endpoint
 
 ### Rate-limiter auto-detect
 
-The 1 req/sec rate limiter is only required by the public Nominatim policy. When the
-effective URL is anything other than `https://nominatim.openstreetmap.org/reverse`, the
-delay is set to 0. This is auto-detected — no config knob needed.
+The 1 req/sec rate limiter is only required by the public Nominatim policy. The detection
+uses `urllib.parse.urlparse(url).netloc`: if the netloc is `nominatim.openstreetmap.org`,
+the delay is 1.0s; any other netloc gets 0.0s. This handles trailing slashes, query
+parameters, and path variations without brittle string equality. No config knob needed.
 
 ### Fetcher factory
 
@@ -60,12 +61,11 @@ existing tests.
 
 ### Readiness check
 
-`bp geocode --check-nominatim` hits the configured endpoint's `/status.php` path (derived
-from the effective URL via `urllib.parse.urlparse` — strip path, append `/status.php`) and
-prints a single line:
+`bp geocode --check-nominatim` hits `<base>/status.php` (derived from the effective URL via
+`urllib.parse.urlparse` — strip path, replace with `/status.php`) and prints a single line:
 
 ```
-Nominatim OK — http://localhost:8080 (data updated: 2024-01-15T12:00:00+00:00)
+Nominatim OK — http://localhost:8080
 ```
 
 or on failure:
@@ -74,8 +74,14 @@ or on failure:
 Nominatim unreachable — http://localhost:8080 (connection refused)
 ```
 
-The command exits 0 on success, 1 on failure. No database is opened; `--check-nominatim`
-is a pre-flight check and exits before the geocoding loop runs.
+Success criterion: HTTP 200. The response body is not parsed — Nominatim deployment
+variants differ in their JSON structure and fields; a 200 is sufficient to confirm the
+instance is up and serving requests.
+
+The command exits 0 on success, 1 on failure. `--check-nominatim` is handled **before**
+the config file is opened: it only needs the URL (from `--nominatim-url` or the public
+default), not the database path. This keeps the check usable in Docker pre-flight scripts
+that run before a full config is available.
 
 A helper `check_nominatim_status(url: str) -> tuple[bool, str]` in `geocoder.py` handles
 the HTTP call and message formatting; `cmd_geocode` calls it and prints the result.
@@ -96,16 +102,21 @@ the HTTP call and message formatting; `cmd_geocode` calls it and prints the resu
 
 ## Behaviour details
 
-### `cmd_geocode` URL resolution
+### `cmd_geocode` control flow
 
 ```python
-nominatim_url = args.nominatim_url or config.get("geocoding", {}).get("nominatim_url")
-
+# --check-nominatim: resolved before config is opened (no DB path needed)
 if args.check_nominatim:
-    ok, msg = check_nominatim_status(nominatim_url or _PUBLIC_NOMINATIM_URL)
+    url = args.nominatim_url or _PUBLIC_NOMINATIM_URL
+    ok, msg = check_nominatim_status(url)
     print(msg)
     sys.exit(0 if ok else 1)
 
+# Normal geocoding path: config required from here on
+with open(args.config) as f:
+    config = yaml.safe_load(f)
+
+nominatim_url = args.nominatim_url or config.get("geocoding", {}).get("nominatim_url")
 fetcher = make_fetcher(nominatim_url) if nominatim_url else fetch_from_nominatim
 counts = run_geocode(db, dry_run=args.dry_run, overwrite=args.overwrite,
                      limit=args.limit, fetcher=fetcher)
@@ -135,14 +146,18 @@ shared rate-limiter state for any subsequent default-fetcher call in the same pr
 - `test_make_fetcher_explicit_min_delay_overrides_auto` — `min_delay=0.5` is respected
 
 **`TestCheckNominatimStatus`** (3 tests):
-- `test_check_status_ok` — 200 with `{"status": 0, "message": "OK", "data_updated": "..."}` → returns `(True, "Nominatim OK — ...")`
+- `test_check_status_ok` — 200 response (any body) → returns `(True, "Nominatim OK — ...")`
 - `test_check_status_http_error` — non-200 response → returns `(False, "Nominatim unreachable — ...")`
 - `test_check_status_connection_error` — `requests.ConnectionError` → returns `(False, "Nominatim unreachable — ...")`
 
 **`test_bp_cli.py`** additions:
-- `--check-nominatim` is not in `DRY_RUN_SUBCOMMANDS` (it exits before the DB; no `--dry-run` needed)
+- `--check-nominatim` is not in `DRY_RUN_SUBCOMMANDS` (no `--dry-run` flag)
 - The `--help` smoke test covers `geocode` already; no new subcommand entries needed
-- Add one test: `test_geocode_check_nominatim_flag_accepted` — `bp geocode --check-nominatim --config /dev/null/nonexistent.yml` exits without "unrecognized arguments"
+- Add one test: `test_geocode_check_nominatim_flag_accepted` — runs
+  `bp geocode --check-nominatim --nominatim-url http://localhost:1/reverse` with no
+  `--config` (connection will be refused → exit 1); asserts no "unrecognized arguments"
+  in stderr. This exercises the actual control flow (config not opened, URL from CLI flag)
+  rather than relying on a nonexistent config path.
 
 ---
 
