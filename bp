@@ -1110,6 +1110,63 @@ def cmd_match_legacy(args: argparse.Namespace) -> None:
         db.close()
 
 
+def cmd_legacy_report(args: argparse.Namespace) -> None:
+    """Report on legacy assets with no matching Flickr photo (#229)."""
+    import csv
+    import yaml
+
+    sys.path.insert(0, str(ROOT / "poller"))
+    from db.db import Database
+    from legacy_report import report_unmatched
+
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+    db_path = str(Path(config["database"]["path"]).expanduser())
+    db = Database(db_path)
+
+    try:
+        libs = db.conn.execute(
+            "SELECT library_uuid FROM legacy_libraries ORDER BY indexed_at DESC"
+        ).fetchall()
+        if not libs:
+            print("No indexed legacy library found. Run 'bp index-legacy' first.", file=sys.stderr)
+            sys.exit(1)
+        if len(libs) > 1 and not getattr(args, "library_uuid", None):
+            print("Multiple legacy libraries indexed; pass --library-uuid <uuid>.", file=sys.stderr)
+            sys.exit(2)
+        library_uuid = getattr(args, "library_uuid", None) or libs[0]["library_uuid"]
+
+        r = report_unmatched(db, library_uuid)
+    finally:
+        db.close()
+
+    print("Legacy library inventory (#229)")
+    print(f"  library_uuid : {r['library_uuid']}")
+    print(f"  total assets : {r['total']:,}")
+    print(f"  matched      : {r['matched']:,}  (timestamp found in Flickr photos)")
+    print(f"  unmatched    : {r['unmatched']:,}  (no Flickr photo at this timestamp — upload candidates)")
+    print(f"  no date      : {r['no_date']:,}  (date_taken is NULL — cannot match by timestamp)")
+
+    if r["by_year"]:
+        print("\nUnmatched by year:")
+        for year in sorted(r["by_year"]):
+            print(f"  {year}  {r['by_year'][year]:,}")
+
+    if args.csv:
+        fields = [
+            "asset_uuid", "original_filename", "date_taken",
+            "width", "height", "title", "persons",
+            "named_face_count", "unknown_face_count",
+            "latitude", "longitude", "master_rel_path",
+        ]
+        with open(args.csv, "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
+            w.writeheader()
+            for asset in r["assets"]:
+                w.writerow(asset)
+        print(f"\nCSV written  : {args.csv} ({r['unmatched']:,} rows)")
+
+
 def cmd_geocode(args: argparse.Namespace) -> None:
     """Backfill place data from Nominatim for photos with GPS coordinates."""
     import yaml
@@ -1702,6 +1759,24 @@ def main():
         help="Reclassify confident (and all-people ambiguous) matches out of the review queue",
     )
 
+    # legacy-report
+    p_lrep = sub.add_parser(
+        "legacy-report",
+        help="Report legacy assets with no Flickr counterpart (upload candidates)",
+    )
+    p_lrep.add_argument(
+        "--library-uuid",
+        default=None,
+        help="Which indexed library to report on (default: most recently indexed)",
+    )
+    p_lrep.add_argument(
+        "--csv",
+        default=None,
+        metavar="PATH",
+        help="Write unmatched assets to a CSV file",
+    )
+    p_lrep.set_defaults(func=cmd_legacy_report)
+
     # geocode
     p_geo = sub.add_parser(
         "geocode",
@@ -1851,6 +1926,7 @@ def main():
         "export": cmd_export,
         "index-legacy": cmd_index_legacy,
         "match-legacy": cmd_match_legacy,
+        "legacy-report": cmd_legacy_report,
         "geocode": cmd_geocode,
         "import-contacts-birthdays": cmd_import_contacts_birthdays,
     }
