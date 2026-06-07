@@ -466,6 +466,7 @@ def build_enriched_row(
     zones: list[dict],
     self_name: str,
     person_policies: dict[str, str] | None = None,
+    db: "Database | None" = None,
 ) -> dict:
     """
     Merge Photos metadata into an existing Flickr DB record.
@@ -505,7 +506,7 @@ def build_enriched_row(
             merged[field] = photo_row[field]
 
     # Location: Photos GPS is usually more precise than Flickr's
-    if photo_row.get("latitude"):
+    if photo_row.get("latitude") is not None:
         merged["latitude"] = photo_row["latitude"]
         merged["longitude"] = photo_row["longitude"]
 
@@ -521,6 +522,29 @@ def build_enriched_row(
     ):
         if photo_row.get(field) is not None:
             merged[field] = photo_row[field]
+
+    # Geocoder fill-in: use Nominatim to fill any missing place fields from GPS coordinates
+    _PLACE_FIELDS = ("place_city", "place_state", "place_country", "place_neighborhood")
+    if (
+        db is not None
+        and merged.get("latitude") is not None
+        and merged.get("longitude") is not None
+        and any(merged.get(f) is None for f in _PLACE_FIELDS)
+    ):
+        from geocoder import reverse_geocode  # deferred import — poller path
+
+        result = reverse_geocode(merged["latitude"], merged["longitude"], db)
+        if result.place:
+            merged["place_city"] = merged.get("place_city") or result.place.city
+            merged["place_state"] = merged.get("place_state") or result.place.state
+            merged["place_country"] = merged.get("place_country") or result.place.country
+            merged["place_country_code"] = (
+                merged.get("place_country_code") or result.place.country_code
+            )
+            merged["place_neighborhood"] = (
+                merged.get("place_neighborhood") or result.place.neighborhood
+            )
+            merged["place_address"] = merged.get("place_address") or result.place.address
 
     # Screenshot / selfie → auto_private unless already reviewed
     is_screenshot = photo_row.get("_is_screenshot", False)
@@ -661,7 +685,12 @@ def scan(
                     )
                 continue
             enriched_row = build_enriched_row(
-                photo_row, existing_by_uuid, zones, self_name, person_policies=person_policies
+                photo_row,
+                existing_by_uuid,
+                zones,
+                self_name,
+                person_policies=person_policies,
+                db=db,
             )
             if not dry_run:
                 db.upsert_photo(enriched_row)
@@ -677,7 +706,7 @@ def scan(
             # Handle duplicates: link first candidate, flag others
             primary = candidates[0]
             enriched_row = build_enriched_row(
-                photo_row, primary, zones, self_name, person_policies=person_policies
+                photo_row, primary, zones, self_name, person_policies=person_policies, db=db
             )
 
             if not dry_run:

@@ -242,3 +242,135 @@ class TestReverseGeocode:
         # Must NOT be stored in cache — next scan should retry
         cached = db.get_nominatim_cache(42.0, -71.0)
         assert cached is None
+
+
+# ---------------------------------------------------------------------------
+# Scanner integration
+# ---------------------------------------------------------------------------
+
+
+class TestScannerIntegration:
+    """Test that build_enriched_row calls reverse_geocode correctly."""
+
+    EXISTING: dict = {
+        "uuid": "test-uuid",
+        "flickr_id": "12345",
+        "privacy_state": "candidate_public",
+        "privacy_reason": "",
+        "proposed_tags": [],
+        "place_city": None,
+        "place_state": None,
+        "place_country": None,
+        "place_country_code": None,
+        "place_neighborhood": None,
+        "place_address": None,
+        "place_ishome": 0,
+        "apple_persons": [],
+        "apple_named_faces": 0,
+        "apple_unknown_faces": 0,
+        "apple_labels": [],
+        "apple_human_count": 0,
+        "apple_ai_caption": "",
+        "apple_ai_caption_conf": 0.0,
+        "geofenced": 0,
+    }
+
+    def _photo_row_with_coords(
+        self,
+        lat: float,
+        lon: float,
+        place_city: str | None = None,
+    ) -> dict:
+        return {
+            "uuid": "test-uuid",
+            "latitude": lat,
+            "longitude": lon,
+            "place_city": place_city,
+            "place_state": None,
+            "place_country": None,
+            "place_country_code": None,
+            "place_neighborhood": None,
+            "place_address": None,
+            "place_ishome": 0,
+            "apple_persons": [],
+            "apple_named_faces": 0,
+            "apple_unknown_faces": 0,
+            "apple_labels": [],
+            "apple_human_count": 0,
+            "apple_ai_caption": "",
+            "apple_ai_caption_conf": 0.0,
+            "date_analyzed": None,
+            "meta_synced_photos_at": None,
+            "photos_tags_hash": None,
+            "photos_title": None,
+            "photos_description": None,
+            "photos_tags": [],
+            "_is_screenshot": False,
+            "_is_selfie": False,
+            "_is_live": False,
+            "is_video": 0,
+        }
+
+    def test_scanner_fills_place_from_geocoder(self, tmp_path: Path):
+        from scanner import build_enriched_row
+
+        db = _db(tmp_path)
+        db.set_nominatim_cache(
+            42.361,
+            -71.057,
+            {
+                "place_city": "Somerville",
+                "place_state": "Massachusetts",
+                "place_country": "United States",
+                "place_country_code": "us",
+                "place_neighborhood": "Winter Hill",
+                "place_address": "Somerville, MA, US",
+            },
+        )
+
+        photo_row = self._photo_row_with_coords(42.3614, -71.0572)
+        result = build_enriched_row(photo_row, self.EXISTING, [], "Chris Devers", db=db)
+        assert result["place_city"] == "Somerville"
+        assert result["place_state"] == "Massachusetts"
+
+    def test_scanner_skips_geocoder_when_all_place_set(self, tmp_path: Path):
+        from scanner import build_enriched_row
+
+        db = _db(tmp_path)
+        # Photo row already has all four key place fields populated
+        photo_row = self._photo_row_with_coords(42.361, -71.057)
+        photo_row["place_city"] = "Somerville"
+        photo_row["place_state"] = "Massachusetts"
+        photo_row["place_country"] = "United States"
+        photo_row["place_neighborhood"] = "Winter Hill"
+
+        # No entry in nominatim_cache — if geocoder is called, it would find nothing
+        result = build_enriched_row(photo_row, self.EXISTING, [], "Chris Devers", db=db)
+        # place_city should still be Somerville (from photo_row), not overwritten
+        assert result["place_city"] == "Somerville"
+        # Verify cache was NOT written (geocoder skipped)
+        cached = db.get_nominatim_cache(42.361, -71.057)
+        assert cached is None
+
+    def test_scanner_zero_zero_coordinates_not_skipped(self, tmp_path: Path):
+        # (lat=0.0, lon=0.0) is a valid coordinate pair (null island).
+        # Neither value should be treated as falsy — geocoder must be called.
+        from scanner import build_enriched_row
+
+        db = _db(tmp_path)
+        db.set_nominatim_cache(
+            0.0,
+            0.0,
+            {
+                "place_city": "Gulf of Guinea",
+                "place_state": None,
+                "place_country": None,
+                "place_country_code": None,
+                "place_neighborhood": None,
+                "place_address": None,
+            },
+        )
+
+        photo_row = self._photo_row_with_coords(0.0, 0.0)
+        result = build_enriched_row(photo_row, self.EXISTING, [], "Chris Devers", db=db)
+        assert result["place_city"] == "Gulf of Guinea"
