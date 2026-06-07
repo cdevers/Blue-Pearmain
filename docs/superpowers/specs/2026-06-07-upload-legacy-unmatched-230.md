@@ -38,12 +38,12 @@ def upload_photo(
     is_public: int = 0,
     is_friend: int = 0,
     is_family: int = 0,
-) -> str:                     # returns flickr_id
+) -> tuple[str, bool]:        # (flickr_id, date_set_ok)
 ```
 
 **All uploads are private** (`is_public=0, is_friend=0, is_family=0`). Privacy is determined by BP's privacy pipeline, not by the upload call.
 
-After uploading and receiving the `flickr_id`, if `date_taken` is provided the method calls `flickr.photos.setDates` (via `_call()`) to stamp the correct capture time. If `setDates` fails, the method logs a warning and returns the `flickr_id` anyway — the photo exists on Flickr with correct content; `bp sync-metadata` can fix the date later. The caller (`legacy_uploader.py`) is responsible for passing `date_taken` and for incrementing `date_set_failed` in the counts if the warning is surfaced.
+After uploading and receiving the `flickr_id`, if `date_taken` is provided the method calls `flickr.photos.setDates` (via `_call()`) to stamp the correct capture time. The method returns a tuple `(flickr_id: str, date_set_ok: bool)`. If `setDates` fails, `date_set_ok` is `False` and the method logs a warning — the photo exists on Flickr with correct content; `bp sync-metadata` can fix the date later. The caller (`legacy_uploader.py`) increments `date_set_failed` when `date_set_ok` is `False`.
 
 ## DB schema changes — migration 031
 
@@ -86,7 +86,7 @@ Returns:
 
 **Phase 1 — Recovery (runs before the upload loop on every invocation):**
 
-Query `legacy_assets` for rows where `uploaded_flickr_id IS NOT NULL` and no `photos` row exists for that `flickr_id`. For each: run the same classify + `upsert_photo` + `log_operation` transaction that a successful new upload would have done (steps 6–7 below). Increment `recovered` in the counts. This self-heals the most common partial failure (upload succeeded, DB write failed) without requiring manual intervention, and runs even on `--dry-run` invocations so the user can see what would be recovered.
+Query `legacy_assets` for rows where `uploaded_flickr_id IS NOT NULL` and no `photos` row exists for that `flickr_id`. In live mode: for each, run the same classify + `upsert_photo` + `log_operation` transaction that a successful new upload would have done (steps 6–7 below), and increment `recovered` in the counts. In `--dry-run` mode: report how many recoverable rows were found but make no writes. This self-heals the most common partial failure (upload succeeded, DB write failed) without requiring manual intervention.
 
 **Phase 2 — Upload loop:**
 
@@ -94,7 +94,7 @@ Query `legacy_assets` for rows where `uploaded_flickr_id IS NOT NULL` and no `ph
 2. Resolve `library_path / master_rel_path`. If path doesn't exist, increment `skipped_missing_file` and continue.
 3. Call `shape_legacy_for_classify()` then `classify(shaped, zones, self_name, person_policies)` → `(privacy_state, privacy_reason)`.
 4. If `dry_run`, record the would-be classification and continue without uploading.
-5. Upload via `flickr_client.upload_photo(path, title, description, tags, date_taken)` → `flickr_id`.
+5. Upload via `flickr_client.upload_photo(path, title, description, tags, date_taken)` → `(flickr_id, date_set_ok)`. If `not date_set_ok`, increment `date_set_failed`.
 6. **Immediately** update `legacy_assets SET uploaded_flickr_id = flickr_id, uploaded_at = now` and commit. If this write fails, log a warning with the `flickr_id` prominently to stdout (see orphan handling below) and increment `db_write_failed`.
 7. In a **single DB transaction**: `db.upsert_photo(...)` + `db.log_operation("upload_legacy_asset", ...)`. Both succeed or both roll back — the operation log entry is part of the atomic write, not a separate step. If this transaction fails, the `uploaded_flickr_id` is already set in `legacy_assets`, so Phase 1 on the next re-run will retry only this step.
 
@@ -145,7 +145,7 @@ bp upload-legacy-unmatched [--dry-run] [--limit N] [--library-uuid UUID] [--libr
 - `--dry-run` — classify and report without uploading or writing to DB
 - `--limit N` — upload at most N assets (for incremental rollout)
 - `--library-uuid` — which indexed library to draw from (default: most recently indexed)
-- `--library` — path to the `.photoslibrary` bundle (overrides `config.legacy_library.path`)
+- `--library` — path to the `.photoslibrary` bundle (overrides `config.legacy_library.path`; this config key was introduced by the legacy indexer — see `config.example.yml`)
 
 Dry-run output:
 ```
