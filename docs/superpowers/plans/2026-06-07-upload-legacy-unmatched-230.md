@@ -109,6 +109,10 @@ These support idempotent re-runs of bp upload-legacy-unmatched (#230):
 uploaded_flickr_id is set immediately after a successful Flickr upload,
 before the photos row is created, so a re-run skips assets already uploaded.
 
+Uniqueness invariant: uploaded_flickr_id is not enforced UNIQUE by the schema.
+Uniqueness is maintained by the upload loop — one upload produces one
+mark_legacy_uploaded call. The column is TEXT NULL; NULL means not yet uploaded.
+
 Idempotent: skips if already applied.
 """
 from __future__ import annotations
@@ -135,24 +139,30 @@ def run_on_conn(conn: sqlite3.Connection) -> None:
     except Exception:
         pass
 
-    conn.execute("BEGIN")
+    # Use context manager so any mid-migration failure auto-rolls back.
+    with conn:
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "legacy_assets" in tables:
+            existing = {
+                r[1] for r in conn.execute("PRAGMA table_info(legacy_assets)").fetchall()
+            }
+            if "uploaded_flickr_id" not in existing:
+                conn.execute(
+                    "ALTER TABLE legacy_assets ADD COLUMN uploaded_flickr_id TEXT"
+                )
+            if "uploaded_at" not in existing:
+                conn.execute("ALTER TABLE legacy_assets ADD COLUMN uploaded_at TEXT")
 
-    tables = {
-        r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-    }
-    if "legacy_assets" in tables:
-        existing = {r[1] for r in conn.execute("PRAGMA table_info(legacy_assets)").fetchall()}
-        if "uploaded_flickr_id" not in existing:
-            conn.execute("ALTER TABLE legacy_assets ADD COLUMN uploaded_flickr_id TEXT")
-        if "uploaded_at" not in existing:
-            conn.execute("ALTER TABLE legacy_assets ADD COLUMN uploaded_at TEXT")
-
-    conn.execute(
-        "INSERT INTO schema_migrations (name, applied_at) "
-        "VALUES (?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))",
-        (MIGRATION_NAME,),
-    )
-    conn.execute("COMMIT")
+        conn.execute(
+            "INSERT INTO schema_migrations (name, applied_at) "
+            "VALUES (?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))",
+            (MIGRATION_NAME,),
+        )
 
 
 def run(db_path: str, dry_run: bool = False) -> None:
@@ -302,6 +312,21 @@ class TestIterUnrecoveredLegacyUploads:
         assert db.iter_unrecovered_legacy_uploads("L1") == []
         assert len(db.iter_unrecovered_legacy_uploads("L2")) == 1
 
+    def test_excludes_asset_when_duplicate_photos_row_present(self, tmp_path):
+        """Corruption guard: if photos row already exists for uploaded_flickr_id,
+        do not surface it as unrecovered — avoids a double-write attempt."""
+        db = _make_db(tmp_path)
+        _seed(db)
+        db.mark_legacy_uploaded("L", "A", "flickr_dup")
+        # Simulate corruption: photos row already exists (e.g. from a prior recovery run)
+        db.conn.execute(
+            "INSERT INTO photos (flickr_id, uuid, privacy_state) "
+            "VALUES ('flickr_dup', NULL, 'candidate_public')"
+        )
+        db.conn.commit()
+        # Must not surface the asset — the photos row already exists
+        assert db.iter_unrecovered_legacy_uploads("L") == []
+
 
 class TestRecordLegacyUpload:
     def test_creates_photos_row_and_operation_log(self, tmp_path):
@@ -386,6 +411,11 @@ Append after the `delete_legacy_assets_not_in` method (the last method in the fi
         before the photos row is created. This is the idempotency guard for
         bp upload-legacy-unmatched (#230) — on re-run, assets with this set
         are skipped in the upload loop and repaired in the recovery phase.
+
+        Uniqueness invariant: the schema does not enforce UNIQUE on
+        uploaded_flickr_id. Uniqueness is maintained by the upload loop's
+        atomicity — one successful upload produces exactly one call to this
+        method with the returned flickr_id.
         """
         self.conn.execute(
             "UPDATE legacy_assets SET uploaded_flickr_id = ?, uploaded_at = ? "
@@ -461,7 +491,7 @@ Append after the `delete_legacy_assets_not_in` method (the last method in the fi
 ```bash
 python -m pytest tests/test_db_legacy_upload.py -q
 ```
-Expected: `8 passed`
+Expected: `9 passed`
 
 - [ ] **Step 5: Commit**
 
@@ -964,6 +994,52 @@ class TestUploadUnmatchedAssets:
         flickr = _StubFlickr()
         counts = _run(db, "L", tmp_path, flickr, limit=2)
         assert counts["uploaded"] == 2
+
+    def test_dry_run_recovered_excluded_from_eligible(self, tmp_path):
+        """Recovery candidates (uploaded_flickr_id set) must not inflate 'eligible'.
+        'eligible' counts Phase 2 candidates only; 'recovered' is a separate counter."""
+        db = _make_db(tmp_path)
+        _seed_lib(db)
+        # Asset A: uploaded but photos row missing (Phase 1 recovery candidate)
+        _seed_asset(db, asset_uuid="A", date_taken="2003-01-01 10:00:00")
+        db.mark_legacy_uploaded("L", "A", "orphan_recover")
+        # Asset B: unmatched, not yet uploaded (Phase 2 candidate)
+        _seed_asset(db, asset_uuid="B", date_taken="2004-01-01 10:00:00",
+                    master_rel_path="Masters/b.jpg")
+        (tmp_path / "Masters").mkdir()
+        (tmp_path / "Masters" / "b.jpg").write_bytes(b"JPEG")
+
+        counts = _run(db, "L", tmp_path, _StubFlickr(), dry_run=True)
+
+        # Recovery candidate is NOT in eligible
+        assert counts["eligible"] == 1   # only asset B
+        assert counts["recovered"] == 1  # asset A reported separately
+        assert counts["candidate_public"] == 1  # asset B classified
+
+    def test_phase1_skips_asset_when_photos_row_already_exists(self, tmp_path):
+        """Corruption resilience: if a photos row already exists for uploaded_flickr_id
+        (e.g. from a previous recovery run), Phase 1 silently skips it — no error,
+        no double-write."""
+        db = _make_db(tmp_path)
+        _seed_lib(db)
+        _seed_asset(db)
+        db.mark_legacy_uploaded("L", "A", "already_there")
+        # Simulate the photos row already existing (prior successful recovery)
+        db.conn.execute(
+            "INSERT INTO photos (flickr_id, uuid, privacy_state) "
+            "VALUES ('already_there', NULL, 'candidate_public')"
+        )
+        db.conn.commit()
+
+        flickr = _StubFlickr()
+        counts = _run(db, "L", tmp_path, flickr)
+
+        # Phase 1 finds no unrecovered assets (iter_unrecovered excludes it)
+        assert counts["recovered"] == 0
+        # No duplicate photos row created
+        assert db.conn.execute(
+            "SELECT COUNT(*) FROM photos WHERE flickr_id='already_there'"
+        ).fetchone()[0] == 1
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1133,6 +1209,9 @@ def upload_unmatched_assets(
             counts["upload_failed"] += 1
             continue
 
+        # date_set_failed is informational only. A successful upload is always
+        # recorded (uploaded_flickr_id set, photos row created) even when setDates
+        # fails. Remediation is bp sync-metadata on a later run — not a re-upload.
         if not date_set_ok:
             counts["date_set_failed"] += 1
 
@@ -1172,7 +1251,7 @@ def upload_unmatched_assets(
 ```bash
 python -m pytest tests/test_legacy_uploader.py -q
 ```
-Expected: `11 passed`
+Expected: `13 passed`
 
 - [ ] **Step 5: Commit**
 
@@ -1310,13 +1389,22 @@ In `bp`, after the `p_lrep.set_defaults(func=cmd_legacy_report)` line and before
     p_ulm.add_argument(
         "--library-uuid",
         default=None,
-        help="Which indexed library to draw from (default: most recently indexed)",
+        help=(
+            "Which indexed library to draw from (default: the most recently indexed). "
+            "Required when more than one legacy library has been indexed — run "
+            "'bp legacy-report' to see library UUIDs, or query "
+            "'SELECT library_uuid, display_name FROM legacy_libraries' directly."
+        ),
     )
     p_ulm.add_argument(
         "--library",
         default=None,
         metavar="PATH",
-        help="Path to the .photoslibrary bundle (overrides config legacy_library.path)",
+        help=(
+            "Path to the .photoslibrary bundle (overrides config legacy_library.path). "
+            "The config key legacy_library.path was introduced by bp index-legacy; "
+            "see config.example.yml."
+        ),
     )
 ```
 
