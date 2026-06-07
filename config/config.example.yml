@@ -45,3 +45,6 @@ tag_protection:
 
 # geocoding:
 #   nominatim_url: "http://localhost:8080/reverse"  # local Docker instance; omit for public API
+
+# legacy_match:
+#   demote_all_confident: false  # true: any confident legacy match → needs_review, even without face/geo signal

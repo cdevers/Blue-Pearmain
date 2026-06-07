@@ -31,6 +31,7 @@ def apply_legacy_matches(
     zones: list[dict],
     person_policies: dict[str, str],
     classifier_version: int,
+    demote_all_confident: bool = False,
 ) -> dict:
     """Reclassify eligible (candidate_public, Flickr-only) photos from their
     legacy matches. Returns the counts dict:
@@ -81,6 +82,7 @@ def apply_legacy_matches(
             zones,
             self_name=self_name,
             person_policies=person_policies,
+            demote_all_confident=demote_all_confident,
         )
         if decision is None:
             counts["unchanged"] += 1
