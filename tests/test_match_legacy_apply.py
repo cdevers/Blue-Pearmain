@@ -277,6 +277,46 @@ def test_reason_and_trigger_share_provenance():
     assert reason == format_legacy_reason(d["tier"], d["asset_uuid"], "named person(s): Aunt May")
 
 
+def test_demote_all_confident_promotes_untagged_confident_to_needs_review():
+    """demote_all_confident=True: confident match with no people/geo signal → needs_review."""
+    from legacy_match import resolve_apply_decision
+
+    d = resolve_apply_decision(
+        _photo(), [_cand("A")], zones=[], self_name="Me", demote_all_confident=True
+    )
+    assert d is not None
+    assert d["state"] == "needs_review"
+    assert d["tier"] == "confident"
+    assert d["asset_uuid"] == "A"
+    assert "demote_all_confident" in d["reason"]
+
+
+def test_demote_all_confident_false_preserves_noop():
+    """demote_all_confident=False (default): no regression — untagged confident stays None."""
+    from legacy_match import resolve_apply_decision
+
+    assert (
+        resolve_apply_decision(
+            _photo(), [_cand("A")], zones=[], self_name="Me", demote_all_confident=False
+        )
+        is None
+    )
+
+
+def test_demote_all_confident_does_not_affect_ambiguous():
+    """demote_all_confident only applies to confident tier; ambiguous mixed is still noop."""
+    from legacy_match import resolve_apply_decision
+
+    cands = [
+        _cand("A", persons='["Aunt May"]', named_face_count=1),
+        _cand("B"),  # no signal
+    ]
+    assert (
+        resolve_apply_decision(_photo(), cands, zones=[], self_name="Me", demote_all_confident=True)
+        is None
+    )
+
+
 def _apply_db():
     """Fresh Database with operation_log migration and one candidate_public photo."""
     from db.db import Database

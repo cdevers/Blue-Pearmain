@@ -1082,6 +1082,9 @@ def cmd_match_legacy(args: argparse.Namespace) -> None:
             self_name = config.get("photos_library", {}).get("self_name", "")
             zones = db.active_zones()
             person_policies = db.get_person_policies()
+            demote_all_confident = bool(
+                (config.get("legacy_match") or {}).get("demote_all_confident", False)
+            )
             counts = apply_legacy_matches(
                 db,
                 library_uuid,
@@ -1089,6 +1092,7 @@ def cmd_match_legacy(args: argparse.Namespace) -> None:
                 zones=zones,
                 person_policies=person_policies,
                 classifier_version=CLASSIFIER_VERSION,
+                demote_all_confident=demote_all_confident,
             )
             print("Applied legacy reclassification:")
             print(f"  eligible     : {counts['eligible']} candidate_public photos evaluated")

@@ -277,6 +277,7 @@ def resolve_apply_decision(
     zones: list[dict],
     self_name: str = "",
     person_policies: dict[str, str] | None = None,
+    demote_all_confident: bool = False,
 ) -> dict | None:
     """Decide whether/how to reclassify a candidate_public photo from its legacy
     match. Returns {tier, state, asset_uuid, reason} when the photo should be
@@ -306,6 +307,13 @@ def resolve_apply_decision(
     assert best is not None  # matches is non-empty for confident/ambiguous tiers
     _, state, reason, asset_uuid = best
     if state == "candidate_public":
+        if demote_all_confident and tier == CONFIDENT:
+            return {
+                "tier": tier,
+                "state": "needs_review",
+                "asset_uuid": asset_uuid,
+                "reason": format_legacy_reason(tier, asset_uuid, "demote_all_confident policy"),
+            }
         return None
     return {
         "tier": tier,
