@@ -15,12 +15,14 @@ from __future__ import annotations
 import logging
 import random
 import time
+from pathlib import Path
 from typing import Any
 
 from requests_oauthlib import OAuth1Session
 import requests
 
 REST_URL = "https://api.flickr.com/services/rest/"
+UPLOAD_URL = "https://up.flickr.com/services/upload/"
 
 log = logging.getLogger("blue-pearmain.flickr")
 
@@ -614,6 +616,87 @@ class FlickrClient:
 
     def get_user_info(self, user_id: str = "me") -> dict:
         return self._call("flickr.people.getInfo", {"user_id": user_id})
+
+    # -----------------------------------------------------------------------
+    # Photo upload
+    # -----------------------------------------------------------------------
+
+    def upload_photo(
+        self,
+        path: Path,
+        title: str = "",
+        description: str = "",
+        tags: str = "",
+        date_taken: str | None = None,
+        is_public: int = 0,
+        is_friend: int = 0,
+        is_family: int = 0,
+    ) -> tuple[str, bool]:
+        """Upload a photo file to Flickr. Returns (flickr_id, date_set_ok).
+
+        Uses the upload endpoint (up.flickr.com), not the REST API — different
+        base URL, multipart POST, XML response. Does NOT go through _call().
+
+        All uploads are private (is_public=0, is_friend=0, is_family=0 by
+        default). Privacy is managed by BP's pipeline after upload.
+
+        If date_taken is provided, calls flickr.photos.setDates after upload.
+        Returns date_set_ok=False (and logs a warning) if setDates fails —
+        bp sync-metadata can repair the date later.
+        """
+        import xml.etree.ElementTree as ET
+
+        data = {
+            "title": title,
+            "description": description,
+            "tags": tags,
+            "is_public": str(is_public),
+            "is_friend": str(is_friend),
+            "is_family": str(is_family),
+            "content_type": "1",
+            "hidden": "2",
+        }
+
+        with open(path, "rb") as fh:
+            resp = self._session.post(
+                UPLOAD_URL,
+                data=data,
+                files={"photo": fh},
+                timeout=120,
+            )
+        resp.raise_for_status()
+
+        tree = ET.fromstring(resp.text)
+        if tree.attrib.get("stat") != "ok":
+            err_el = tree.find("err")
+            msg = err_el.attrib.get("msg", "unknown") if err_el is not None else "unknown"
+            raise FlickrError(-1, f"Upload failed: {msg}")
+
+        photoid_el = tree.find("photoid")
+        if photoid_el is None:
+            raise FlickrError(-1, "Upload response missing <photoid>")
+        flickr_id = (photoid_el.text or "").strip()
+
+        date_set_ok = True
+        if date_taken:
+            try:
+                self._call(
+                    "flickr.photos.setDates",
+                    {
+                        "photo_id": flickr_id,
+                        "date_taken": date_taken,
+                        "date_taken_granularity": "0",
+                    },
+                    http_method="POST",
+                )
+            except Exception:
+                log.warning(
+                    f"upload_photo: setDates failed for {flickr_id} — "
+                    "date can be repaired by bp sync-metadata"
+                )
+                date_set_ok = False
+
+        return flickr_id, date_set_ok
 
 
 # ---------------------------------------------------------------------------
