@@ -4,7 +4,7 @@
 
 **Goal:** Allow `bp geocode` to use a local Nominatim Docker instance for bulk geocoding, bypassing the public API's rate limits.
 
-**Architecture:** A new `make_fetcher(url, *, min_delay=None)` factory in `geocoder.py` returns a closure bound to an arbitrary Nominatim URL and auto-detected delay (1s for the public endpoint, 0s for anything else). A companion `check_nominatim_status(url)` function confirms a local instance is up. `cmd_geocode` in `bp` resolves the URL from CLI flag or config, constructs the fetcher, and passes it into the existing `run_geocode` machinery unchanged.
+**Architecture:** A private `_fetch_nominatim(url, lat, lon)` helper handles all HTTP logic (request construction, 429 retry, parsing, logging, error handling). Both `fetch_from_nominatim` and the closure from the new `make_fetcher` factory delegate to it — each adding only its own rate-limiter bookkeeping. A companion `check_nominatim_status(url)` function confirms a local instance is reachable. `cmd_geocode` in `bp` resolves the URL from CLI flag or config and passes the resulting fetcher into the existing `run_geocode` machinery unchanged.
 
 **Tech Stack:** Python 3.11+, `requests`, `urllib.parse`, `pytest`, `unittest.mock`
 
@@ -14,7 +14,7 @@
 
 | File | Change |
 |------|--------|
-| `poller/geocoder.py` | Rename `_NOMINATIM_URL` → `_PUBLIC_NOMINATIM_URL`; add `urlparse` import; add `make_fetcher`; add `check_nominatim_status` |
+| `poller/geocoder.py` | Rename `_NOMINATIM_URL` → `_PUBLIC_NOMINATIM_URL`; add `urlparse` import; extract `_fetch_nominatim` helper; refactor `fetch_from_nominatim` to use it; add `make_fetcher`; add `check_nominatim_status` |
 | `bp` | Add `--nominatim-url` and `--check-nominatim` args to `p_geo` (after `--limit`, ~line 1709); update `cmd_geocode` body (line 1109) |
 | `config/config.example.yml` | Add commented `geocoding:` section (after `tag_protection:` block) |
 | `tests/test_geocoder.py` | Add `make_fetcher`, `check_nominatim_status` to import block; add `TestMakeFetcher` and `TestCheckNominatimStatus` |
@@ -22,10 +22,12 @@
 
 ---
 
-## Task 1: `make_fetcher` — factory function + tests
+## Task 1: `make_fetcher` — helper extraction, factory function, tests
+
+The duplicate HTTP logic in `fetch_from_nominatim` and the new `make_fetcher` closure is factored into `_fetch_nominatim(url, lat, lon)`. That helper handles request construction, 429 retry, parsing, and error handling. Callers wrap it with their own rate-limiter bookkeeping via `try/finally`. This eliminates the maintenance hazard: a future fix to the retry logic or logging lands in one place.
 
 **Files:**
-- Modify: `poller/geocoder.py` (lines 1–26, 102, 115, then new code after line 124)
+- Modify: `poller/geocoder.py` (refactor + new code)
 - Test: `tests/test_geocoder.py` (new class `TestMakeFetcher`)
 
 - [ ] **Step 1a: Rename the constant (refactor, no test needed)**
@@ -66,9 +68,81 @@ After `from typing import Any, Callable` (line 17), add:
 from urllib.parse import urlparse
 ```
 
-- [ ] **Step 1c: Write `TestMakeFetcher` tests (they must fail — `make_fetcher` does not exist yet)**
+- [ ] **Step 1c: Extract `_fetch_nominatim` helper and refactor `fetch_from_nominatim`**
+
+This is a pure refactor — behaviour is unchanged, existing tests must still pass.
+
+**Add `_fetch_nominatim` immediately before `fetch_from_nominatim` (before line 80):**
+
+```python
+def _fetch_nominatim(url: str, lat: float, lon: float) -> "PlaceData | None":
+    """Execute one Nominatim request (with 429 retry) and return PlaceData or None.
+
+    Handles request construction, retry back-off, response parsing, and error
+    logging. Does NOT apply rate limiting — callers enforce delays before calling
+    and update their own last_call_time timestamp afterward.
+    """
+    import requests  # deferred import — not needed if geocoder isn't used
+
+    _params = {"lat": lat, "lon": lon, "zoom": 14, "addressdetails": 1, "format": "json"}
+    _headers = {"User-Agent": _USER_AGENT}
+
+    try:
+        resp = requests.get(url, params=_params, headers=_headers, timeout=10)
+        for delay in _RETRY_DELAYS:
+            if resp.status_code != 429:
+                break
+            wait = max(int(resp.headers.get("Retry-After", delay)), delay)
+            log.warning(
+                "Nominatim rate-limited (429) for (%.6f, %.6f); backing off %ds",
+                lat,
+                lon,
+                wait,
+            )
+            time.sleep(wait)
+            resp = requests.get(url, params=_params, headers=_headers, timeout=10)
+        if resp.status_code != 200:
+            log.warning("Nominatim returned HTTP %s for (%.6f, %.6f)", resp.status_code, lat, lon)
+            return None
+        return _parse_nominatim_response(resp.json())
+    except Exception as exc:
+        log.warning("Nominatim request failed for (%.6f, %.6f): %s", lat, lon, exc)
+        return None
+```
+
+**Replace `fetch_from_nominatim` (lines 80–124) with the slimmed-down version that delegates to `_fetch_nominatim`:**
+
+```python
+def fetch_from_nominatim(lat: float, lon: float) -> "PlaceData | None":
+    """Make a live HTTP GET to Nominatim and return parsed PlaceData, or None on error.
+
+    Rate-limited to 1 request/second per Nominatim usage policy. On a 429 response,
+    retries up to twice with incremental back-off: 5 seconds before the first retry,
+    15 seconds before the second. The actual wait is max(Retry-After, floor) so we
+    respect longer server-requested delays while ignoring Retry-After: 0.
+    """
+    global _last_call_time
+    elapsed = time.monotonic() - _last_call_time
+    if elapsed < 1.0:
+        time.sleep(1.0 - elapsed)
+    try:
+        return _fetch_nominatim(_PUBLIC_NOMINATIM_URL, lat, lon)
+    finally:
+        _last_call_time = time.monotonic()
+```
+
+- [ ] **Step 1d: Run the full suite to confirm the refactor is safe**
+
+```bash
+python -m pytest tests/ -q
+```
+
+Expected: all tests pass. The existing `TestFetchFromNominatim` tests still exercise the 429 retry logic (now in `_fetch_nominatim`).
+
+- [ ] **Step 1e: Write `TestMakeFetcher` tests (must fail — `make_fetcher` does not exist yet)**
 
 Add after the `TestFetchFromNominatim` class in `tests/test_geocoder.py`:
+
 ```python
 # ---------------------------------------------------------------------------
 # make_fetcher — URL-bound fetcher factory (#225)
@@ -97,60 +171,62 @@ class TestMakeFetcher:
         assert mock_get.call_args[0][0] == _PUBLIC_NOMINATIM_URL
 
     def test_make_fetcher_public_url_delay_is_1s(self):
-        """Auto-detected delay is 1.0s when URL matches the public Nominatim endpoint."""
+        """Auto-detected delay is 1.0s when URL matches the public Nominatim endpoint.
+
+        Mocks time.monotonic() to return deterministic values:
+          - last_call_time starts at 0.0 (closure init)
+          - first monotonic() call returns 0.5 → elapsed = 0.5 < 1.0 → sleep(0.5)
+          - second monotonic() call returns 1.0 → last_call_time updated to 1.0
+        """
         from unittest.mock import patch
 
         from geocoder import _PUBLIC_NOMINATIM_URL, make_fetcher
 
         fetcher = make_fetcher(_PUBLIC_NOMINATIM_URL)
-        resp = self._mock_resp_200()
 
         with (
-            patch("requests.get", return_value=resp),
+            patch("requests.get", return_value=self._mock_resp_200()),
+            patch("time.monotonic", side_effect=[0.5, 1.0]),
             patch("time.sleep") as mock_sleep,
         ):
-            # First call sets last_call_time to ~now.
-            # Second call finds elapsed < 1.0 and calls sleep.
-            fetcher(42.0, -71.0)
             fetcher(42.0, -71.0)
 
-        assert mock_sleep.called
-        sleep_amount = mock_sleep.call_args[0][0]
-        assert 0.9 < sleep_amount <= 1.0
+        mock_sleep.assert_called_once_with(pytest.approx(0.5))
 
     def test_make_fetcher_local_url_delay_is_0(self):
-        """Auto-detected delay is 0.0s for any URL other than the public endpoint."""
+        """Auto-detected delay is 0.0s for any URL other than the public endpoint.
+
+        Mocks time.monotonic() to return 0.5 → elapsed = 0.5, but min_delay=0.0
+        so 0.5 < 0.0 is False → sleep is never called.
+        """
         from unittest.mock import patch
 
         from geocoder import make_fetcher
 
         fetcher = make_fetcher("http://localhost:8080/reverse")
-        resp = self._mock_resp_200()
 
         with (
-            patch("requests.get", return_value=resp),
+            patch("requests.get", return_value=self._mock_resp_200()),
+            patch("time.monotonic", side_effect=[0.5, 1.0]),
             patch("time.sleep") as mock_sleep,
         ):
             fetcher(42.0, -71.0)
-            fetcher(42.0, -71.0)  # elapsed ≈ 0, min_delay=0.0 → no sleep
 
         mock_sleep.assert_not_called()
 
     def test_make_fetcher_explicit_min_delay_overrides_auto(self):
-        """Explicit min_delay overrides auto-detection."""
+        """Explicit min_delay=0.0 suppresses the delay even for the public URL."""
         from unittest.mock import patch
 
         from geocoder import _PUBLIC_NOMINATIM_URL, make_fetcher
 
-        # Public URL auto-detects to 1.0s; explicit 0.0 suppresses the sleep.
         fetcher = make_fetcher(_PUBLIC_NOMINATIM_URL, min_delay=0.0)
-        resp = self._mock_resp_200()
 
         with (
-            patch("requests.get", return_value=resp),
+            patch("requests.get", return_value=self._mock_resp_200()),
+            patch("time.monotonic", side_effect=[0.5, 1.0]),
             patch("time.sleep") as mock_sleep,
         ):
-            fetcher(42.0, -71.0)
             fetcher(42.0, -71.0)
 
         mock_sleep.assert_not_called()
@@ -167,7 +243,13 @@ from geocoder import (
 )
 ```
 
-- [ ] **Step 1d: Run tests to confirm `TestMakeFetcher` fails**
+Add `import pytest` near the top of the test file (after `import sys`), if not already present:
+
+```python
+import pytest
+```
+
+- [ ] **Step 1f: Run tests to confirm `TestMakeFetcher` fails for the right reason**
 
 ```bash
 python -m pytest tests/test_geocoder.py::TestMakeFetcher -v
@@ -175,9 +257,9 @@ python -m pytest tests/test_geocoder.py::TestMakeFetcher -v
 
 Expected: 4 failures mentioning `ImportError: cannot import name 'make_fetcher'`
 
-- [ ] **Step 1e: Implement `make_fetcher` in `geocoder.py`**
+- [ ] **Step 1g: Implement `make_fetcher` in `geocoder.py`**
 
-Insert the following function after `fetch_from_nominatim` (after line 124) and before `reverse_geocode`:
+Insert the following function after `fetch_from_nominatim` and before `reverse_geocode`:
 
 ```python
 def make_fetcher(
@@ -187,8 +269,8 @@ def make_fetcher(
 ) -> Callable[[float, float], "PlaceData | None"]:
     """Return a Nominatim fetcher closure bound to url and an auto-detected delay.
 
-    url=None uses the public endpoint. min_delay=None auto-detects: 1.0s for
-    the public endpoint (Nominatim usage policy), 0.0s for any other host.
+    url=None uses the public endpoint. min_delay=None auto-detects: 1.0s for the
+    public endpoint (Nominatim usage policy), 0.0s for any other host.
     The closure tracks its own last_call_time, independent of the module-level
     _last_call_time used by fetch_from_nominatim.
     """
@@ -200,47 +282,19 @@ def make_fetcher(
     last_call_time = 0.0
 
     def fetcher(lat: float, lon: float) -> "PlaceData | None":
-        import requests  # deferred import — not needed if geocoder isn't used
-
         nonlocal last_call_time
         elapsed = time.monotonic() - last_call_time
         if elapsed < min_delay:
             time.sleep(min_delay - elapsed)
-
-        _params = {"lat": lat, "lon": lon, "zoom": 14, "addressdetails": 1, "format": "json"}
-        _headers = {"User-Agent": _USER_AGENT}
-
         try:
-            resp = requests.get(effective_url, params=_params, headers=_headers, timeout=10)
+            return _fetch_nominatim(effective_url, lat, lon)
+        finally:
             last_call_time = time.monotonic()
-            for delay in _RETRY_DELAYS:
-                if resp.status_code != 429:
-                    break
-                wait = max(int(resp.headers.get("Retry-After", delay)), delay)
-                log.warning(
-                    "Nominatim rate-limited (429) for (%.6f, %.6f); backing off %ds",
-                    lat,
-                    lon,
-                    wait,
-                )
-                time.sleep(wait)
-                resp = requests.get(effective_url, params=_params, headers=_headers, timeout=10)
-                last_call_time = time.monotonic()
-            if resp.status_code != 200:
-                log.warning(
-                    "Nominatim returned HTTP %s for (%.6f, %.6f)", resp.status_code, lat, lon
-                )
-                return None
-            return _parse_nominatim_response(resp.json())
-        except Exception as exc:
-            last_call_time = time.monotonic()
-            log.warning("Nominatim request failed for (%.6f, %.6f): %s", lat, lon, exc)
-            return None
 
     return fetcher
 ```
 
-- [ ] **Step 1f: Run the full test suite and confirm it passes**
+- [ ] **Step 1h: Run the full test suite and confirm it passes**
 
 ```bash
 python -m pytest tests/ -q
@@ -248,18 +302,22 @@ python -m pytest tests/ -q
 
 Expected: all tests pass, including the 4 new `TestMakeFetcher` tests.
 
-- [ ] **Step 1g: Commit**
+- [ ] **Step 1i: Commit**
 
 ```bash
 git add poller/geocoder.py tests/test_geocoder.py
 git commit -m "$(cat <<'EOF'
 feat(#225): add make_fetcher — URL-bound fetcher factory with auto-detected delay
 
-Renames _NOMINATIM_URL → _PUBLIC_NOMINATIM_URL. make_fetcher(url, *,
-min_delay=None) returns a closure that binds the effective URL and
-auto-detected rate-limit delay (1s for the public endpoint, 0s for any
-other host). The closure tracks its own last_call_time so a local-instance
-run does not pollute the module-level rate-limiter state.
+Extracts _fetch_nominatim(url, lat, lon) to hold all HTTP logic (request
+construction, 429 retry, parsing, logging). Both fetch_from_nominatim and
+the make_fetcher closure delegate to it, each wrapping only their own
+rate-limiter bookkeeping — no duplicate logic.
+
+make_fetcher(url, *, min_delay=None) auto-detects delay: 1.0s for the
+public endpoint, 0.0s for any other host. Renames _NOMINATIM_URL →
+_PUBLIC_NOMINATIM_URL. Delay tests use mocked time.monotonic() for
+deterministic assertions.
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 EOF
@@ -592,3 +650,4 @@ Spec coverage check:
 | CLI smoke test for new flags | Task 3 |
 | `config.example.yml` commented `geocoding:` section | Task 3 |
 | Closure uses own `last_call_time`, not module-level | Task 1 (via `nonlocal`) |
+| No HTTP logic duplication between `fetch_from_nominatim` and closure | Task 1 (`_fetch_nominatim` helper) |
