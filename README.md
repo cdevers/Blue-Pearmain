@@ -203,6 +203,8 @@ bp geocode                         # Backfill place data (city/state/country/nei
 bp geocode --dry-run               # Report counts without writing anything
 bp geocode --overwrite             # Replace existing place data with Nominatim results (default: fill gaps only)
 bp geocode --limit N               # Stop after N API call attempts (cache hits do not count; errors do count)
+bp geocode --nominatim-url URL     # Use a local Docker Nominatim instance instead of the public API (no rate limit)
+bp geocode --check-nominatim       # Check whether the Nominatim endpoint is reachable and exit (0=ok, 1=unreachable)
 bp ui                              # Start the review UI (http://localhost:5173)
 bp ui --host 0.0.0.0               # Also bind to LAN interfaces (e.g. for iPad access)
 ```
