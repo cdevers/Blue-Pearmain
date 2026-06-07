@@ -1026,6 +1026,112 @@ class Database:
         self.conn.commit()
 
     # -----------------------------------------------------------------------
+    # Nominatim geocoding cache (#217)
+    # -----------------------------------------------------------------------
+
+    def get_nominatim_cache(self, lat_r: float, lon_r: float) -> "dict[str, Any] | None":
+        """Return the cached row for (lat_r, lon_r) as a plain dict, or None if no row.
+
+        A return value of None means cache miss — no API call has been made for
+        these coordinates. A returned dict (even with all place fields None) means
+        cache hit — Nominatim was queried and returned no address data. Callers
+        MUST NOT conflate the two.
+        """
+        row = self.conn.execute(
+            "SELECT place_city, place_state, place_country, place_country_code, "
+            "place_neighborhood, place_address "
+            "FROM nominatim_cache WHERE lat_rounded = ? AND lon_rounded = ?",
+            (lat_r, lon_r),
+        ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def set_nominatim_cache(self, lat_r: float, lon_r: float, place_dict: "dict[str, Any]") -> None:
+        """Insert or replace a nominatim_cache row for (lat_r, lon_r).
+
+        place_dict keys: place_city, place_state, place_country, place_country_code,
+        place_neighborhood, place_address. Any key may be None.
+        """
+        self.conn.execute(
+            """INSERT INTO nominatim_cache
+               (lat_rounded, lon_rounded, place_city, place_state, place_country,
+                place_country_code, place_neighborhood, place_address)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(lat_rounded, lon_rounded) DO UPDATE SET
+                   place_city=excluded.place_city,
+                   place_state=excluded.place_state,
+                   place_country=excluded.place_country,
+                   place_country_code=excluded.place_country_code,
+                   place_neighborhood=excluded.place_neighborhood,
+                   place_address=excluded.place_address,
+                   fetched_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')""",
+            (
+                lat_r,
+                lon_r,
+                place_dict.get("place_city"),
+                place_dict.get("place_state"),
+                place_dict.get("place_country"),
+                place_dict.get("place_country_code"),
+                place_dict.get("place_neighborhood"),
+                place_dict.get("place_address"),
+            ),
+        )
+        self.conn.commit()
+
+    def update_place_data(
+        self,
+        photo_id: int,
+        place_dict: "dict[str, Any]",
+        overwrite: bool = False,
+    ) -> None:
+        """Write place data for photo_id from place_dict.
+
+        overwrite=False: fill gaps only (COALESCE semantics — only writes fields
+            where the DB value is currently NULL).
+        overwrite=True: unconditionally set all six place columns.
+
+        Only used by bp geocode. The scanner updates the in-memory row dict instead.
+        """
+        if overwrite:
+            self.conn.execute(
+                """UPDATE photos SET
+                       place_city=?, place_state=?, place_country=?,
+                       place_country_code=?, place_neighborhood=?, place_address=?
+                   WHERE id=?""",
+                (
+                    place_dict.get("place_city"),
+                    place_dict.get("place_state"),
+                    place_dict.get("place_country"),
+                    place_dict.get("place_country_code"),
+                    place_dict.get("place_neighborhood"),
+                    place_dict.get("place_address"),
+                    photo_id,
+                ),
+            )
+        else:
+            self.conn.execute(
+                """UPDATE photos SET
+                       place_city=COALESCE(place_city, ?),
+                       place_state=COALESCE(place_state, ?),
+                       place_country=COALESCE(place_country, ?),
+                       place_country_code=COALESCE(place_country_code, ?),
+                       place_neighborhood=COALESCE(place_neighborhood, ?),
+                       place_address=COALESCE(place_address, ?)
+                   WHERE id=?""",
+                (
+                    place_dict.get("place_city"),
+                    place_dict.get("place_state"),
+                    place_dict.get("place_country"),
+                    place_dict.get("place_country_code"),
+                    place_dict.get("place_neighborhood"),
+                    place_dict.get("place_address"),
+                    photo_id,
+                ),
+            )
+        self.conn.commit()
+
+    # -----------------------------------------------------------------------
     # Review queue queries
     # -----------------------------------------------------------------------
 
