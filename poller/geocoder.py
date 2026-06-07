@@ -24,6 +24,7 @@ _USER_AGENT = (
 )
 _NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 _last_call_time: float = 0.0  # module-level rate limiter (single-threaded)
+_RETRY_DELAYS = (5, 15)  # minimum back-off (seconds) before each retry attempt on 429
 
 
 @dataclass
@@ -82,7 +83,10 @@ def fetch_from_nominatim(lat: float, lon: float) -> "PlaceData | None":
     Returns None on network error or 4xx/5xx response (not cached; logged at WARNING).
     Returns PlaceData (possibly all-None fields) on a 200 response.
 
-    Rate-limited to 1 request/second per Nominatim usage policy.
+    Rate-limited to 1 request/second per Nominatim usage policy. On a 429 response,
+    retries up to twice with incremental back-off: 5 seconds before the first retry,
+    15 seconds before the second. The actual wait is max(Retry-After, floor) so we
+    respect longer server-requested delays while ignoring Retry-After: 0.
     """
     import requests  # deferred import — not needed if geocoder isn't used
 
@@ -91,19 +95,29 @@ def fetch_from_nominatim(lat: float, lon: float) -> "PlaceData | None":
     if elapsed < 1.0:
         time.sleep(1.0 - elapsed)
 
+    _params = {"lat": lat, "lon": lon, "zoom": 14, "addressdetails": 1, "format": "json"}
+    _headers = {"User-Agent": _USER_AGENT}
+
     try:
-        resp = requests.get(
-            _NOMINATIM_URL,
-            params={"lat": lat, "lon": lon, "zoom": 14, "addressdetails": 1, "format": "json"},
-            headers={"User-Agent": _USER_AGENT},
-            timeout=10,
-        )
+        resp = requests.get(_NOMINATIM_URL, params=_params, headers=_headers, timeout=10)
         _last_call_time = time.monotonic()
+        for delay in _RETRY_DELAYS:
+            if resp.status_code != 429:
+                break
+            wait = max(int(resp.headers.get("Retry-After", delay)), delay)
+            log.warning(
+                "Nominatim rate-limited (429) for (%.6f, %.6f); backing off %ds",
+                lat,
+                lon,
+                wait,
+            )
+            time.sleep(wait)
+            resp = requests.get(_NOMINATIM_URL, params=_params, headers=_headers, timeout=10)
+            _last_call_time = time.monotonic()
         if resp.status_code != 200:
             log.warning("Nominatim returned HTTP %s for (%.6f, %.6f)", resp.status_code, lat, lon)
             return None
-        data = resp.json()
-        return _parse_nominatim_response(data)
+        return _parse_nominatim_response(resp.json())
     except Exception as exc:
         _last_call_time = time.monotonic()
         log.warning("Nominatim request failed for (%.6f, %.6f): %s", lat, lon, exc)

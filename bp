@@ -50,16 +50,16 @@ def cmd_stats(args):
     s = db.stats()
 
     by_state = s["by_state"]
-    total    = s["total"]
+    total = s["total"]
     order = [
-        ("candidate_public",  "Candidate public"),
-        ("needs_review",      "Needs review"),
-        ("approved_public",   "Approved public"),
-        ("already_public",    "Already public"),
-        ("keep_private",      "Keep private"),
-        ("auto_private",      "Auto private"),
-        ("skipped",           "Skipped"),
-        ("duplicate_flickr",  "Duplicate Flickr"),
+        ("candidate_public", "Candidate public"),
+        ("needs_review", "Needs review"),
+        ("approved_public", "Approved public"),
+        ("already_public", "Already public"),
+        ("keep_private", "Keep private"),
+        ("auto_private", "Auto private"),
+        ("skipped", "Skipped"),
+        ("duplicate_flickr", "Duplicate Flickr"),
     ]
 
     flickr_linked = db.conn.execute(
@@ -81,12 +81,12 @@ def cmd_stats(args):
     if args.oneliner:
         short = {
             "candidate_public": "cand",
-            "needs_review":     "review",
-            "approved_public":  "approved",
-            "already_public":   "public",
-            "keep_private":     "private",
-            "auto_private":     "auto",
-            "skipped":          "skip",
+            "needs_review": "review",
+            "approved_public": "approved",
+            "already_public": "public",
+            "keep_private": "private",
+            "auto_private": "auto",
+            "skipped": "skip",
             "duplicate_flickr": "dup",
         }
         parts = []
@@ -135,34 +135,49 @@ def _run(fn, args, pairs):
 
 def cmd_poll(args):
     from poller.poller import main
-    _run(main, args, [
-        ("--config",   args.config),
-        ("--backfill", args.backfill),
-        ("--days",     str(args.days) if args.days else None),
-        ("--verbose",  args.verbose),
-        ("--dry-run",  args.dry_run),
-    ])
+
+    _run(
+        main,
+        args,
+        [
+            ("--config", args.config),
+            ("--backfill", args.backfill),
+            ("--days", str(args.days) if args.days else None),
+            ("--verbose", args.verbose),
+            ("--dry-run", args.dry_run),
+        ],
+    )
 
 
 def cmd_scan(args):
     from poller.scanner import main
-    _run(main, args, [
-        ("--config",  args.config),
-        ("--all",     args.all),
-        ("--days",    str(args.days) if args.days else None),
-        ("--verbose", args.verbose),
-        ("--dry-run", args.dry_run),
-    ])
+
+    _run(
+        main,
+        args,
+        [
+            ("--config", args.config),
+            ("--all", args.all),
+            ("--days", str(args.days) if args.days else None),
+            ("--verbose", args.verbose),
+            ("--dry-run", args.dry_run),
+        ],
+    )
 
 
 def cmd_thumbs(args):
     from poller.thumbnailer import main
-    _run(main, args, [
-        ("--config",       args.config),
-        ("--verbose",      args.verbose),
-        ("--icloud",       args.icloud),
-        ("--icloud-limit", args.icloud_limit),
-    ])
+
+    _run(
+        main,
+        args,
+        [
+            ("--config", args.config),
+            ("--verbose", args.verbose),
+            ("--icloud", args.icloud),
+            ("--icloud-limit", args.icloud_limit),
+        ],
+    )
 
 
 def cmd_pipeline(args):
@@ -176,16 +191,18 @@ def cmd_pipeline(args):
     import yaml
     from pathlib import Path as _Path
     from poller.bp_logging import configure
+
     configure("pipeline", args.verbose)
     log = logging.getLogger("blue-pearmain.pipeline")
 
     with open(args.config) as f:
         config = yaml.safe_load(f)
 
-    db_path      = config["database"]["path"]
+    db_path = config["database"]["path"]
     library_path = str(_Path(config.get("photos_library", {}).get("path", "")).expanduser())
 
     from db.db import Database
+
     db = Database(db_path)
 
     # Step 1: generate proposals for any photos whose cache has drifted
@@ -196,13 +213,18 @@ def cmd_pipeline(args):
 
     photo_ids = _select_drift_filtered(db, limit=0)
     if photo_ids:
-        log.info("pipeline: sync-metadata — %d photos to harmonise%s",
-                 len(photo_ids), "  (dry-run)" if dry_run else "")
+        log.info(
+            "pipeline: sync-metadata — %d photos to harmonise%s",
+            len(photo_ids),
+            "  (dry-run)" if dry_run else "",
+        )
         sync_totals = run_sync_engine(db, photo_ids, dry_run=dry_run, verbose=args.verbose)
         log.info(
             "pipeline: sync-metadata done — proposals=%d  hash_matches=%d  skipped=%d  failed=%d%s",
-            sync_totals["proposals"], sync_totals["hash_matches"],
-            sync_totals["skipped"],   sync_totals["failed"],
+            sync_totals["proposals"],
+            sync_totals["hash_matches"],
+            sync_totals["skipped"],
+            sync_totals["failed"],
             "  (dry-run: not written)" if dry_run else "",
         )
     else:
@@ -212,18 +234,26 @@ def cmd_pipeline(args):
     # Step 2: auto-apply non-conflict proposals (both tags and title/description)
     if dry_run:
         from flickr.proposal_applier import _count_pending
+
         pending = _count_pending(db, conflict_types=["non_conflict"])
-        log.info("pipeline: apply skipped (dry-run) — %d pending non-conflict proposal(s) would be applied", pending)
+        log.info(
+            "pipeline: apply skipped (dry-run) — %d pending non-conflict proposal(s) would be applied",
+            pending,
+        )
     else:
         from flickr.proposal_applier import apply_batch
+
         apply_totals = apply_batch(
-            db, library_path,
+            db,
+            library_path,
             conflict_types=["non_conflict"],
             limit=args.limit or 0,
         )
         log.info(
             "pipeline: apply done — applied=%d  failed=%d  superseded=%d",
-            apply_totals["applied"], apply_totals["failed"], apply_totals["superseded"],
+            apply_totals["applied"],
+            apply_totals["failed"],
+            apply_totals["superseded"],
         )
 
     db.close()
@@ -231,90 +261,130 @@ def cmd_pipeline(args):
 
 def cmd_reconcile(args):
     from poller.reconcile import main
-    _run(main, args, [
-        ("--config",          args.config),
-        ("--fix",             args.fix),
-        ("--apply-proposals", args.apply_proposals),
-        ("--explain",         args.explain),
-        ("--limit",           str(args.limit) if args.limit is not None else None),
-        ("--verbose",         args.verbose),
-    ])
+
+    _run(
+        main,
+        args,
+        [
+            ("--config", args.config),
+            ("--fix", args.fix),
+            ("--apply-proposals", args.apply_proposals),
+            ("--explain", args.explain),
+            ("--limit", str(args.limit) if args.limit is not None else None),
+            ("--verbose", args.verbose),
+        ],
+    )
 
 
 def cmd_tag_writeback(args):
     from poller.tag_writeback import main
-    _run(main, args, [
-        ("--config",  args.config),
-        ("--dry-run", args.dry_run),
-        ("--limit",   str(args.limit) if args.limit is not None else None),
-        ("--verbose", args.verbose),
-        ("--source",  args.source),
-    ])
+
+    _run(
+        main,
+        args,
+        [
+            ("--config", args.config),
+            ("--dry-run", args.dry_run),
+            ("--limit", str(args.limit) if args.limit is not None else None),
+            ("--verbose", args.verbose),
+            ("--source", args.source),
+        ],
+    )
 
 
 def cmd_ui(args):
     from reviewer.app import main
-    _run(main, args, [
-        ("--config", args.config),
-        ("--port",   str(args.port)),
-        ("--host",   args.host),
-        ("--debug",  args.debug),
-    ])
+
+    _run(
+        main,
+        args,
+        [
+            ("--config", args.config),
+            ("--port", str(args.port)),
+            ("--host", args.host),
+            ("--debug", args.debug),
+        ],
+    )
 
 
 def cmd_sync_albums(args):
     from flickr.sync_albums import main
-    _run(main, args, [
-        ("--config",   args.config),
-        ("--dry-run",  args.dry_run),
-        ("--album",    args.album),
-        ("--limit",    str(args.limit) if args.limit is not None else None),
-        ("--coalesce", getattr(args, "coalesce", False)),
-        ("--verbose",  args.verbose),
-    ])
+
+    _run(
+        main,
+        args,
+        [
+            ("--config", args.config),
+            ("--dry-run", args.dry_run),
+            ("--album", args.album),
+            ("--limit", str(args.limit) if args.limit is not None else None),
+            ("--coalesce", getattr(args, "coalesce", False)),
+            ("--verbose", args.verbose),
+        ],
+    )
 
 
 def cmd_sync_album_collections(args):
     from flickr.sync_collections import main
-    _run(main, args, [
-        ("--config",  args.config),
-        ("--dry-run", args.dry_run),
-        ("--remove",  getattr(args, "remove", False)),
-        ("--force",   getattr(args, "force", False)),
-        ("--verbose", args.verbose),
-    ])
+
+    _run(
+        main,
+        args,
+        [
+            ("--config", args.config),
+            ("--dry-run", args.dry_run),
+            ("--remove", getattr(args, "remove", False)),
+            ("--force", getattr(args, "force", False)),
+            ("--verbose", args.verbose),
+        ],
+    )
 
 
 def cmd_sync_names_from_flickr(args):
     from flickr.sync_names_from_flickr import main
-    _run(main, args, [
-        ("--config",  args.config),
-        ("--dry-run", args.dry_run),
-        ("--verbose", args.verbose),
-    ])
+
+    _run(
+        main,
+        args,
+        [
+            ("--config", args.config),
+            ("--dry-run", args.dry_run),
+            ("--verbose", args.verbose),
+        ],
+    )
 
 
 def cmd_sync_metadata(args):
     from flickr.sync_metadata import main
-    _run(main, args, [
-        ("--config",         args.config),
-        ("--dry-run",        args.dry_run),
-        ("--limit",          str(args.limit) if args.limit is not None else None),
-        ("--photo-id",       str(args.photo_id) if args.photo_id else None),
-        ("--conflicts-only", args.conflicts_only),
-        ("--force",          args.force),
-        ("--verbose",        args.verbose),
-    ])
+
+    _run(
+        main,
+        args,
+        [
+            ("--config", args.config),
+            ("--dry-run", args.dry_run),
+            ("--limit", str(args.limit) if args.limit is not None else None),
+            ("--photo-id", str(args.photo_id) if args.photo_id else None),
+            ("--conflicts-only", args.conflicts_only),
+            ("--force", args.force),
+            ("--verbose", args.verbose),
+        ],
+    )
 
 
 def cmd_link_orphans(args):
     from poller.link_orphans import main
-    _run(main, args, [
-        ("--config",  args.config),
-        ("--dry-run", args.dry_run),
-        ("--limit",   str(args.limit) if args.limit is not None else None),
-        ("--verbose", args.verbose),
-    ])
+
+    _run(
+        main,
+        args,
+        [
+            ("--config", args.config),
+            ("--dry-run", args.dry_run),
+            ("--limit", str(args.limit) if args.limit is not None else None),
+            ("--verbose", args.verbose),
+        ],
+    )
 
 
 def cmd_install_daemons(args):
@@ -341,10 +411,11 @@ def cmd_install_daemons(args):
     for plist_name in plists:
         src = ROOT / "config" / plist_name
         template = src.read_text()
-        content = (template
-                   .replace("__REPO__", str(ROOT))
-                   .replace("__UV__", uv)
-                   .replace("__HOME__", str(home)))
+        content = (
+            template.replace("__REPO__", str(ROOT))
+            .replace("__UV__", uv)
+            .replace("__HOME__", str(home))
+        )
         dest = launch_agents / plist_name
         if args.dry_run:
             print(f"  would install: {dest}")
@@ -407,8 +478,8 @@ def cmd_checkpoint(args):
     result = db.checkpoint(mode=args.mode.upper())
     db.close()
 
-    busy        = result["busy"]
-    log         = result["log"]
+    busy = result["busy"]
+    log = result["log"]
     checkpointed = result["checkpointed"]
 
     if log == 0:
@@ -483,6 +554,7 @@ def _inject_argv(args, pairs):
 def _step_args(base, **overrides):
     """Return a copy of base Namespace with overrides applied."""
     import argparse as _ap
+
     d = vars(base).copy()
     d.update(overrides)
     return _ap.Namespace(**d)
@@ -567,6 +639,7 @@ def cmd_export(args):
 # Migration helpers
 # ---------------------------------------------------------------------------
 
+
 def _pending_migrations(
     db_path: str,
     migrations_dir: Path,
@@ -605,7 +678,7 @@ def cmd_doctor(args):
     import sqlite3
     import yaml
 
-    OK   = "✓"
+    OK = "✓"
     FAIL = "✗"
     WARN = "!"
     issues = []
@@ -625,7 +698,11 @@ def cmd_doctor(args):
     # ── 1. Config file ────────────────────────────────────────────────────────
     config_path = Path(args.config)
     if not config_path.exists():
-        check(FAIL, f"Config file: {config_path}", "File not found — copy config/config.example.yml to config/config.yml and fill in your values")
+        check(
+            FAIL,
+            f"Config file: {config_path}",
+            "File not found — copy config/config.example.yml to config/config.yml and fill in your values",
+        )
         print()
         print("Cannot continue: config file is required for all other checks.")
         sys.exit(1)
@@ -658,7 +735,10 @@ def cmd_doctor(args):
     _cfg("photos_library", "self_name", label="photos_library.self_name")
 
     if "photos_library" in config and not config["photos_library"].get("self_name"):
-        check(WARN, "photos_library.self_name is empty — photos of named people will not be filtered as self")
+        check(
+            WARN,
+            "photos_library.self_name is empty — photos of named people will not be filtered as self",
+        )
 
     # ── 3. Photos library path ────────────────────────────────────────────────
     photos_path_raw = (config.get("photos_library") or {}).get("path", "")
@@ -667,7 +747,11 @@ def cmd_doctor(args):
         if photos_path.exists():
             check(OK, f"Photos library: {photos_path}")
         else:
-            check(FAIL, f"Photos library: {photos_path}", "Path not found — check photos_library.path in config.yml")
+            check(
+                FAIL,
+                f"Photos library: {photos_path}",
+                "Path not found — check photos_library.path in config.yml",
+            )
 
     # ── 4. Database ───────────────────────────────────────────────────────────
     db_path_raw = (config.get("database") or {}).get("path", "")
@@ -694,13 +778,18 @@ def cmd_doctor(args):
             if pending:
                 for name, _ in pending:
                     check(WARN, f"Migration not applied: {name}")
-                config_flag = f" --config {args.config}" if args.config != "config/config.yml" else ""
+                config_flag = (
+                    f" --config {args.config}" if args.config != "config/config.yml" else ""
+                )
                 print(f"       → Run: bp{config_flag} migrate")
             else:
                 conn = sqlite3.connect(str(db_path))
-                applied = [r[0] for r in conn.execute(
-                    "SELECT name FROM schema_migrations ORDER BY name"
-                ).fetchall()]
+                applied = [
+                    r[0]
+                    for r in conn.execute(
+                        "SELECT name FROM schema_migrations ORDER BY name"
+                    ).fetchall()
+                ]
                 conn.close()
                 last = applied[-1] if applied else "(none)"
                 check(OK, f"Migrations: all applied (latest: {last})")
@@ -710,6 +799,7 @@ def cmd_doctor(args):
     # ── 6. photoscript importable ─────────────────────────────────────────────
     try:
         import photoscript  # noqa: F401
+
         check(OK, "photoscript: importable")
     except ImportError:
         check(FAIL, "photoscript: not found", "Run: uv add photoscript")
@@ -718,6 +808,7 @@ def cmd_doctor(args):
     if args.check_flickr:
         try:
             from flickr.flickr_client import FlickrClient
+
             fc = config.get("flickr", {})
             client = FlickrClient(
                 api_key=fc.get("api_key", ""),
@@ -837,14 +928,17 @@ def _resolve_legacy_library_path(args: argparse.Namespace, config: dict) -> str:
     cfg = (config.get("legacy_library") or {}).get("path")
     if cfg:
         return str(Path(cfg).expanduser())
-    print("Error: no library path. Pass --library <path> or set legacy_library.path in config.",
-          file=sys.stderr)
+    print(
+        "Error: no library path. Pass --library <path> or set legacy_library.path in config.",
+        file=sys.stderr,
+    )
     sys.exit(2)
 
 
 def cmd_index_legacy(args: argparse.Namespace) -> None:
     """Index a legacy (migrated iPhoto/Photos 4) library into curator.db."""
     import yaml
+
     sys.path.insert(0, str(ROOT / "poller"))
     from db.db import Database
     from legacy_indexer import index_library
@@ -866,7 +960,8 @@ def cmd_index_legacy(args: argparse.Namespace) -> None:
     db = Database(db_path)
     try:
         stats = index_library(
-            library_path, db,
+            library_path,
+            db,
             curator_db_path=db_path,
             thumb_root=thumb_root,
             copy_thumbnails=not args.no_thumbnails,
@@ -892,6 +987,7 @@ def cmd_match_legacy(args: argparse.Namespace) -> None:
     import csv
     import yaml
     from collections import defaultdict
+
     sys.path.insert(0, str(ROOT / "poller"))
     from db.db import Database
     from legacy_match import normalise_wall_clock, order_rows, preview_rows
@@ -912,12 +1008,15 @@ def cmd_match_legacy(args: argparse.Namespace) -> None:
                 "SELECT library_uuid FROM legacy_libraries ORDER BY indexed_at DESC"
             ).fetchall()
             if not libs:
-                print("No indexed legacy library found. Run 'bp index-legacy' first.",
-                      file=sys.stderr)
+                print(
+                    "No indexed legacy library found. Run 'bp index-legacy' first.", file=sys.stderr
+                )
                 sys.exit(1)
             if len(libs) > 1 and not args.library_uuid:
-                print("Multiple legacy libraries indexed; pass --library-uuid <uuid>.",
-                      file=sys.stderr)
+                print(
+                    "Multiple legacy libraries indexed; pass --library-uuid <uuid>.",
+                    file=sys.stderr,
+                )
                 sys.exit(2)
             library_uuid = libs[0]["library_uuid"]
 
@@ -943,7 +1042,11 @@ def cmd_match_legacy(args: argparse.Namespace) -> None:
         rows = order_rows(preview_rows(pairs))
 
         counts = {"confident": 0, "ambiguous": 0, "no-match": 0}
-        seen_photos: dict[str, set[str]] = {"confident": set(), "ambiguous": set(), "no-match": set()}
+        seen_photos: dict[str, set[str]] = {
+            "confident": set(),
+            "ambiguous": set(),
+            "no-match": set(),
+        }
         for r in rows:
             seen_photos[r["tier"]].add(r["flickr_id"])
         for tier in counts:
@@ -957,8 +1060,17 @@ def cmd_match_legacy(args: argparse.Namespace) -> None:
         print(f"  no-match     : {counts['no-match']}")
 
         if args.csv:
-            fields = ["tier", "date_norm", "flickr_id", "asset_uuid", "width", "height",
-                      "flickr_title", "legacy_title", "legacy_persons"]
+            fields = [
+                "tier",
+                "date_norm",
+                "flickr_id",
+                "asset_uuid",
+                "width",
+                "height",
+                "flickr_title",
+                "legacy_title",
+                "legacy_persons",
+            ]
             with open(args.csv, "w", newline="") as fh:
                 w = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
                 w.writeheader()
@@ -971,8 +1083,10 @@ def cmd_match_legacy(args: argparse.Namespace) -> None:
             zones = db.active_zones()
             person_policies = db.get_person_policies()
             counts = apply_legacy_matches(
-                db, library_uuid,
-                self_name=self_name, zones=zones,
+                db,
+                library_uuid,
+                self_name=self_name,
+                zones=zones,
                 person_policies=person_policies,
                 classifier_version=CLASSIFIER_VERSION,
             )
@@ -983,9 +1097,11 @@ def cmd_match_legacy(args: argparse.Namespace) -> None:
             print(f"    auto_private : {counts['auto_private']}")
             print(f"  unchanged    : {counts['unchanged']}")
             print(f"  failed       : {counts['failed']} (rolled back and skipped)")
-            print(f"  metadata     : {counts['metadata_matched']} matched, "
-                  f"{counts['metadata_applied']} updated, "
-                  f"{counts['metadata_failed']} failed")
+            print(
+                f"  metadata     : {counts['metadata_matched']} matched, "
+                f"{counts['metadata_applied']} updated, "
+                f"{counts['metadata_failed']} failed"
+            )
     finally:
         db.close()
 
@@ -995,8 +1111,11 @@ def cmd_geocode(args: argparse.Namespace) -> None:
     import yaml
 
     sys.path.insert(0, str(ROOT / "poller"))
+    from bp_logging import configure
     from db.db import Database
     from run_geocode import run_geocode
+
+    configure("geocode", verbose=args.verbose)
 
     with open(args.config) as f:
         config = yaml.safe_load(f)
@@ -1038,9 +1157,7 @@ def cmd_import_contacts_birthdays(args: argparse.Namespace) -> None:
         config = yaml.safe_load(f)
 
     db_path = str(Path(config["database"]["path"]).expanduser())
-    photos_library_path = str(
-        Path(config.get("photos_library", {}).get("path", "")).expanduser()
-    )
+    photos_library_path = str(Path(config.get("photos_library", {}).get("path", "")).expanduser())
     photos_db_path = str(Path(photos_library_path) / "database" / "Photos.sqlite")
 
     if not config.get("photos_library", {}).get("path", ""):
@@ -1097,6 +1214,7 @@ def cmd_all(args):
     """
     import logging
     from poller.bp_logging import configure
+
     configure("all", args.verbose)
     log = logging.getLogger("blue-pearmain.all")
 
@@ -1105,17 +1223,25 @@ def cmd_all(args):
         log.info("all: dry-run mode — no external writes will be made")
 
     steps = [
-        ("scan --all",             cmd_scan,                    _step_args(args, all=True,       dry_run=dry_run, days=None)),
-        ("poll",                   cmd_poll,                    _step_args(args, backfill=False, dry_run=dry_run, days=None)),
+        ("scan --all", cmd_scan, _step_args(args, all=True, dry_run=dry_run, days=None)),
+        ("poll", cmd_poll, _step_args(args, backfill=False, dry_run=dry_run, days=None)),
         ("sync-names-from-flickr", cmd_sync_names_from_flickr, _step_args(args, dry_run=dry_run)),
-        ("pipeline",               cmd_pipeline,                _step_args(args, limit=None,     dry_run=dry_run)),
-        ("reconcile",              cmd_reconcile,               _step_args(args, fix=not dry_run, apply_proposals=False, limit=None)),
-        ("sync-albums",            cmd_sync_albums,             _step_args(args, dry_run=dry_run, album=None,   limit=None)),
-        ("sync-album-collections", cmd_sync_album_collections,  _step_args(args, dry_run=dry_run, remove=False, force=False)),
+        ("pipeline", cmd_pipeline, _step_args(args, limit=None, dry_run=dry_run)),
+        (
+            "reconcile",
+            cmd_reconcile,
+            _step_args(args, fix=not dry_run, apply_proposals=False, limit=None),
+        ),
+        ("sync-albums", cmd_sync_albums, _step_args(args, dry_run=dry_run, album=None, limit=None)),
+        (
+            "sync-album-collections",
+            cmd_sync_album_collections,
+            _step_args(args, dry_run=dry_run, remove=False, force=False),
+        ),
     ]
     if not dry_run:
-        steps.insert(2, ("thumbs",     cmd_thumbs,     _step_args(args, icloud=False, icloud_limit=50)))
-        steps.append(   ("checkpoint", cmd_checkpoint, _step_args(args, mode="truncate")))
+        steps.insert(2, ("thumbs", cmd_thumbs, _step_args(args, icloud=False, icloud_limit=50)))
+        steps.append(("checkpoint", cmd_checkpoint, _step_args(args, mode="truncate")))
 
     include_legacy = getattr(args, "include_legacy", False)
     if include_legacy:
@@ -1127,20 +1253,24 @@ def cmd_all(args):
                     "all: %s SKIPPED (no dry-run support) -- continuing",
                     step_name,
                 )
+
             return _skipped
 
         # "pipeline" is always present in the base steps list — StopIteration here is a programmer mistake
-        pipeline_idx = next(
-            i for i, (n, _, _) in enumerate(steps) if n == "pipeline"
-        )
+        pipeline_idx = next(i for i, (n, _, _) in enumerate(steps) if n == "pipeline")
         if dry_run:
             legacy_steps = [
                 (
                     "index-legacy",
                     _dry_run_skip_fn("index-legacy"),
-                    _step_args(args,
-                               library=None, no_thumbnails=False, limit=None,
-                               no_cache=False, refresh_cache=False),
+                    _step_args(
+                        args,
+                        library=None,
+                        no_thumbnails=False,
+                        limit=None,
+                        no_cache=False,
+                        refresh_cache=False,
+                    ),
                 ),
                 (
                     "match-legacy --apply",
@@ -1153,9 +1283,14 @@ def cmd_all(args):
                 (
                     "index-legacy",
                     cmd_index_legacy,
-                    _step_args(args,
-                               library=None, no_thumbnails=False, limit=None,
-                               no_cache=False, refresh_cache=False),
+                    _step_args(
+                        args,
+                        library=None,
+                        no_thumbnails=False,
+                        limit=None,
+                        no_cache=False,
+                        refresh_cache=False,
+                    ),
                 ),
                 (
                     "match-legacy --apply",
@@ -1198,7 +1333,7 @@ def main():
         description="Blue Pearmain — Flickr + Apple Photos review tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--config",  default="config/config.yml", help="Path to config.yml")
+    parser.add_argument("--config", default="config/config.yml", help="Path to config.yml")
     parser.add_argument("--verbose", action="store_true")
 
     sub = parser.add_subparsers(dest="command", metavar="<command>")
@@ -1206,49 +1341,74 @@ def main():
 
     # stats
     p_stats = sub.add_parser("stats", help="Show photo counts by privacy state")
-    p_stats.add_argument("--oneliner", action="store_true", help="Single-line summary for watch/loop use")
+    p_stats.add_argument(
+        "--oneliner", action="store_true", help="Single-line summary for watch/loop use"
+    )
 
     # poll
     p_poll = sub.add_parser("poll", help="Poll Flickr for new/updated photos")
-    p_poll.add_argument("--backfill", action="store_true", help="Poll full history, not just recent")
-    p_poll.add_argument("--days",     type=int, default=None, help="Days to look back (with --backfill)")
-    p_poll.add_argument("--dry-run",  action="store_true")
+    p_poll.add_argument(
+        "--backfill", action="store_true", help="Poll full history, not just recent"
+    )
+    p_poll.add_argument(
+        "--days", type=int, default=None, help="Days to look back (with --backfill)"
+    )
+    p_poll.add_argument("--dry-run", action="store_true")
 
     # scan
     p_scan = sub.add_parser("scan", help="Scan Apple Photos library")
-    p_scan.add_argument("--all",     action="store_true", help="Scan entire library")
-    p_scan.add_argument("--days",    type=int, default=None)
+    p_scan.add_argument("--all", action="store_true", help="Scan entire library")
+    p_scan.add_argument("--days", type=int, default=None)
     p_scan.add_argument("--dry-run", action="store_true")
 
     # thumbs
     p_thumbs = sub.add_parser("thumbs", help="Populate missing thumbnail paths")
-    p_thumbs.add_argument("--icloud",       action="store_true",
-                          help="Trigger sequential AppleScript export for iCloud-only photos")
-    p_thumbs.add_argument("--icloud-limit", type=int, default=50,
-                          help="Max iCloud exports per run (default: 50)")
+    p_thumbs.add_argument(
+        "--icloud",
+        action="store_true",
+        help="Trigger sequential AppleScript export for iCloud-only photos",
+    )
+    p_thumbs.add_argument(
+        "--icloud-limit", type=int, default=50, help="Max iCloud exports per run (default: 50)"
+    )
 
     # pipeline
     p_pipe = sub.add_parser("pipeline", help="Sync-metadata then auto-apply non-conflict proposals")
-    p_pipe.add_argument("--dry-run", action="store_true",
-                        help="Classify drift and count proposals; do not write or apply")
-    p_pipe.add_argument("--limit", type=int, default=None,
-                        help="Cap number of proposals applied (default: unlimited)")
+    p_pipe.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Classify drift and count proposals; do not write or apply",
+    )
+    p_pipe.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Cap number of proposals applied (default: unlimited)",
+    )
 
     # reconcile
     p_rec = sub.add_parser("reconcile", help="Check DB state vs actual Flickr state")
-    p_rec.add_argument("--fix",              action="store_true", help="Re-push mismatches")
-    p_rec.add_argument("--apply-proposals",  action="store_true", help="Apply pending non-conflict metadata proposals")
-    p_rec.add_argument("--explain",          action="store_true", help="Show current→desired→reason for each photo with pending drift (DB-only)")
-    p_rec.add_argument("--limit",            type=int, default=None)
+    p_rec.add_argument("--fix", action="store_true", help="Re-push mismatches")
+    p_rec.add_argument(
+        "--apply-proposals",
+        action="store_true",
+        help="Apply pending non-conflict metadata proposals",
+    )
+    p_rec.add_argument(
+        "--explain",
+        action="store_true",
+        help="Show current→desired→reason for each photo with pending drift (DB-only)",
+    )
+    p_rec.add_argument("--limit", type=int, default=None)
 
     # tag-writeback
     p_twb = sub.add_parser(
         "tag-writeback",
         help="Write pushed Flickr tags back to Photos.app as explicit keywords",
     )
-    p_twb.add_argument("--dry-run",  action="store_true")
-    p_twb.add_argument("--limit",    type=int, default=None)
-    p_twb.add_argument("--verbose",  action="store_true")
+    p_twb.add_argument("--dry-run", action="store_true")
+    p_twb.add_argument("--limit", type=int, default=None)
+    p_twb.add_argument("--verbose", action="store_true")
     p_twb.add_argument(
         "--source",
         choices=["pushed-tags", "proposed-tags"],
@@ -1257,16 +1417,19 @@ def main():
 
     # ui
     p_ui = sub.add_parser("ui", help="Start the review UI")
-    p_ui.add_argument("--port",  type=int, default=5173)
-    p_ui.add_argument("--host",  default=None,
-                      help="Interface to bind (default: 127.0.0.1). Use 0.0.0.0 for LAN access.")
+    p_ui.add_argument("--port", type=int, default=5173)
+    p_ui.add_argument(
+        "--host",
+        default=None,
+        help="Interface to bind (default: 127.0.0.1). Use 0.0.0.0 for LAN access.",
+    )
     p_ui.add_argument("--debug", action="store_true")
 
     # sync-albums
     p_sync = sub.add_parser("sync-albums", help="Sync Apple Photos albums → Flickr photosets")
     p_sync.add_argument("--dry-run", action="store_true")
-    p_sync.add_argument("--album",   default=None, help="Sync only this album name")
-    p_sync.add_argument("--limit",   type=int, default=None)
+    p_sync.add_argument("--album", default=None, help="Sync only this album name")
+    p_sync.add_argument("--limit", type=int, default=None)
     p_sync.add_argument(
         "--coalesce",
         action="store_true",
@@ -1279,12 +1442,17 @@ def main():
         "sync-album-collections",
         help="Sync Apple Photos folder hierarchy → Flickr Collections (Pro account required)",
     )
-    p_col.add_argument("--dry-run", action="store_true",
-                       help="Show what would be synced without making API calls")
-    p_col.add_argument("--remove",  action="store_true",
-                       help="Remove Flickr Collections for folders deleted from Photos")
-    p_col.add_argument("--force",   action="store_true",
-                       help="Skip confirmation prompts when used with --remove")
+    p_col.add_argument(
+        "--dry-run", action="store_true", help="Show what would be synced without making API calls"
+    )
+    p_col.add_argument(
+        "--remove",
+        action="store_true",
+        help="Remove Flickr Collections for folders deleted from Photos",
+    )
+    p_col.add_argument(
+        "--force", action="store_true", help="Skip confirmation prompts when used with --remove"
+    )
     p_col.add_argument("--verbose", action="store_true")
 
     # sync-names-from-flickr
@@ -1297,40 +1465,47 @@ def main():
 
     # sync-metadata
     p_meta = sub.add_parser("sync-metadata", help="Pull Flickr metadata → Apple Photos")
-    p_meta.add_argument("--dry-run",        action="store_true",
-                        help="Compare and log; do not write to Photos or DB")
-    p_meta.add_argument("--limit",          type=int, default=None)
-    p_meta.add_argument("--photo-id",       type=int, default=None,
-                        help="Process only this DB photo_id")
-    p_meta.add_argument("--conflicts-only", action="store_true",
-                        help="Detect and record conflicts only; skip Photos writes")
-    p_meta.add_argument("--force",          action="store_true",
-                        help="Process all photos, ignoring meta_last_harmonized_at")
-    p_meta.add_argument("--verbose",        action="store_true")
+    p_meta.add_argument(
+        "--dry-run", action="store_true", help="Compare and log; do not write to Photos or DB"
+    )
+    p_meta.add_argument("--limit", type=int, default=None)
+    p_meta.add_argument("--photo-id", type=int, default=None, help="Process only this DB photo_id")
+    p_meta.add_argument(
+        "--conflicts-only",
+        action="store_true",
+        help="Detect and record conflicts only; skip Photos writes",
+    )
+    p_meta.add_argument(
+        "--force", action="store_true", help="Process all photos, ignoring meta_last_harmonized_at"
+    )
+    p_meta.add_argument("--verbose", action="store_true")
 
     # link-orphans
     p_link = sub.add_parser(
         "link-orphans",
         help="Merge split Photos-only / Flickr-only records that share a capture timestamp",
     )
-    p_link.add_argument("--dry-run", action="store_true",
-                        help="Find pairs but do not write to DB")
-    p_link.add_argument("--limit",   type=int, default=None,
-                        help="Max pairs to process (default: all)")
+    p_link.add_argument("--dry-run", action="store_true", help="Find pairs but do not write to DB")
+    p_link.add_argument(
+        "--limit", type=int, default=None, help="Max pairs to process (default: all)"
+    )
 
     # all
     p_all = sub.add_parser(
         "all",
         help="Full maintenance run: scan --all, poll, thumbs, pipeline, reconcile --fix, sync-albums, sync-album-collections, checkpoint",
     )
-    p_all.add_argument("--dry-run", action="store_true",
-                       help="Run all stages read-only: no external writes. "
-                            "Thumbs and checkpoint are skipped; reconcile runs without --fix.")
+    p_all.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run all stages read-only: no external writes. "
+        "Thumbs and checkpoint are skipped; reconcile runs without --fix.",
+    )
     p_all.add_argument(
         "--include-legacy",
         action="store_true",
         help="Also run index-legacy (full authoritative NAS refresh) and "
-             "match-legacy --apply after the pipeline step.",
+        "match-legacy --apply after the pipeline step.",
     )
 
     # install-daemons
@@ -1338,21 +1513,29 @@ def main():
         "install-daemons",
         help="Install launchd agents to ~/Library/LaunchAgents",
     )
-    p_install.add_argument("--dry-run", action="store_true",
-                           help="Show what would be installed without writing files")
+    p_install.add_argument(
+        "--dry-run", action="store_true", help="Show what would be installed without writing files"
+    )
 
     # uninstall-daemons
     p_uninstall = sub.add_parser(
         "uninstall-daemons",
         help="Remove installed launchd agents from ~/Library/LaunchAgents",
     )
-    p_uninstall.add_argument("--dry-run", action="store_true",
-                             help="Show what would be removed without deleting files")
+    p_uninstall.add_argument(
+        "--dry-run", action="store_true", help="Show what would be removed without deleting files"
+    )
 
     # doctor
-    p_doc = sub.add_parser("doctor", help="Preflight check: config, environment, and DB. Passing means startup is likely to succeed; it is not a guarantee of successful execution.")
-    p_doc.add_argument("--check-flickr", action="store_true",
-                       help="Make a live Flickr API call to verify credentials (requires network)")
+    p_doc = sub.add_parser(
+        "doctor",
+        help="Preflight check: config, environment, and DB. Passing means startup is likely to succeed; it is not a guarantee of successful execution.",
+    )
+    p_doc.add_argument(
+        "--check-flickr",
+        action="store_true",
+        help="Make a live Flickr API call to verify credentials (requires network)",
+    )
 
     # migrate
     p_mig = sub.add_parser(
@@ -1360,13 +1543,15 @@ def main():
         help="Apply all pending DB migrations in order (safe to re-run; each migration is idempotent).",
     )
     p_mig.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Show what would be applied without modifying the DB",
     )
     p_mig.add_argument(
-        "--baseline", action="store_true",
+        "--baseline",
+        action="store_true",
         help="Mark all pending migrations as applied WITHOUT running their DDL "
-             "(resync schema_migrations on a DB whose schema already exists)",
+        "(resync schema_migrations on a DB whose schema already exists)",
     )
 
     # status
@@ -1378,7 +1563,8 @@ def main():
     # checkpoint
     p_ckpt = sub.add_parser("checkpoint", help="Run a WAL checkpoint to shrink the WAL file")
     p_ckpt.add_argument(
-        "--mode", default="truncate",
+        "--mode",
+        default="truncate",
         choices=["truncate", "passive", "full", "restart"],
         help="Checkpoint mode (default: truncate)",
     )
@@ -1389,16 +1575,31 @@ def main():
         help="Find and classify duplicate photos (dry-run by default)",
     )
     p_dedup.add_argument("--write", action="store_true", help="Write results to the DB")
-    p_dedup.add_argument("--confirm", action="store_true", help="Delete Flickr discards (requires --write)")
-    p_dedup.add_argument("--dry-run", action="store_true", help="Report without writing (default behaviour)")
+    p_dedup.add_argument(
+        "--confirm", action="store_true", help="Delete Flickr discards (requires --write)"
+    )
+    p_dedup.add_argument(
+        "--dry-run", action="store_true", help="Report without writing (default behaviour)"
+    )
     p_dedup.add_argument("--flickr", action="store_true", help="Detect Flickr re-upload duplicates")
-    p_dedup.add_argument("--limit", type=int, default=None, metavar="N",
-                         help="Maximum pairs to write (recommended for first live runs)")
-    p_dedup.add_argument("--verbose", "-v", action="store_true", help="Show all uncertain pairs in report")
-    p_dedup.add_argument("--prune", action="store_true",
-                         help="Clean up zombie groups and stale photo_count values (dry-run by default)")
-    p_dedup.add_argument("--apply", action="store_true",
-                         help="Execute --prune changes (default is dry-run)")
+    p_dedup.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Maximum pairs to write (recommended for first live runs)",
+    )
+    p_dedup.add_argument(
+        "--verbose", "-v", action="store_true", help="Show all uncertain pairs in report"
+    )
+    p_dedup.add_argument(
+        "--prune",
+        action="store_true",
+        help="Clean up zombie groups and stale photo_count values (dry-run by default)",
+    )
+    p_dedup.add_argument(
+        "--apply", action="store_true", help="Execute --prune changes (default is dry-run)"
+    )
 
     # prune-proposals
     p_prune = sub.add_parser(
@@ -1406,10 +1607,15 @@ def main():
         help="Supersede spurious managed-tag proposals and delete old resolved proposals",
     )
     p_prune.add_argument(
-        "--older-than", type=int, default=90, metavar="N",
+        "--older-than",
+        type=int,
+        default=90,
+        metavar="N",
         help="Delete resolved proposals older than N days (default: 90)",
     )
-    p_prune.add_argument("--dry-run", action="store_true", help="Report counts without modifying the DB")
+    p_prune.add_argument(
+        "--dry-run", action="store_true", help="Report counts without modifying the DB"
+    )
 
     # export
     p_export = sub.add_parser(
@@ -1417,7 +1623,8 @@ def main():
         help="Export DB state to portable NDJSON (photos.ndjson, zones.json, manifest.json)",
     )
     p_export.add_argument(
-        "--out", default=None,
+        "--out",
+        default=None,
         help="Output directory (default: ./bp-export-YYYY-MM-DD/)",
     )
 
@@ -1426,28 +1633,51 @@ def main():
         "index-legacy",
         help="Index a legacy (migrated iPhoto/Photos 4) library into curator.db",
     )
-    p_idxleg.add_argument("--library", default=None,
-                          help="Path to the .photoslibrary bundle (overrides config legacy_library.path)")
-    p_idxleg.add_argument("--no-thumbnails", action="store_true",
-                          help="Skip copying thumbnails into BP's cache")
-    p_idxleg.add_argument("--limit", type=int, default=None, metavar="N",
-                          help="Index only the first N assets (non-authoritative: no deletions)")
-    p_idxleg.add_argument("--no-cache", action="store_true",
-                          help="Read the library in place instead of the local DB cache")
-    p_idxleg.add_argument("--refresh-cache", action="store_true",
-                          help="Force a rebuild of the local DB cache")
+    p_idxleg.add_argument(
+        "--library",
+        default=None,
+        help="Path to the .photoslibrary bundle (overrides config legacy_library.path)",
+    )
+    p_idxleg.add_argument(
+        "--no-thumbnails", action="store_true", help="Skip copying thumbnails into BP's cache"
+    )
+    p_idxleg.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Index only the first N assets (non-authoritative: no deletions)",
+    )
+    p_idxleg.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Read the library in place instead of the local DB cache",
+    )
+    p_idxleg.add_argument(
+        "--refresh-cache", action="store_true", help="Force a rebuild of the local DB cache"
+    )
 
     # match-legacy
     p_mlp = sub.add_parser(
         "match-legacy",
         help="Match legacy assets to Flickr-only candidate_public photos; preview by default, --apply to reclassify",
     )
-    p_mlp.add_argument("--library-uuid", default=None,
-                       help="Which indexed library to match against (default: the most recently indexed)")
-    p_mlp.add_argument("--csv", default=None, metavar="PATH",
-                       help="Also write the full tiered report to a CSV file")
-    p_mlp.add_argument("--apply", action="store_true",
-                       help="Reclassify confident (and all-people ambiguous) matches out of the review queue")
+    p_mlp.add_argument(
+        "--library-uuid",
+        default=None,
+        help="Which indexed library to match against (default: the most recently indexed)",
+    )
+    p_mlp.add_argument(
+        "--csv",
+        default=None,
+        metavar="PATH",
+        help="Also write the full tiered report to a CSV file",
+    )
+    p_mlp.add_argument(
+        "--apply",
+        action="store_true",
+        help="Reclassify confident (and all-people ambiguous) matches out of the review queue",
+    )
 
     # geocode
     p_geo = sub.add_parser(
@@ -1491,65 +1721,96 @@ def main():
     args = parser.parse_args()
 
     # Attach config/verbose to all subcommands
-    if not hasattr(args, "oneliner"):        args.oneliner = False
-    if not hasattr(args, "dry_run"):         args.dry_run = False
-    if not hasattr(args, "all"):             args.all = False
-    if not hasattr(args, "days"):            args.days = None
-    if not hasattr(args, "backfill"):        args.backfill = False
-    if not hasattr(args, "fix"):             args.fix = False
-    if not hasattr(args, "apply_proposals"): args.apply_proposals = False
-    if not hasattr(args, "explain"):         args.explain = False
-    if not hasattr(args, "limit"):           args.limit = None
-    if not hasattr(args, "port"):            args.port = 5173
-    if not hasattr(args, "debug"):           args.debug = False
-    if not hasattr(args, "album"):           args.album = None
-    if not hasattr(args, "remove"):          args.remove = False
-    if not hasattr(args, "force"):           args.force = False
-    if not hasattr(args, "photo_id"):        args.photo_id = None
-    if not hasattr(args, "conflicts_only"):  args.conflicts_only = False
-    if not hasattr(args, "mode"):            args.mode = "truncate"
-    if not hasattr(args, "check_flickr"):   args.check_flickr = False
-    if not hasattr(args, "older_than"):     args.older_than = 90
-    if not hasattr(args, "write"):          args.write = False
-    if not hasattr(args, "confirm"):        args.confirm = False
-    if not hasattr(args, "prune"):          args.prune = False
-    if not hasattr(args, "apply"):          args.apply = False
-    if not hasattr(args, "out"):           args.out = None
-    if not hasattr(args, "library"):        args.library = None
-    if not hasattr(args, "no_thumbnails"):  args.no_thumbnails = False
-    if not hasattr(args, "no_cache"):       args.no_cache = False
-    if not hasattr(args, "refresh_cache"):  args.refresh_cache = False
-    if not hasattr(args, "library_uuid"):   args.library_uuid = None
-    if not hasattr(args, "csv"):            args.csv = None
-    if not hasattr(args, "overwrite"):      args.overwrite = False
+    if not hasattr(args, "oneliner"):
+        args.oneliner = False
+    if not hasattr(args, "dry_run"):
+        args.dry_run = False
+    if not hasattr(args, "all"):
+        args.all = False
+    if not hasattr(args, "days"):
+        args.days = None
+    if not hasattr(args, "backfill"):
+        args.backfill = False
+    if not hasattr(args, "fix"):
+        args.fix = False
+    if not hasattr(args, "apply_proposals"):
+        args.apply_proposals = False
+    if not hasattr(args, "explain"):
+        args.explain = False
+    if not hasattr(args, "limit"):
+        args.limit = None
+    if not hasattr(args, "port"):
+        args.port = 5173
+    if not hasattr(args, "debug"):
+        args.debug = False
+    if not hasattr(args, "album"):
+        args.album = None
+    if not hasattr(args, "remove"):
+        args.remove = False
+    if not hasattr(args, "force"):
+        args.force = False
+    if not hasattr(args, "photo_id"):
+        args.photo_id = None
+    if not hasattr(args, "conflicts_only"):
+        args.conflicts_only = False
+    if not hasattr(args, "mode"):
+        args.mode = "truncate"
+    if not hasattr(args, "check_flickr"):
+        args.check_flickr = False
+    if not hasattr(args, "older_than"):
+        args.older_than = 90
+    if not hasattr(args, "write"):
+        args.write = False
+    if not hasattr(args, "confirm"):
+        args.confirm = False
+    if not hasattr(args, "prune"):
+        args.prune = False
+    if not hasattr(args, "apply"):
+        args.apply = False
+    if not hasattr(args, "out"):
+        args.out = None
+    if not hasattr(args, "library"):
+        args.library = None
+    if not hasattr(args, "no_thumbnails"):
+        args.no_thumbnails = False
+    if not hasattr(args, "no_cache"):
+        args.no_cache = False
+    if not hasattr(args, "refresh_cache"):
+        args.refresh_cache = False
+    if not hasattr(args, "library_uuid"):
+        args.library_uuid = None
+    if not hasattr(args, "csv"):
+        args.csv = None
+    if not hasattr(args, "overwrite"):
+        args.overwrite = False
 
     dispatch = {
-        "pipeline":      cmd_pipeline,
-        "stats":         cmd_stats,
-        "poll":          cmd_poll,
-        "scan":          cmd_scan,
-        "thumbs":        cmd_thumbs,
-        "reconcile":     cmd_reconcile,
+        "pipeline": cmd_pipeline,
+        "stats": cmd_stats,
+        "poll": cmd_poll,
+        "scan": cmd_scan,
+        "thumbs": cmd_thumbs,
+        "reconcile": cmd_reconcile,
         "tag-writeback": cmd_tag_writeback,
-        "ui":            cmd_ui,
-        "sync-albums":             cmd_sync_albums,
-        "sync-album-collections":  cmd_sync_album_collections,
-        "sync-names-from-flickr":  cmd_sync_names_from_flickr,
-        "sync-metadata":           cmd_sync_metadata,
-        "link-orphans":  cmd_link_orphans,
-        "checkpoint":       cmd_checkpoint,
-        "all":              cmd_all,
-        "install-daemons":   cmd_install_daemons,
+        "ui": cmd_ui,
+        "sync-albums": cmd_sync_albums,
+        "sync-album-collections": cmd_sync_album_collections,
+        "sync-names-from-flickr": cmd_sync_names_from_flickr,
+        "sync-metadata": cmd_sync_metadata,
+        "link-orphans": cmd_link_orphans,
+        "checkpoint": cmd_checkpoint,
+        "all": cmd_all,
+        "install-daemons": cmd_install_daemons,
         "uninstall-daemons": cmd_uninstall_daemons,
-        "doctor":            cmd_doctor,
-        "migrate":           cmd_migrate,
-        "status":            cmd_status,
-        "deduplicator":      cmd_deduplicator,
-        "prune-proposals":   cmd_prune_proposals,
-        "export":            cmd_export,
-        "index-legacy":          cmd_index_legacy,
-        "match-legacy":  cmd_match_legacy,
-        "geocode":               cmd_geocode,
+        "doctor": cmd_doctor,
+        "migrate": cmd_migrate,
+        "status": cmd_status,
+        "deduplicator": cmd_deduplicator,
+        "prune-proposals": cmd_prune_proposals,
+        "export": cmd_export,
+        "index-legacy": cmd_index_legacy,
+        "match-legacy": cmd_match_legacy,
+        "geocode": cmd_geocode,
         "import-contacts-birthdays": cmd_import_contacts_birthdays,
     }
     dispatch[args.command](args)
