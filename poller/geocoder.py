@@ -24,6 +24,7 @@ _USER_AGENT = (
 )
 _NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 _last_call_time: float = 0.0  # module-level rate limiter (single-threaded)
+_RETRY_DELAYS = (5, 15)  # minimum back-off (seconds) before each retry attempt on 429
 
 
 @dataclass
@@ -83,7 +84,9 @@ def fetch_from_nominatim(lat: float, lon: float) -> "PlaceData | None":
     Returns PlaceData (possibly all-None fields) on a 200 response.
 
     Rate-limited to 1 request/second per Nominatim usage policy. On a 429 response,
-    backs off for Retry-After seconds (default 10) and retries once.
+    retries up to twice with incremental back-off: 5 seconds before the first retry,
+    15 seconds before the second. The actual wait is max(Retry-After, floor) so we
+    respect longer server-requested delays while ignoring Retry-After: 0.
     """
     import requests  # deferred import — not needed if geocoder isn't used
 
@@ -98,8 +101,10 @@ def fetch_from_nominatim(lat: float, lon: float) -> "PlaceData | None":
     try:
         resp = requests.get(_NOMINATIM_URL, params=_params, headers=_headers, timeout=10)
         _last_call_time = time.monotonic()
-        if resp.status_code == 429:
-            wait = int(resp.headers.get("Retry-After", 10))
+        for delay in _RETRY_DELAYS:
+            if resp.status_code != 429:
+                break
+            wait = max(int(resp.headers.get("Retry-After", delay)), delay)
             log.warning(
                 "Nominatim rate-limited (429) for (%.6f, %.6f); backing off %ds",
                 lat,

@@ -578,7 +578,7 @@ class TestFetchFromNominatim:
 
         resp_429 = MagicMock()
         resp_429.status_code = 429
-        resp_429.headers = {"Retry-After": "2"}
+        resp_429.headers = {"Retry-After": "2"}  # below the 5-second first-retry floor
 
         resp_200 = MagicMock()
         resp_200.status_code = 200
@@ -601,10 +601,10 @@ class TestFetchFromNominatim:
         assert result is not None
         assert result.city == "Somerville"
         assert mock_get.call_count == 2
-        mock_sleep.assert_any_call(2)
+        mock_sleep.assert_any_call(5)  # first-retry floor: max(2, 5) == 5
 
     def test_429_default_backoff_when_no_retry_after(self):
-        """On 429 without Retry-After header, backs off for 10 seconds."""
+        """On 429 without Retry-After header, uses the first-retry floor of 5 seconds."""
         from unittest.mock import MagicMock, patch
 
         from geocoder import fetch_from_nominatim
@@ -626,10 +626,10 @@ class TestFetchFromNominatim:
         ):
             fetch_from_nominatim(42.0, -71.0)
 
-        mock_sleep.assert_any_call(10)
+        mock_sleep.assert_any_call(5)  # default floor for first retry: max(0, 5) == 5
 
     def test_429_retry_also_fails_returns_none(self):
-        """On persistent 429 (both attempts), returns None after exactly 2 HTTP calls."""
+        """On persistent 429, returns None after all retries (3 HTTP calls total)."""
         from unittest.mock import MagicMock, patch
 
         from geocoder import fetch_from_nominatim
@@ -638,8 +638,15 @@ class TestFetchFromNominatim:
         resp_429.status_code = 429
         resp_429.headers = {"Retry-After": "0"}
 
-        with patch("requests.get", return_value=resp_429) as mock_get, patch("time.sleep"):
+        with (
+            patch("requests.get", return_value=resp_429) as mock_get,
+            patch("time.sleep") as mock_sleep,
+        ):
             result = fetch_from_nominatim(42.0, -71.0)
 
         assert result is None
-        assert mock_get.call_count == 2
+        # original attempt + 2 retries (one per entry in _RETRY_DELAYS)
+        assert mock_get.call_count == 3
+        # incremental back-off: 5s then 15s
+        mock_sleep.assert_any_call(5)
+        mock_sleep.assert_any_call(15)
