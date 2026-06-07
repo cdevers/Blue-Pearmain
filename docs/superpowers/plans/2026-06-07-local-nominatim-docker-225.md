@@ -235,17 +235,6 @@ class TestMakeFetcher:
         mock_sleep.assert_not_called()
 ```
 
-Also update the import block at the top of `tests/test_geocoder.py` to include `make_fetcher`:
-
-```python
-from geocoder import (
-    PlaceData,
-    _parse_nominatim_response,
-    make_fetcher,
-    reverse_geocode,
-)
-```
-
 Add `import pytest` near the top of the test file (after `import sys`), if not already present:
 
 ```python
@@ -396,18 +385,6 @@ class TestCheckNominatimStatus:
         assert "unreachable" in msg
 ```
 
-Also update the import block at the top of `tests/test_geocoder.py` to include `check_nominatim_status`:
-
-```python
-from geocoder import (
-    PlaceData,
-    _parse_nominatim_response,
-    check_nominatim_status,
-    make_fetcher,
-    reverse_geocode,
-)
-```
-
 - [ ] **Step 2b: Run tests to confirm `TestCheckNominatimStatus` fails**
 
 ```bash
@@ -507,7 +484,7 @@ def test_geocode_check_nominatim_flag_accepted() -> None:
         timeout=30,
     )
     stderr = result.stderr.decode()
-    assert result.returncode == 1  # connection refused → unreachable → exit 1
+    assert result.returncode != 2  # exit 2 = argparse rejected the flag; 0/1 both mean accepted
     assert "unrecognized arguments" not in stderr
 ```
 
