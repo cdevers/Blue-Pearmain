@@ -171,12 +171,12 @@ class TestMakeFetcher:
         assert mock_get.call_args[0][0] == _PUBLIC_NOMINATIM_URL
 
     def test_make_fetcher_public_url_delay_is_1s(self):
-        """Auto-detected delay is 1.0s when URL matches the public Nominatim endpoint.
+        """Subsequent calls are rate-limited to 1 request/second.
 
-        Mocks time.monotonic() to return deterministic values:
+        Uses realistic uptime-scale mock values to mirror production behaviour:
           - last_call_time starts at 0.0 (closure init)
-          - first monotonic() call returns 0.5 → elapsed = 0.5 < 1.0 → sleep(0.5)
-          - second monotonic() call returns 1.0 → last_call_time updated to 1.0
+          - first call:  elapsed = 1000.0 - 0.0 = 1000.0 → no sleep; LCT = 1000.1
+          - second call: elapsed = 1000.2 - 1000.1 = 0.1 < 1.0 → sleep(0.9); LCT = 1001.2
         """
         from unittest.mock import patch
 
@@ -186,19 +186,16 @@ class TestMakeFetcher:
 
         with (
             patch("requests.get", return_value=self._mock_resp_200()),
-            patch("time.monotonic", side_effect=[0.5, 1.0]),
+            patch("time.monotonic", side_effect=[1000.0, 1000.1, 1000.2, 1001.2]),
             patch("time.sleep") as mock_sleep,
         ):
-            fetcher(42.0, -71.0)
+            fetcher(42.0, -71.0)  # first call: goes through without sleeping
+            fetcher(42.0, -71.0)  # second call: rate-limited
 
-        mock_sleep.assert_called_once_with(pytest.approx(0.5))
+        mock_sleep.assert_called_once_with(pytest.approx(0.9))
 
     def test_make_fetcher_local_url_delay_is_0(self):
-        """Auto-detected delay is 0.0s for any URL other than the public endpoint.
-
-        Mocks time.monotonic() to return 0.5 → elapsed = 0.5, but min_delay=0.0
-        so 0.5 < 0.0 is False → sleep is never called.
-        """
+        """Auto-detected delay is 0.0s for any URL other than the public endpoint."""
         from unittest.mock import patch
 
         from geocoder import make_fetcher
@@ -207,10 +204,11 @@ class TestMakeFetcher:
 
         with (
             patch("requests.get", return_value=self._mock_resp_200()),
-            patch("time.monotonic", side_effect=[0.5, 1.0]),
+            patch("time.monotonic", side_effect=[1000.0, 1000.1, 1000.1, 1000.2]),
             patch("time.sleep") as mock_sleep,
         ):
             fetcher(42.0, -71.0)
+            fetcher(42.0, -71.0)  # elapsed = 0.0, but min_delay=0.0 → no sleep
 
         mock_sleep.assert_not_called()
 
@@ -224,10 +222,11 @@ class TestMakeFetcher:
 
         with (
             patch("requests.get", return_value=self._mock_resp_200()),
-            patch("time.monotonic", side_effect=[0.5, 1.0]),
+            patch("time.monotonic", side_effect=[1000.0, 1000.1, 1000.1, 1000.2]),
             patch("time.sleep") as mock_sleep,
         ):
             fetcher(42.0, -71.0)
+            fetcher(42.0, -71.0)  # min_delay=0.0 overrides auto-detect → no sleep
 
         mock_sleep.assert_not_called()
 ```
@@ -279,6 +278,8 @@ def make_fetcher(
         netloc = urlparse(effective_url).netloc
         min_delay = 1.0 if netloc == "nominatim.openstreetmap.org" else 0.0
 
+    # 0.0 guarantees the first call is never rate-limited: time.monotonic() returns
+    # the system uptime in seconds, so elapsed >> min_delay on any first real call.
     last_call_time = 0.0
 
     def fetcher(lat: float, lon: float) -> "PlaceData | None":
