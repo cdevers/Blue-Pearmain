@@ -114,7 +114,7 @@ User-Agent: BluePearmain/1.0 (https://github.com/cdevers/Blue-Pearmain; contact:
 - Returns `None` on network error or a 4xx/5xx response. These are **not cached** and are logged at WARNING level so persistent rejections (429, 403) are visible. The next scan cycle will retry.
 - Returns a `PlaceData` with all-`None` fields if the API responds 200 but returns no address data for those coordinates. This **is cached** to prevent retrying unmapped coordinates.
 
-**Rate limiting:** A module-level timestamp enforces a minimum 1-second gap between calls, per Nominatim's usage policy. If the last call was less than 1 second ago, the function sleeps the remainder before calling.
+**Rate limiting:** A module-level timestamp enforces a minimum 1-second gap between calls, per Nominatim's usage policy. If the last call was less than 1 second ago, the function sleeps the remainder before calling. BP's scanner and `bp geocode` are single-threaded, so no lock is needed around the timestamp.
 
 ### `reverse_geocode(lat, lon, db, fetcher=fetch_from_nominatim) -> LookupResult`
 
@@ -158,10 +158,12 @@ The scanner updates the in-memory `row` dict; the standard DB upsert downstream 
 
 Retroactive backfill for existing photos. After the first run, ongoing enrichment is handled automatically by the scan cycle.
 
+**Performance note:** On a large library the first run may require many API calls at 1/sec. Running `bp geocode` before the first full scan is recommended — it populates `nominatim_cache` so that when `build_enriched_row()` runs, the geocoder path returns from cache immediately rather than blocking the scan for each photo.
+
 **Flags:**
 - `--dry-run` — report counts, write nothing
 - `--overwrite` — replace existing place data with Nominatim results (default: fill gaps only)
-- `--limit N` — stop after N **API calls** (cache hits do not count toward the limit; `LookupResult.cache_hit` distinguishes the two)
+- `--limit N` — stop after N **API call attempts** (cache hits do not count; failed network calls do count — a network attempt was made and consuming the slot prevents `--limit` from spinning indefinitely on persistent errors; `LookupResult.cache_hit` distinguishes cache hits from API attempts)
 
 **Query:** `SELECT id, latitude, longitude, place_city, place_state, place_country, place_neighborhood FROM photos WHERE latitude IS NOT NULL AND (place_city IS NULL OR place_state IS NULL OR place_country IS NULL OR place_neighborhood IS NULL OR <overwrite>)`.
 
@@ -182,7 +184,7 @@ Geocoded: 48   Cached: 312   No result: 7   Skipped (already set): 203
 
 ## `db/db.py` additions
 
-- `get_nominatim_cache(lat_r: float, lon_r: float) -> PlaceData | None` — returns `None` if no cache row exists; returns a `PlaceData` (possibly all-null fields) if a row exists
+- `get_nominatim_cache(lat_r: float, lon_r: float) -> PlaceData | None` — returns `None` if **no row exists** (cache miss); returns a `PlaceData` object if a row exists, even if all its fields are `None` (cached empty result). The distinction is Python `None` vs a `PlaceData` instance — callers must not conflate the two.
 - `set_nominatim_cache(lat_r: float, lon_r: float, place: PlaceData) -> None`
 - `update_place_data(photo_id: int, place: PlaceData, overwrite: bool = False) -> None` — when `overwrite=False`, uses `COALESCE(existing, new)` semantics (only writes fields where the DB value is currently NULL); when `overwrite=True`, unconditionally sets all six place columns
 
@@ -208,10 +210,10 @@ All tests use an injectable `fetcher` — no real HTTP calls.
 | `test_bp_geocode_skips_existing` — photo has all place fields set; not overwritten without --overwrite | any |
 | `test_bp_geocode_overwrite_flag` — --overwrite replaces existing place data | any |
 | `test_bp_geocode_dry_run` — DB unchanged; counts reported correctly | any |
-| `test_bp_geocode_limit` — stops after N API calls; cache hits do not count | any |
+| `test_bp_geocode_limit` — stops after N API call attempts; cache hits do not count; failed network calls do count | any |
 | `test_scanner_fills_place_from_geocoder` — `build_enriched_row()` calls geocoder when coords present and any place field is None | any |
 | `test_scanner_skips_geocoder_when_all_place_set` — `build_enriched_row()` skips geocoder when all four key place fields are populated | any |
-| `test_scanner_zero_latitude_not_skipped` — latitude 0.0 is a valid coordinate; geocoder is called | any |
+| `test_scanner_zero_zero_coordinates_not_skipped` — `(lat=0.0, lon=0.0)` (null island) is a valid coordinate pair; geocoder is called and neither value is treated as falsy | any |
 
 ---
 
