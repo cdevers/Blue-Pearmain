@@ -562,3 +562,84 @@ class TestBpGeocode:
 
         run_geocode(db, dry_run=False, overwrite=False, limit=2, fetcher=fake_fetcher)
         assert len(fetcher_calls) == 2  # limited even with errors
+
+
+# ---------------------------------------------------------------------------
+# fetch_from_nominatim — 429 backoff (#219)
+# ---------------------------------------------------------------------------
+
+
+class TestFetchFromNominatim:
+    def test_429_backs_off_and_retries_on_success(self):
+        """On 429 + Retry-After, sleeps the right amount and returns PlaceData on retry."""
+        from unittest.mock import MagicMock, patch
+
+        from geocoder import fetch_from_nominatim
+
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_429.headers = {"Retry-After": "2"}
+
+        resp_200 = MagicMock()
+        resp_200.status_code = 200
+        resp_200.json.return_value = {
+            "display_name": "Somerville, MA",
+            "address": {
+                "city": "Somerville",
+                "state": "Massachusetts",
+                "country": "United States",
+                "country_code": "us",
+            },
+        }
+
+        with (
+            patch("requests.get", side_effect=[resp_429, resp_200]) as mock_get,
+            patch("time.sleep") as mock_sleep,
+        ):
+            result = fetch_from_nominatim(42.361, -71.057)
+
+        assert result is not None
+        assert result.city == "Somerville"
+        assert mock_get.call_count == 2
+        mock_sleep.assert_any_call(2)
+
+    def test_429_default_backoff_when_no_retry_after(self):
+        """On 429 without Retry-After header, backs off for 10 seconds."""
+        from unittest.mock import MagicMock, patch
+
+        from geocoder import fetch_from_nominatim
+
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_429.headers = {}
+
+        resp_200 = MagicMock()
+        resp_200.status_code = 200
+        resp_200.json.return_value = {
+            "display_name": "Somewhere",
+            "address": {"country": "United States", "country_code": "us"},
+        }
+
+        with (
+            patch("requests.get", side_effect=[resp_429, resp_200]),
+            patch("time.sleep") as mock_sleep,
+        ):
+            fetch_from_nominatim(42.0, -71.0)
+
+        mock_sleep.assert_any_call(10)
+
+    def test_429_retry_also_fails_returns_none(self):
+        """On persistent 429 (both attempts), returns None after exactly 2 HTTP calls."""
+        from unittest.mock import MagicMock, patch
+
+        from geocoder import fetch_from_nominatim
+
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_429.headers = {"Retry-After": "0"}
+
+        with patch("requests.get", return_value=resp_429) as mock_get, patch("time.sleep"):
+            result = fetch_from_nominatim(42.0, -71.0)
+
+        assert result is None
+        assert mock_get.call_count == 2

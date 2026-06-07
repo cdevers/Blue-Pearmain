@@ -82,7 +82,8 @@ def fetch_from_nominatim(lat: float, lon: float) -> "PlaceData | None":
     Returns None on network error or 4xx/5xx response (not cached; logged at WARNING).
     Returns PlaceData (possibly all-None fields) on a 200 response.
 
-    Rate-limited to 1 request/second per Nominatim usage policy.
+    Rate-limited to 1 request/second per Nominatim usage policy. On a 429 response,
+    backs off for Retry-After seconds (default 10) and retries once.
     """
     import requests  # deferred import — not needed if geocoder isn't used
 
@@ -91,19 +92,27 @@ def fetch_from_nominatim(lat: float, lon: float) -> "PlaceData | None":
     if elapsed < 1.0:
         time.sleep(1.0 - elapsed)
 
+    _params = {"lat": lat, "lon": lon, "zoom": 14, "addressdetails": 1, "format": "json"}
+    _headers = {"User-Agent": _USER_AGENT}
+
     try:
-        resp = requests.get(
-            _NOMINATIM_URL,
-            params={"lat": lat, "lon": lon, "zoom": 14, "addressdetails": 1, "format": "json"},
-            headers={"User-Agent": _USER_AGENT},
-            timeout=10,
-        )
+        resp = requests.get(_NOMINATIM_URL, params=_params, headers=_headers, timeout=10)
         _last_call_time = time.monotonic()
+        if resp.status_code == 429:
+            wait = int(resp.headers.get("Retry-After", 10))
+            log.warning(
+                "Nominatim rate-limited (429) for (%.6f, %.6f); backing off %ds",
+                lat,
+                lon,
+                wait,
+            )
+            time.sleep(wait)
+            resp = requests.get(_NOMINATIM_URL, params=_params, headers=_headers, timeout=10)
+            _last_call_time = time.monotonic()
         if resp.status_code != 200:
             log.warning("Nominatim returned HTTP %s for (%.6f, %.6f)", resp.status_code, lat, lon)
             return None
-        data = resp.json()
-        return _parse_nominatim_response(data)
+        return _parse_nominatim_response(resp.json())
     except Exception as exc:
         _last_call_time = time.monotonic()
         log.warning("Nominatim request failed for (%.6f, %.6f): %s", lat, lon, exc)
