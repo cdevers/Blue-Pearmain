@@ -215,7 +215,8 @@ def run_on_conn(conn: sqlite3.Connection) -> None:
         ).fetchone()
         if row is not None:
             return
-    except Exception:
+    except sqlite3.OperationalError:
+        # schema_migrations table doesn't exist yet — proceed with migration
         pass
 
     conn.execute("BEGIN")

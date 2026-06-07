@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS nominatim_cache (
 );
 ```
 
-Added to `db/schema.sql` for fresh installs. Migration 029 (following the existing pattern in `db/migrations/`, including an entry in `schema_migrations`) handles existing databases.
+Added to `db/schema.sql` for fresh installs. Migration 030 (following the existing pattern in `db/migrations/`, including an entry in `schema_migrations`) handles existing databases.
 
 ---
 
@@ -184,9 +184,9 @@ Geocoded: 48   Cached: 312   No result: 7   Skipped (already set): 203
 
 ## `db/db.py` additions
 
-- `get_nominatim_cache(lat_r: float, lon_r: float) -> PlaceData | None` — returns `None` if **no row exists** (cache miss); returns a `PlaceData` object if a row exists, even if all its fields are `None` (cached empty result). The distinction is Python `None` vs a `PlaceData` instance — callers must not conflate the two.
-- `set_nominatim_cache(lat_r: float, lon_r: float, place: PlaceData) -> None`
-- `update_place_data(photo_id: int, place: PlaceData, overwrite: bool = False) -> None` — when `overwrite=False`, uses `COALESCE(existing, new)` semantics (only writes fields where the DB value is currently NULL); when `overwrite=True`, unconditionally sets all six place columns
+- `get_nominatim_cache(lat_r: float, lon_r: float) -> dict[str, Any] | None` — returns `None` if **no row exists** (cache miss); returns a plain dict of the row's place columns if a row exists, even if all values are `None` (cached empty result). The distinction is Python `None` vs a dict instance — callers must not conflate the two. The DB layer returns raw dicts to avoid a circular import (`db/db.py` cannot import `PlaceData` from `poller/geocoder.py`); the geocoder converts the dict to `PlaceData`.
+- `set_nominatim_cache(lat_r: float, lon_r: float, place_dict: dict[str, Any]) -> None` — `place_dict` keys: `place_city`, `place_state`, `place_country`, `place_country_code`, `place_neighborhood`, `place_address`.
+- `update_place_data(photo_id: int, place_dict: dict[str, Any], overwrite: bool = False) -> None` — when `overwrite=False`, uses `COALESCE(existing, new)` semantics (only writes fields where the DB value is currently NULL); when `overwrite=True`, unconditionally sets all six place columns.
 
 ---
 
