@@ -990,6 +990,42 @@ def cmd_match_legacy(args: argparse.Namespace) -> None:
         db.close()
 
 
+def cmd_geocode(args: argparse.Namespace) -> None:
+    """Backfill place data from Nominatim for photos with GPS coordinates."""
+    import yaml
+
+    sys.path.insert(0, str(ROOT / "poller"))
+    from db.db import Database
+    from run_geocode import run_geocode
+
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+
+    db_path = str(Path(config["database"]["path"]).expanduser())
+    db = Database(db_path)
+    try:
+        counts = run_geocode(
+            db,
+            dry_run=args.dry_run,
+            overwrite=args.overwrite,
+            limit=args.limit,
+        )
+    finally:
+        db.close()
+
+    parts = [
+        f"Geocoded: {counts['geocoded']}",
+        f"Cached: {counts['cached']}",
+        f"No result: {counts['no_result']}",
+        f"Skipped (already set): {counts['skipped']}",
+    ]
+    if counts.get("errors"):
+        parts.append(f"Errors: {counts['errors']}")
+    print("   ".join(parts))
+    if args.dry_run:
+        print("(dry run — nothing written)")
+
+
 def cmd_import_contacts_birthdays(args: argparse.Namespace) -> None:
     """Import person birthdays from Apple Contacts into person_birthdays."""
     import yaml
@@ -1413,6 +1449,29 @@ def main():
     p_mlp.add_argument("--apply", action="store_true",
                        help="Reclassify confident (and all-people ambiguous) matches out of the review queue")
 
+    # geocode
+    p_geo = sub.add_parser(
+        "geocode",
+        help="Backfill place data from Nominatim for photos that have GPS coordinates",
+    )
+    p_geo.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report counts without writing anything",
+    )
+    p_geo.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace existing place data with Nominatim results (default: fill gaps only)",
+    )
+    p_geo.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Stop after N API call attempts (cache hits do not count; errors do count)",
+    )
+
     # import-contacts-birthdays
     p_icb = sub.add_parser(
         "import-contacts-birthdays",
@@ -1490,6 +1549,7 @@ def main():
         "export":            cmd_export,
         "index-legacy":          cmd_index_legacy,
         "match-legacy":  cmd_match_legacy,
+        "geocode":               cmd_geocode,
         "import-contacts-birthdays": cmd_import_contacts_birthdays,
     }
     dispatch[args.command](args)

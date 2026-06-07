@@ -374,3 +374,191 @@ class TestScannerIntegration:
         photo_row = self._photo_row_with_coords(0.0, 0.0)
         result = build_enriched_row(photo_row, self.EXISTING, [], "Chris Devers", db=db)
         assert result["place_city"] == "Gulf of Guinea"
+
+
+# ---------------------------------------------------------------------------
+# bp geocode command
+# ---------------------------------------------------------------------------
+
+
+class TestBpGeocode:
+    """Tests for run_geocode() (injectable; called by cmd_geocode in bp)."""
+
+    def _make_db_with_photo(
+        self,
+        tmp_path: Path,
+        *,
+        lat: float = 42.361,
+        lon: float = -71.057,
+        place_city: str | None = None,
+        place_state: str | None = None,
+        place_country: str | None = None,
+        place_neighborhood: str | None = None,
+    ) -> tuple["Database", int]:
+        """Insert a test photo with the given place fields; return (db, photo_id)."""
+        db = _db(tmp_path)
+        row_id = db.upsert_photo(
+            {
+                "uuid": "test-geocode-uuid",
+                "flickr_id": None,
+                "latitude": lat,
+                "longitude": lon,
+                "place_city": place_city,
+                "place_state": place_state,
+                "place_country": place_country,
+                "place_neighborhood": place_neighborhood,
+                "privacy_state": "candidate_public",
+                "privacy_reason": "",
+                "proposed_tags": [],
+            }
+        )
+        return db, row_id
+
+    def test_bp_geocode_fills_gaps(self, tmp_path: Path):
+        from run_geocode import run_geocode
+
+        db, photo_id = self._make_db_with_photo(tmp_path)
+
+        def fake_fetcher(lat: float, lon: float) -> PlaceData | None:
+            return _place(
+                city="Somerville", state="Massachusetts", country="United States", country_code="us"
+            )
+
+        counts = run_geocode(db, dry_run=False, overwrite=False, limit=None, fetcher=fake_fetcher)
+        assert counts["geocoded"] == 1
+        row = db.get_photo(photo_id)
+        assert row["place_city"] == "Somerville"
+
+    def test_bp_geocode_skips_existing(self, tmp_path: Path):
+        from run_geocode import run_geocode
+
+        db, photo_id = self._make_db_with_photo(
+            tmp_path,
+            place_city="Cambridge",
+            place_state="Massachusetts",
+            place_country="United States",
+            place_neighborhood="Harvard Square",
+        )
+
+        fetcher_calls = []
+
+        def fake_fetcher(lat: float, lon: float) -> PlaceData | None:
+            fetcher_calls.append((lat, lon))
+            return _place(city="Somerville")
+
+        counts = run_geocode(db, dry_run=False, overwrite=False, limit=None, fetcher=fake_fetcher)
+        assert counts["skipped"] == 1
+        assert counts["geocoded"] == 0
+        assert fetcher_calls == []  # no API call needed
+        row = db.get_photo(photo_id)
+        assert row["place_city"] == "Cambridge"  # unchanged
+
+    def test_bp_geocode_overwrite_flag(self, tmp_path: Path):
+        from run_geocode import run_geocode
+
+        db, photo_id = self._make_db_with_photo(
+            tmp_path,
+            place_city="Old City",
+            place_state="Old State",
+            place_country="Old Country",
+            place_neighborhood="Old Neighborhood",
+        )
+
+        def fake_fetcher(lat: float, lon: float) -> PlaceData | None:
+            return _place(
+                city="New City", state="New State", country="New Country", country_code="nc"
+            )
+
+        counts = run_geocode(db, dry_run=False, overwrite=True, limit=None, fetcher=fake_fetcher)
+        assert counts["geocoded"] >= 1
+        row = db.get_photo(photo_id)
+        assert row["place_city"] == "New City"
+
+    def test_bp_geocode_dry_run(self, tmp_path: Path):
+        from run_geocode import run_geocode
+
+        db, photo_id = self._make_db_with_photo(tmp_path)
+
+        def fake_fetcher(lat: float, lon: float) -> PlaceData | None:
+            return _place(city="Somerville")
+
+        counts = run_geocode(db, dry_run=True, overwrite=False, limit=None, fetcher=fake_fetcher)
+        assert counts["geocoded"] == 1  # counted
+        row = db.get_photo(photo_id)
+        assert row["place_city"] is None  # DB unchanged
+
+    def test_bp_geocode_limit(self, tmp_path: Path):
+        from run_geocode import run_geocode
+
+        # Insert two photos with missing place data
+        db = _db(tmp_path)
+        db.upsert_photo(
+            {
+                "uuid": "uuid-a",
+                "flickr_id": None,
+                "latitude": 42.0,
+                "longitude": -71.0,
+                "place_city": None,
+                "place_state": None,
+                "place_country": None,
+                "place_neighborhood": None,
+                "privacy_state": "candidate_public",
+                "privacy_reason": "",
+                "proposed_tags": [],
+            }
+        )
+        db.upsert_photo(
+            {
+                "uuid": "uuid-b",
+                "flickr_id": None,
+                "latitude": 43.0,
+                "longitude": -72.0,
+                "place_city": None,
+                "place_state": None,
+                "place_country": None,
+                "place_neighborhood": None,
+                "privacy_state": "candidate_public",
+                "privacy_reason": "",
+                "proposed_tags": [],
+            }
+        )
+
+        fetcher_calls = []
+
+        def fake_fetcher(lat: float, lon: float) -> PlaceData | None:
+            fetcher_calls.append((lat, lon))
+            return _place(city="Somewhere")
+
+        run_geocode(db, dry_run=False, overwrite=False, limit=1, fetcher=fake_fetcher)
+        assert len(fetcher_calls) == 1  # stopped after limit
+
+    def test_bp_geocode_limit_counts_failed_calls(self, tmp_path: Path):
+        # Network errors count toward --limit to prevent spinning on persistent failures
+        from run_geocode import run_geocode
+
+        db = _db(tmp_path)
+        for i in range(3):
+            db.upsert_photo(
+                {
+                    "uuid": f"uuid-{i}",
+                    "flickr_id": None,
+                    "latitude": float(40 + i),
+                    "longitude": -71.0,
+                    "place_city": None,
+                    "place_state": None,
+                    "place_country": None,
+                    "place_neighborhood": None,
+                    "privacy_state": "candidate_public",
+                    "privacy_reason": "",
+                    "proposed_tags": [],
+                }
+            )
+
+        fetcher_calls = []
+
+        def fake_fetcher(lat: float, lon: float) -> PlaceData | None:
+            fetcher_calls.append((lat, lon))
+            return None  # persistent network error
+
+        run_geocode(db, dry_run=False, overwrite=False, limit=2, fetcher=fake_fetcher)
+        assert len(fetcher_calls) == 2  # limited even with errors
