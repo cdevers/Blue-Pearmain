@@ -1131,7 +1131,7 @@ def cmd_geocode(args: argparse.Namespace) -> None:
     db_path = str(Path(config["database"]["path"]).expanduser())
     db = Database(db_path)
 
-    nominatim_url = args.nominatim_url or config.get("geocoding", {}).get("nominatim_url")
+    nominatim_url = args.nominatim_url or (config.get("geocoding") or {}).get("nominatim_url")
     fetcher = make_fetcher(nominatim_url) if nominatim_url else fetch_from_nominatim
 
     try:
