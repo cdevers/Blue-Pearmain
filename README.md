@@ -211,6 +211,47 @@ bp ui --host 0.0.0.0               # Also bind to LAN interfaces (e.g. for iPad 
 
 All commands accept `--config PATH` (default: `config/config.yml`) and `--verbose`.
 
+### Bulk geocoding with a local Nominatim instance
+
+The public Nominatim API limits requests to 1/second and prohibits bulk usage. For a fresh library or a new geographic region, spin up a local [mediagis/nominatim](https://github.com/mediagis/nominatim-docker) container loaded from an [OpenStreetMap extract](https://download.geofabrik.de/). After one bulk run, `nominatim_cache` covers every coordinate in the library and the container can be discarded — all future `bp geocode` runs hit the cache with no API calls.
+
+```bash
+# 1. Start the container with a regional OSM extract
+#    (data load takes 30 min – a few hours depending on region size)
+docker run -d --name nominatim -p 8080:8080 \
+  -e PBF_URL=https://download.geofabrik.de/north-america/us-northeast-latest.osm.pbf \
+  mediagis/nominatim:4.4
+
+# 2. Watch the logs; wait until output goes quiet
+docker logs -f nominatim
+
+# 3. Confirm the instance is ready
+bp geocode --check-nominatim --nominatim-url http://localhost:8080/reverse
+
+# 4. Bulk-geocode — no rate limiting
+bp geocode --nominatim-url http://localhost:8080/reverse
+
+# 5. Discard the container — cache covers everything now
+docker stop nominatim && docker rm nominatim
+```
+
+**Region selection** — pick the smallest extract that covers your photos. Approximate sizes and load times:
+
+| Coverage | Geofabrik URL path | Size | Load time |
+|---|---|---|---|
+| US Northeast | `north-america/us-northeast-latest.osm.pbf` | ~2–3 GB | 30–60 min |
+| US West (CA/OR/WA/NV/AZ/UT/CO) | `north-america/us-west-latest.osm.pbf` | ~3–4 GB | 45–90 min |
+| US South (VA/DC/NC/SC/AL/TN) | `north-america/us-south-latest.osm.pbf` | ~2–3 GB | 30–60 min |
+| Canada | `north-america/canada-latest.osm.pbf` | ~3–4 GB | 45–90 min |
+| Great Britain | `europe/great-britain-latest.osm.pbf` | ~1–2 GB | 20–40 min |
+| Spain | `europe/spain-latest.osm.pbf` | ~500 MB | 10–20 min |
+| Turkey | `europe/turkey-latest.osm.pbf` | ~500 MB | 10–20 min |
+| Japan | `asia/japan-latest.osm.pbf` | ~1–2 GB | 20–40 min |
+| Vietnam | `asia/vietnam-latest.osm.pbf` | ~200 MB | 5–15 min |
+| Full planet | `planet-latest.osm.pbf` | ~70 GB | many hours |
+
+Run as many containers sequentially as needed — each adds its region to the shared `nominatim_cache`, and the cache is permanent. Once a coordinate is cached, it is never re-fetched regardless of which instance (or the public API) was used.
+
 Initial population sequence:
 
 ```bash
