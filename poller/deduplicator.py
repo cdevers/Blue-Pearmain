@@ -1184,7 +1184,8 @@ def main() -> None:
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
-    from poller.bp_logging import configure
+    sys.path.insert(0, str(Path(__file__).parent))
+    from bp_logging import configure
 
     configure("dedup", args.verbose)
 
