@@ -1,5 +1,5 @@
 """
-migrate_002_dimensions_and_dedup.py
+migrate_003_dimensions_and_dedup.py
 
 Adds three groups of columns to the photos table:
 
@@ -18,15 +18,19 @@ Adds three groups of columns to the photos table:
 This migration is safe to run multiple times (idempotent).
 
 Usage:
-    python db/migrate_002_dimensions_and_dedup.py --config config/config.yml
+    python db/migrations/migrate_003_dimensions_and_dedup.py --config config/config.yml
 """
 
 import argparse
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
+
+
+MIGRATION_NAME = "migrate_003_dimensions_and_dedup"
 
 
 NEW_COLUMNS: list[tuple[str, str, str | None]] = [
@@ -83,6 +87,17 @@ def run(db_path: str, dry_run: bool = False) -> None:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
+    try:
+        row = conn.execute(
+            "SELECT id FROM schema_migrations WHERE name = ?", (MIGRATION_NAME,)
+        ).fetchone()
+        if row is not None:
+            print("  Skipped:  migration already applied")
+            conn.close()
+            return
+    except Exception:
+        pass
+
     if dry_run:
         print("[dry-run] Would apply the following changes:")
         existing = {r[1] for r in conn.execute("PRAGMA table_info(photos)").fetchall()}
@@ -114,6 +129,11 @@ def run(db_path: str, dry_run: bool = False) -> None:
     conn.executescript(NEW_TABLES)
     print("  Created table: duplicate_groups (and indexes)")
 
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (name, applied_at) VALUES (?, ?)",
+        (MIGRATION_NAME, datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
     conn.close()
     print(f"\nMigration complete. {len(added)} column(s) added.")
 

@@ -207,5 +207,107 @@ class TestMigrateBaseline(unittest.TestCase):
         self.assertTrue(_name_applied(self.db_path, "migrate_001_boom"))
 
 
+# ---------------------------------------------------------------------------
+# migrate_003 — regression guard (#231 bug: MIGRATION_NAME was missing)
+# ---------------------------------------------------------------------------
+
+
+class TestMigrate003(unittest.TestCase):
+    def setUp(self):
+        fd, self.db_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        # migrate_003 needs schema_migrations to self-register; create it first.
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            "CREATE TABLE schema_migrations "
+            "(id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, applied_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            # Minimal columns required by the three indexes migrate_003 creates.
+            "CREATE TABLE photos "
+            "(id INTEGER PRIMARY KEY, privacy_state TEXT, "
+            " fingerprint TEXT, original_filename TEXT, date_taken TEXT)"
+        )
+        conn.commit()
+        conn.close()
+
+    def tearDown(self):
+        for ext in ("", "-wal", "-shm"):
+            try:
+                os.unlink(self.db_path + ext)
+            except FileNotFoundError:
+                pass
+
+    def test_migration_name_constant_is_defined(self):
+        mod = _load_migration("migrate_003_dimensions_and_dedup.py")
+        self.assertTrue(
+            hasattr(mod, "MIGRATION_NAME"),
+            "migrate_003 must define MIGRATION_NAME so the runner can discover it",
+        )
+        self.assertEqual(mod.MIGRATION_NAME, "migrate_003_dimensions_and_dedup")
+
+    def test_run_adds_columns_and_registers(self):
+        mod = _load_migration("migrate_003_dimensions_and_dedup.py")
+        mod.run(self.db_path, dry_run=False)
+
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(photos)").fetchall()}
+        conn.close()
+
+        self.assertIn("duplicate_group_id", cols)
+        self.assertIn("duplicate_role", cols)
+        self.assertTrue(
+            _name_applied(self.db_path, "migrate_003_dimensions_and_dedup"),
+            "migrate_003 must record itself in schema_migrations",
+        )
+
+    def test_dry_run_does_not_register(self):
+        mod = _load_migration("migrate_003_dimensions_and_dedup.py")
+        mod.run(self.db_path, dry_run=True)
+        self.assertFalse(
+            _name_applied(self.db_path, "migrate_003_dimensions_and_dedup"),
+            "dry_run must not write to schema_migrations",
+        )
+
+    def test_runner_discovers_migrate_003(self):
+        """_pending_migrations must find migrate_003 when it is not yet applied."""
+        result = _pending_migrations(self.db_path, _MIG_DIR)
+        names = [name for name, _ in result]
+        self.assertIn(
+            "migrate_003_dimensions_and_dedup",
+            names,
+            "_pending_migrations must discover migrate_003 via MIGRATION_NAME",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Static lint: every migration file must have MIGRATION_NAME
+# ---------------------------------------------------------------------------
+
+
+class TestAllMigrationsHaveMigrationName(unittest.TestCase):
+    # 001 and 002 predate the MIGRATION_NAME pattern. 002 creates the
+    # schema_migrations table itself and retroactively records 001. Neither
+    # has a column-missing bug because the runner applies them on fresh DBs
+    # before schema_migrations exists. They are excluded from this check.
+    _EXEMPT = {"migrate_001_privacy_state_check.py", "migrate_002_updated_at_and_indexes.py"}
+
+    _name_re = __import__("re").compile(r"^MIGRATION_NAME\s*=", __import__("re").MULTILINE)
+
+    def test_all_migration_files_have_migration_name(self):
+        missing = []
+        for mf in sorted(_MIG_DIR.glob("migrate_*.py")):
+            if mf.name in self._EXEMPT:
+                continue
+            if not self._name_re.search(mf.read_text()):
+                missing.append(mf.name)
+        self.assertEqual(
+            missing,
+            [],
+            f"Migration file(s) missing MIGRATION_NAME constant: {missing}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

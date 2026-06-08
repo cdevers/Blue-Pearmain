@@ -554,7 +554,8 @@ def duplicates() -> str:
         """)
             .fetchall()
         )
-    except Exception:
+    except Exception as exc:
+        log.error("duplicates query failed: %s", exc, exc_info=True)
         rows = []
 
     # Aggregate rows into groups, preserving ORDER BY order
