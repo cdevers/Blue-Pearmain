@@ -11,10 +11,9 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-sys.path.insert(0, str(Path(__file__).parent.parent / "poller"))
 
 from db.db import Database
-from geocoder import (
+from poller.geocoder import (
     PlaceData,
     _parse_nominatim_response,
     reverse_geocode,
@@ -314,7 +313,7 @@ class TestScannerIntegration:
         }
 
     def test_scanner_fills_place_from_geocoder(self, tmp_path: Path):
-        from scanner import build_enriched_row
+        from poller.scanner import build_enriched_row
 
         db = _db(tmp_path)
         db.set_nominatim_cache(
@@ -336,7 +335,7 @@ class TestScannerIntegration:
         assert result["place_state"] == "Massachusetts"
 
     def test_scanner_skips_geocoder_when_all_place_set(self, tmp_path: Path):
-        from scanner import build_enriched_row
+        from poller.scanner import build_enriched_row
 
         db = _db(tmp_path)
         # Photo row already has all four key place fields populated
@@ -357,7 +356,7 @@ class TestScannerIntegration:
     def test_scanner_zero_zero_coordinates_not_skipped(self, tmp_path: Path):
         # (lat=0.0, lon=0.0) is a valid coordinate pair (null island).
         # Neither value should be treated as falsy — geocoder must be called.
-        from scanner import build_enriched_row
+        from poller.scanner import build_enriched_row
 
         db = _db(tmp_path)
         db.set_nominatim_cache(
@@ -417,7 +416,7 @@ class TestBpGeocode:
         return db, row_id
 
     def test_bp_geocode_fills_gaps(self, tmp_path: Path):
-        from run_geocode import run_geocode
+        from poller.run_geocode import run_geocode
 
         db, photo_id = self._make_db_with_photo(tmp_path)
 
@@ -432,7 +431,7 @@ class TestBpGeocode:
         assert row["place_city"] == "Somerville"
 
     def test_bp_geocode_skips_existing(self, tmp_path: Path):
-        from run_geocode import run_geocode
+        from poller.run_geocode import run_geocode
 
         db, photo_id = self._make_db_with_photo(
             tmp_path,
@@ -456,7 +455,7 @@ class TestBpGeocode:
         assert row["place_city"] == "Cambridge"  # unchanged
 
     def test_bp_geocode_overwrite_flag(self, tmp_path: Path):
-        from run_geocode import run_geocode
+        from poller.run_geocode import run_geocode
 
         db, photo_id = self._make_db_with_photo(
             tmp_path,
@@ -477,7 +476,7 @@ class TestBpGeocode:
         assert row["place_city"] == "New City"
 
     def test_bp_geocode_dry_run(self, tmp_path: Path):
-        from run_geocode import run_geocode
+        from poller.run_geocode import run_geocode
 
         db, photo_id = self._make_db_with_photo(tmp_path)
 
@@ -490,7 +489,7 @@ class TestBpGeocode:
         assert row["place_city"] is None  # DB unchanged
 
     def test_bp_geocode_limit(self, tmp_path: Path):
-        from run_geocode import run_geocode
+        from poller.run_geocode import run_geocode
 
         # Insert two photos with missing place data
         db = _db(tmp_path)
@@ -536,7 +535,7 @@ class TestBpGeocode:
 
     def test_bp_geocode_limit_counts_failed_calls(self, tmp_path: Path):
         # Network errors count toward --limit to prevent spinning on persistent failures
-        from run_geocode import run_geocode
+        from poller.run_geocode import run_geocode
 
         db = _db(tmp_path)
         for i in range(3):
@@ -567,7 +566,7 @@ class TestBpGeocode:
 
     def test_bp_geocode_stops_early_on_consecutive_errors(self, tmp_path: Path):
         # After 3 consecutive API errors, run_geocode aborts and sets stopped_early.
-        from run_geocode import run_geocode
+        from poller.run_geocode import run_geocode
 
         db = _db(tmp_path)
         for i in range(5):
@@ -610,7 +609,7 @@ class TestFetchFromNominatim:
         """On 429 + Retry-After, sleeps the right amount and returns PlaceData on retry."""
         from unittest.mock import MagicMock, patch
 
-        from geocoder import fetch_from_nominatim
+        from poller.geocoder import fetch_from_nominatim
 
         resp_429 = MagicMock()
         resp_429.status_code = 429
@@ -643,7 +642,7 @@ class TestFetchFromNominatim:
         """On 429 without Retry-After header, uses the first-retry floor of 5 seconds."""
         from unittest.mock import MagicMock, patch
 
-        from geocoder import fetch_from_nominatim
+        from poller.geocoder import fetch_from_nominatim
 
         resp_429 = MagicMock()
         resp_429.status_code = 429
@@ -668,7 +667,7 @@ class TestFetchFromNominatim:
         """On persistent 429, returns None after all retries (3 HTTP calls total)."""
         from unittest.mock import MagicMock, patch
 
-        from geocoder import fetch_from_nominatim
+        from poller.geocoder import fetch_from_nominatim
 
         resp_429 = MagicMock()
         resp_429.status_code = 429
@@ -706,7 +705,7 @@ class TestMakeFetcher:
         """make_fetcher() with no URL argument hits the public Nominatim endpoint."""
         from unittest.mock import patch
 
-        from geocoder import _PUBLIC_NOMINATIM_URL, make_fetcher
+        from poller.geocoder import _PUBLIC_NOMINATIM_URL, make_fetcher
 
         fetcher = make_fetcher()
         with patch("requests.get", return_value=self._mock_resp_200()) as mock_get:
@@ -724,7 +723,7 @@ class TestMakeFetcher:
         """
         from unittest.mock import patch
 
-        from geocoder import _PUBLIC_NOMINATIM_URL, make_fetcher
+        from poller.geocoder import _PUBLIC_NOMINATIM_URL, make_fetcher
 
         fetcher = make_fetcher(_PUBLIC_NOMINATIM_URL)
 
@@ -742,7 +741,7 @@ class TestMakeFetcher:
         """Auto-detected delay is 0.0s for any URL other than the public endpoint."""
         from unittest.mock import patch
 
-        from geocoder import make_fetcher
+        from poller.geocoder import make_fetcher
 
         fetcher = make_fetcher("http://localhost:8080/reverse")
 
@@ -760,7 +759,7 @@ class TestMakeFetcher:
         """Explicit min_delay=0.0 suppresses the delay even for the public URL."""
         from unittest.mock import patch
 
-        from geocoder import _PUBLIC_NOMINATIM_URL, make_fetcher
+        from poller.geocoder import _PUBLIC_NOMINATIM_URL, make_fetcher
 
         fetcher = make_fetcher(_PUBLIC_NOMINATIM_URL, min_delay=0.0)
 
@@ -785,7 +784,7 @@ class TestCheckNominatimStatus:
         """HTTP 200 from /status.php → (True, 'Nominatim OK — <base_url>')."""
         from unittest.mock import MagicMock, patch
 
-        from geocoder import check_nominatim_status
+        from poller.geocoder import check_nominatim_status
 
         resp = MagicMock()
         resp.status_code = 200
@@ -801,7 +800,7 @@ class TestCheckNominatimStatus:
         """Non-200 response → (False, 'Nominatim unreachable — ...')."""
         from unittest.mock import MagicMock, patch
 
-        from geocoder import check_nominatim_status
+        from poller.geocoder import check_nominatim_status
 
         resp = MagicMock()
         resp.status_code = 503
@@ -818,7 +817,7 @@ class TestCheckNominatimStatus:
         import requests as _requests
         from unittest.mock import patch
 
-        from geocoder import check_nominatim_status
+        from poller.geocoder import check_nominatim_status
 
         with patch("requests.get", side_effect=_requests.ConnectionError("refused")):
             ok, msg = check_nominatim_status("http://localhost:1/reverse")
