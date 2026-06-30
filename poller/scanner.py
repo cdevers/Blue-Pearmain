@@ -531,7 +531,7 @@ def build_enriched_row(
         and merged.get("longitude") is not None
         and any(merged.get(f) is None for f in _PLACE_FIELDS)
     ):
-        from geocoder import reverse_geocode  # deferred import — poller path
+        from poller.geocoder import reverse_geocode  # deferred import
 
         result = reverse_geocode(merged["latitude"], merged["longitude"], db)
         if result.place:
