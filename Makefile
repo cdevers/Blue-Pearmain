@@ -37,7 +37,7 @@ dist:
 	@echo "..."
 
 test:
-	python -m pytest tests/ -q
+	uv run --extra dev python -m pytest tests/ -q
 
 lint:
 	uv run mypy db/ poller/ flickr/ reviewer/ bp
