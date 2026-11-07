@@ -606,7 +606,7 @@ def scan(
     try:
         import osxphotos
     except ImportError:
-        log.error("osxphotos is not installed. Run: uv tool install osxphotos")
+        log.error("osxphotos is not installed. Run: uv add osxphotos")
         sys.exit(1)
 
     log.info(f"Opening Photos library: {library_path}")
